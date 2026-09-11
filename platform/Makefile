@@ -1,4 +1,4 @@
-# KRE platform developer commands.
+# CASS platform developer commands.
 #
 # Section 12 requires that a fresh environment be buildable from
 # version-controlled configuration. These targets are that path, and the CI
@@ -32,8 +32,8 @@ setup-backend: ## Create the backend virtualenv and install every package
 	python -m venv $(VENV)
 	$(PY) -m pip install --upgrade pip
 	$(PY) -m pip install -r $(BACKEND)/requirements-dev.txt
-	$(PY) -m pip install -e $(BACKEND)/packages/kre_core \
-		-e $(BACKEND)/packages/kre_oed \
+	$(PY) -m pip install -e $(BACKEND)/packages/cass_core \
+		-e $(BACKEND)/packages/cass_oed \
 		-e $(BACKEND)/services/keys \
 		-e $(BACKEND)/services/converter
 
@@ -45,7 +45,7 @@ setup-frontend: ## Install frontend dependencies from the lockfile
 env: ## Create .env from the template if it does not exist
 	@if [ ! -f .env ]; then \
 		cp deploy/.env.example .env; \
-		echo "Created platform/.env - fill in KRE_SECRET_KEY, POSTGRES_PASSWORD,"; \
+		echo "Created platform/.env - fill in CASS_SECRET_KEY, POSTGRES_PASSWORD,"; \
 		echo "MINIO_ROOT_PASSWORD and OASIS_ADMIN_PASS before starting the stack."; \
 	else \
 		echo "platform/.env already exists; leaving it alone."; \
@@ -84,8 +84,8 @@ typecheck: ## TypeScript project references
 
 .PHONY: schema
 schema: ## Regenerate the OpenAPI schema, failing on any warning
-	cd $(BACKEND)/kre_api && \
-		DJANGO_SETTINGS_MODULE=kre.settings.test ../.venv/Scripts/python.exe manage.py \
+	cd $(BACKEND)/cass_api && \
+		DJANGO_SETTINGS_MODULE=cass.settings.test ../.venv/Scripts/python.exe manage.py \
 		spectacular --fail-on-warn --file ../../docs/openapi.yaml
 
 # -- running ----------------------------------------------------------------
@@ -124,8 +124,8 @@ seed: ## Load the demonstration project, model version and PiWind portfolio
 
 .PHONY: dev-api
 dev-api: ## Run the API against a local database, outside Docker
-	cd $(BACKEND)/kre_api && \
-		DJANGO_SETTINGS_MODULE=kre.settings.dev ../.venv/Scripts/python.exe manage.py runserver
+	cd $(BACKEND)/cass_api && \
+		DJANGO_SETTINGS_MODULE=cass.settings.dev ../.venv/Scripts/python.exe manage.py runserver
 
 .PHONY: dev-web
 dev-web: ## Run the Vite dev server with API proxying

@@ -3,7 +3,7 @@
  *
  * Every product area of build plan section 3 has a route from the first
  * release, because section 13 is explicit that the interface does not wait
- * until phase six: each engine capability is exposed through a thin KRE
+ * until phase six: each engine capability is exposed through a thin CASS
  * workflow and then expanded. An area whose engine work is still ahead shows
  * what it will do and what is outstanding, rather than being absent.
  */

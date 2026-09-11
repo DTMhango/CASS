@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from kre_keys.lookup import (
+from cass_keys.lookup import (
     AreaPerilGrid,
     GridCell,
     KeyStatus,

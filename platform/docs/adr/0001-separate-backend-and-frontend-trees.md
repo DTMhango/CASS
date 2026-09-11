@@ -10,7 +10,7 @@ Python, holds the control plane and the scientific packages, and is deployed as
 several containers. The frontend is TypeScript, builds to static assets, and is
 deployed behind a web server.
 
-They share a contract — the KRE API — and nothing else. They do not share
+They share a contract — the CASS API — and nothing else. They do not share
 dependencies, tooling, test runners, linters or release cadence.
 
 ## Decision

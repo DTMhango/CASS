@@ -1,5 +1,5 @@
 /**
- * Data hooks over the KRE API.
+ * Data hooks over the CASS API.
  *
  * Long-running work is a background job, so the run queries poll while a run
  * is active and stop once it reaches a terminal state. Section 3 requires that

@@ -10,7 +10,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // The browser calls only the KRE API. Proxying in development keeps that
+    // The browser calls only the CASS API. Proxying in development keeps that
     // true without CORS special cases, and keeps the session cookie first-party.
     proxy: {
       "/api": { target: "http://localhost:8000", changeOrigin: true },

@@ -14,6 +14,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useSession, useSignOut } from "@/api/hooks";
 import { Button } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
+import logoBox from "@/assets/logo_box.png";
 
 import { ContextBar } from "./ContextBar";
 import "./AppShell.css";
@@ -92,13 +93,10 @@ export function AppShell() {
 
       <nav className="rail" aria-label="Product areas">
         <div className="rail__brand">
-          <span className="rail__mark" aria-hidden="true">
-            KRE
-          </span>
+          <img className="rail__logo" src={logoBox} alt="Klapton Re" />
           <span className="rail__brand-text">
-            Catastrophe
-            <br />
-            Modelling Platform
+            <span className="rail__brand-name">CASS</span>
+            <span className="rail__brand-sub">Modelling Platform</span>
           </span>
         </div>
 

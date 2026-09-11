@@ -101,6 +101,7 @@ export function ModelBuild() {
       <Card
         title="Hazard and conversion runs"
         description="Model-build work belongs to a model version rather than a project."
+        padded={false}
       >
         {buildRuns.length > 0 ? (
           <table className="data-table">
@@ -160,6 +161,7 @@ export function ModelBuild() {
       <Card
         title="Governance gates"
         description="Each gate needs named evidence and an approver who did not request it."
+        padded={false}
       >
         <table className="data-table">
           <thead>

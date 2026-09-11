@@ -1,4 +1,4 @@
-# The KRE keys service: the exposure-to-model lookup boundary.
+# The CASS keys service: the exposure-to-model lookup boundary.
 #
 # Packaged separately from the API because section 8 makes it a controlled
 # bridge with its own contract, and because a lookup over a country-scale grid
@@ -15,14 +15,14 @@ WORKDIR /app
 
 COPY backend/packages ./packages
 COPY backend/services/keys ./services/keys
-RUN pip install --no-cache-dir ./packages/kre_core ./packages/kre_oed ./services/keys
+RUN pip install --no-cache-dir ./packages/cass_core ./packages/cass_oed ./services/keys
 
-RUN useradd --create-home --uid 10002 kre && chown -R kre:kre /app
-USER kre
+RUN useradd --create-home --uid 10002 cass && chown -R cass:cass /app
+USER cass
 
 EXPOSE 8010
 
 # The service is a library plus a thin HTTP wrapper; until the wrapper lands
 # the container is exercised by the API calling the package directly, and this
 # entry point proves the image is importable.
-CMD ["python", "-c", "import kre_keys; print('kre-keys ready')"]
+CMD ["python", "-c", "import cass_keys; print('cass-keys ready')"]

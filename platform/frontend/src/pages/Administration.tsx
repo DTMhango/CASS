@@ -57,6 +57,7 @@ export function Administration() {
         <Card
           title="Tested engine combinations"
           description="Promotion requires contract and regression suites to pass against a combination listed here."
+          padded={false}
         >
           {platform?.compatibility_matrix?.length ? (
             <table className="data-table">
@@ -90,6 +91,7 @@ export function Administration() {
       <Card
         title="Execution profiles"
         description="Declared limits, so no run inherits maximum parallelism and exhausts the host."
+        padded={false}
       >
         <table className="data-table">
           <thead>
@@ -125,7 +127,7 @@ export function Administration() {
 
       <Card
         title="Engine endpoints"
-        description="The KRE API reaches these. The browser never calls them directly."
+        description="The CASS API reaches these. The browser never calls them directly."
       >
         <dl className="admin-facts">
           {Object.entries(platform?.engines ?? {}).map(([name, url]) => (

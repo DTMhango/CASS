@@ -4,16 +4,17 @@
   justify-content: center;
   min-height: 100%;
   padding: var(--space-6);
-  background: linear-gradient(160deg, var(--surface-rail) 0%, #0d1729 100%);
+  background: var(--surface-canvas);
 }
 
 .signin__panel {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   padding: var(--space-8);
   background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -21,34 +22,36 @@
 
 .signin__brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
+  text-align: center;
   gap: var(--space-3);
   margin-bottom: var(--space-2);
 }
 
-.signin__mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  background: var(--kre-blue);
-  color: var(--grey-0);
-  border-radius: var(--radius-md);
-  font-weight: 700;
-  font-size: var(--text-sm);
-  letter-spacing: 0.04em;
+/* Compact square mark at Opus sign-in scale (~h-12). */
+.signin__logo {
+  height: 48px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+  display: block;
 }
 
 .signin__title {
-  font-size: var(--text-lg);
-  font-weight: 600;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--grey-900);
 }
 
 .signin__subtitle {
+  margin-top: var(--space-1);
   font-size: var(--text-sm);
   color: var(--grey-600);
+}
+
+.signin__panel > .btn {
+  width: 100%;
 }
 
 .signin__footnote {

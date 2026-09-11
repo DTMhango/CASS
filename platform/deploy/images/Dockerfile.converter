@@ -1,4 +1,4 @@
-# The KRE OpenQuake to Oasis converter.
+# The CASS OpenQuake to Oasis converter.
 #
 # Stateless by design (section 7): it is called by a durable background job,
 # reads and writes through the artifact interface, and holds no state between
@@ -21,11 +21,11 @@ WORKDIR /app
 
 COPY backend/packages ./packages
 COPY backend/services/converter ./services/converter
-RUN pip install --no-cache-dir ./packages/kre_core "./services/converter[hdf5]"
+RUN pip install --no-cache-dir ./packages/cass_core "./services/converter[hdf5]"
 
-RUN useradd --create-home --uid 10003 kre && chown -R kre:kre /app
-USER kre
+RUN useradd --create-home --uid 10003 cass && chown -R cass:cass /app
+USER cass
 
 EXPOSE 8020
 
-CMD ["python", "-c", "import kre_converter; print('kre-converter', kre_converter.__version__)"]
+CMD ["python", "-c", "import cass_converter; print('cass-converter', cass_converter.__version__)"]

@@ -1,5 +1,5 @@
 /**
- * Types mirroring the KRE API.
+ * Types mirroring the CASS API.
  *
  * These are hand-written against the OpenAPI schema the backend generates
  * rather than produced from it, so that a backend field rename shows up as a

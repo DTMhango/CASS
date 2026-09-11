@@ -14,7 +14,7 @@
 .catalogue__facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-4);
   margin: 0 0 var(--space-4);
 }
 
@@ -29,6 +29,7 @@
 .catalogue__fact dd {
   margin: 2px 0 0;
   font-weight: 500;
+  color: var(--grey-900);
 }
 
 .catalogue__blockers {

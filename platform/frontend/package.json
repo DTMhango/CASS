@@ -1,9 +1,9 @@
 {
-  "name": "kre-platform-frontend",
+  "name": "cass-platform-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "KRE catastrophe modelling platform: the analyst interface.",
+  "description": "CASS, the Catastrophe Analytics and Scenario Suite: the analyst interface.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

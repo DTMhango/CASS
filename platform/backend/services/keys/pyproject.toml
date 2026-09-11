@@ -1,13 +1,13 @@
 [project]
-name = "kre-keys"
+name = "cass-keys"
 version = "0.1.0"
-description = "KRE keys service: the exposure-to-model lookup boundary."
+description = "CASS keys service: the exposure-to-model lookup boundary."
 requires-python = ">=3.11"
-dependencies = ["kre-core", "kre-oed"]
+dependencies = ["cass-core", "cass-oed"]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["kre_keys*"]
+include = ["cass_keys*"]

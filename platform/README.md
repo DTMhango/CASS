@@ -1,10 +1,10 @@
-# KRE Catastrophe Modelling Platform
+# CASS — Catastrophe Analytics and Scenario Suite
 
 The internal earthquake portfolio analysis platform for Klapton Reinsurance
 PLC, built to the [build plan](../deliverables/Klapton%20Re%20Earthquake%20Catastrophe%20Modelling%20Platform%20Build%20Plan.md).
 
 React provides the analyst experience. Django provides authentication,
-workflow orchestration, metadata, lineage and a stable KRE API. OpenQuake and
+workflow orchestration, metadata, lineage and a stable CASS API. OpenQuake and
 Oasis remain independently owned calculation engines, reached through versioned
 adapters over their supported APIs.
 
@@ -15,18 +15,18 @@ Backend and frontend are separate top-level trees.
 ```
 platform/
   backend/                 Everything Python
-    kre_api/               Django control plane: identity, orchestration, audit
+    cass_api/              Django control plane: identity, orchestration, audit
       apps/                accounts, projects, artifacts, audit, modelregistry,
                            exposure, runs, results
     packages/
-      kre_core/            Artifact store, checksums, run state machine, evidence
-      kre_oed/             OED schema subset, reader, validation, perspectives
+      cass_core/           Artifact store, checksums, run state machine, evidence
+      cass_oed/            OED schema subset, reader, validation, perspectives
     services/
       keys/                The exposure-to-model lookup boundary
       converter/           OpenQuake to Oasis conversion
     adapters/              OpenQuake and Oasis adapters
   frontend/                React and TypeScript
-    src/api/               The single route to the KRE API
+    src/api/               The single route to the CASS API
     src/components/        Design system primitives
     src/layout/            Navigation rail and the persistent context bar
     src/pages/             The screens of build plan section 3
@@ -45,7 +45,7 @@ make setup          # virtualenv, npm ci, and a .env from the template
 ```
 
 Fill in the four secrets `make setup` leaves blank in `platform/.env`:
-`KRE_SECRET_KEY`, `POSTGRES_PASSWORD`, `MINIO_ROOT_PASSWORD` and
+`CASS_SECRET_KEY`, `POSTGRES_PASSWORD`, `MINIO_ROOT_PASSWORD` and
 `OASIS_ADMIN_PASS`. Generate them with:
 
 ```bash
@@ -100,10 +100,10 @@ that caused each one, previews the OED interpretation and publishes an
 immutable version.
 
 **The boundary rules are enforced, not documented.** Large arrays live in the
-artifact store behind `kre://` URIs with checksums and retention classes, never
+artifact store behind `cass://` URIs with checksums and retention classes, never
 in PostgreSQL. Published exposure versions and results are immutable in the
 model layer, so a management command cannot bypass it either. The browser
-reaches only the KRE API.
+reaches only the CASS API.
 
 **The governance rules are enforced too.** An assumption cannot overwrite
 reported data. Weighted TIV allocation reconciles exactly, in `Decimal`. A
@@ -155,3 +155,18 @@ The GEM public models are CC BY-NC-SA. KRE's intended use supports commercial
 reinsurance decisions, so it remains a research activity until GEM confirms
 permitted commercial use in writing. The seeded model version records this as a
 publication blocker rather than assuming it resolved.
+
+## The name
+
+CASS is the Catastrophe Analytics and Scenario Suite. The name nods to
+Cassandra, the prophetess granted foresight and cursed never to be believed.
+CASS is built for the opposite outcome: foresight that is evidenced,
+reproducible and traceable to its inputs, so that a decision-maker can act on
+it. Every design rule in this platform — immutable published versions,
+checksummed artifacts, an assumption that cannot overwrite reported data, a
+model that publishes as a research prototype while its blockers stand — exists
+to make the output believable.
+
+CASS is the product. Klapton Reinsurance PLC (KRE) is the organisation that
+owns and operates it, which is why `KRE` still appears against licence
+positions, approver roles, the Oasis supplier ID and the house brand colour.

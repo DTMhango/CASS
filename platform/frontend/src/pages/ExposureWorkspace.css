@@ -38,23 +38,23 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   background: transparent;
   border: 1px solid transparent;
-  border-left: 3px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   text-align: left;
   cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .exposure-list__item:hover {
-  background: var(--grey-50);
+  background: var(--grey-100);
 }
 
 .exposure-list__item--active {
   background: var(--kre-blue-subtle);
   border-color: var(--kre-blue-border);
-  border-left-color: var(--kre-blue);
+  box-shadow: inset 3px 0 0 var(--kre-blue);
 }
 
 .exposure-list__name {
@@ -143,10 +143,12 @@
 .file-list__button {
   display: inline-flex;
   align-items: center;
+  min-height: 32px;
   padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--grey-0);
+  box-shadow: var(--shadow-sm);
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
@@ -155,7 +157,7 @@
 
 .file-list__button:hover {
   background: var(--grey-50);
-  border-color: var(--grey-500);
+  border-color: var(--grey-300);
 }
 
 .file-list__action input:focus-visible + .file-list__button,
@@ -192,9 +194,11 @@
 
 .finding {
   padding: var(--space-3);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
   border-left: 3px solid var(--border-strong);
-  background: var(--surface-sunken);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
 }
 
 .finding--error {

@@ -84,7 +84,7 @@ const EXPOSURE: ExposureVersion = {
   attached_files: [
     {
       role: "oed_location",
-      uri: "kre://kre-portfolio/project/idn-fac-2026/exposure/22222222/oed_location.csv",
+      uri: "cass://cass-portfolio/project/idn-fac-2026/exposure/22222222/oed_location.csv",
       checksum: "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
       size_bytes: 1024,
       original_filename: "locations.csv",
@@ -248,7 +248,7 @@ describe("ExposureWorkspace", () => {
     );
   });
 
-  it("calls only the KRE API", async () => {
+  it("calls only the CASS API", async () => {
     const user = userEvent.setup();
     renderWorkspace();
     await user.click(await screen.findByText("Pilot portfolio"));

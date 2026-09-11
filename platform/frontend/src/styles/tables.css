@@ -1,4 +1,4 @@
-/* Dense analytical tables ------------------------------------------------- */
+/* Dense analytical tables — Opus-Lite rhythm -------------------------------- */
 
 .data-table {
   width: 100%;
@@ -14,22 +14,32 @@
   vertical-align: top;
 }
 
+/* Flush card tables align cell padding with the card header inset. */
+.card__body--flush .data-table th,
+.card__body--flush .data-table td {
+  padding-inline: var(--space-5);
+}
+
 .data-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--surface-sunken);
-  border-bottom: 1px solid var(--border-strong);
+  background: linear-gradient(180deg, var(--grey-100) 0%, var(--grey-50) 100%);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--grey-600);
   white-space: nowrap;
 }
 
+.data-table tbody tr:nth-child(even) {
+  background: var(--grey-25);
+}
+
 .data-table tbody tr:hover {
-  background: var(--kre-blue-subtle);
+  background: color-mix(in srgb, var(--kre-blue) 6%, transparent);
 }
 
 .data-table tbody th[scope="row"] {

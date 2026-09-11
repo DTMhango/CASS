@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from kre_adapters.base import (
+from cass_adapters.base import (
     EngineAdapter,
     EngineState,
     EngineVersion,
@@ -30,7 +30,7 @@ class FakeAdapter(EngineAdapter):
 
     def version(self) -> EngineVersion:
         if not self._reachable:
-            from kre_adapters.base import EngineUnavailable
+            from cass_adapters.base import EngineUnavailable
 
             raise EngineUnavailable(f"{self.engine_name} did not respond.")
         return EngineVersion(self.engine_name, self._version, "sha256:abc")
@@ -78,7 +78,7 @@ def test_an_adapter_declaring_no_tested_versions_is_refused():
 
 def test_an_unreachable_engine_is_retryable():
     """A network failure is worth retrying; a rejection is not."""
-    from kre_adapters.base import EngineRejected, EngineUnavailable
+    from cass_adapters.base import EngineRejected, EngineUnavailable
 
     assert EngineUnavailable("down").retryable is True
     assert EngineRejected("bad request").retryable is False

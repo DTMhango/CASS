@@ -81,7 +81,7 @@ export function ExposureWorkspace() {
     <>
       <PageHeader
         title="Exposure workspace"
-        description="Import or create portfolio records, review how KRE interprets them as OED, resolve findings, then publish an immutable version that an analysis can use."
+        description="Import or create portfolio records, review how CASS interprets them as OED, resolve findings, then publish an immutable version that an analysis can use."
       />
 
       <div className="exposure-layout">
@@ -387,7 +387,7 @@ function FileAttachments({ version }: { version: ExposureVersion }) {
   return (
     <Card
       title="Source files"
-      description="KRE reads these exactly as supplied and never rewrites them. Each is checksummed on upload."
+      description="CASS reads these exactly as supplied and never rewrites them. Each is checksummed on upload."
     >
       {error ? (
         <Notice tone="error" title="Upload refused">
@@ -448,7 +448,7 @@ function PerspectiveAvailabilityCard({ version }: { version: ExposureVersion }) 
   return (
     <Card
       title="Perspectives this data supports"
-      description="A perspective is offered only where the source files support it. KRE does not generate empty financial files to imply one."
+      description="A perspective is offered only where the source files support it. CASS does not generate empty financial files to imply one."
     >
       <ul className="perspective-list">
         {version.supported_perspectives.map((item) => (
@@ -603,7 +603,7 @@ function PreviewCard({ exposureId }: { exposureId: string }) {
   return (
     <Card
       title="OED interpretation"
-      description="Exactly what KRE will hand to the model. Columns KRE does not interpret are listed rather than dropped silently."
+      description="Exactly what CASS will hand to the model. Columns CASS does not interpret are listed rather than dropped silently."
       actions={
         <Button size="sm" onClick={() => setOpen((value) => !value)}>
           {open ? "Hide" : "Show"} preview
@@ -626,7 +626,7 @@ function PreviewCard({ exposureId }: { exposureId: string }) {
             defaultOpen={kind === "location"}
           >
             {file.unrecognised_columns.length ? (
-              <Notice tone="warning" title="Columns KRE did not interpret">
+              <Notice tone="warning" title="Columns CASS did not interpret">
                 {file.unrecognised_columns.join(", ")}
               </Notice>
             ) : null}

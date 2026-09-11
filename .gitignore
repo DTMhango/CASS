@@ -26,7 +26,12 @@ dist/
 .vite/
 
 # Local runtime state
-platform/.env
+# Every .env at any depth -- platform/.env and platform/deploy/.env both
+# carry live secrets. Templates stay tracked.
+.env
+.env.*
+!.env.example
+!.env.*.example
 platform/.artifacts/
 platform/**/db.sqlite3
 platform/**/staticfiles/

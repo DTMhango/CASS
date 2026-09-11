@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 @import "./tokens.css";
 @import "./tables.css";
 
@@ -13,6 +14,10 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+html {
+  font-family: var(--font-sans);
 }
 
 body {
@@ -123,4 +128,20 @@ a:hover {
 
 .muted {
   color: var(--grey-600);
+}
+
+/* Subtle content entrance; disabled via tokens prefers-reduced-motion. */
+@keyframes canvas-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.canvas-enter {
+  animation: canvas-fade-in 0.22s ease-out;
 }

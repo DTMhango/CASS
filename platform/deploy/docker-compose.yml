@@ -1,4 +1,4 @@
-# KRE catastrophe modelling platform: development and first controlled deployment.
+# CASS, the Catastrophe Analytics and Scenario Suite: development and first controlled deployment.
 #
 # Build plan section 4 makes Docker the common execution boundary from
 # development onward, and section 11 requires the same versioned container set
@@ -8,7 +8,7 @@
 #
 # Engine containers are unmodified upstream images. Section 10 notes that
 # OpenQuake is AGPL-3.0 and the main OasisLMF repository is BSD; keeping the
-# engines unmodified and the KRE logic in separate adapter services is the
+# engines unmodified and the CASS logic in separate adapter services is the
 # design that keeps the licence position simple. Service separation is not a
 # substitute for licence analysis, but modifying an engine image would make
 # that analysis harder rather than easier.
@@ -17,45 +17,45 @@
 # governed deployment. Section 18 requires pinned digests rather than moving
 # latest tags, and `make pin-digests` records them.
 
-name: kre-platform
+name: cass-platform
 
 x-artifact-env: &artifact-env
-  KRE_ARTIFACT_BACKEND: ${KRE_ARTIFACT_BACKEND:-s3}
-  KRE_S3_ENDPOINT: http://minio:9000
-  KRE_S3_REGION: us-east-1
-  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-kre-local}
-  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-kre-local-secret}
+  CASS_ARTIFACT_BACKEND: ${CASS_ARTIFACT_BACKEND:-s3}
+  CASS_S3_ENDPOINT: http://minio:9000
+  CASS_S3_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-cass-local}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-cass-local-secret}
 
 x-django-env: &django-env
-  DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-kre.settings.dev}
-  KRE_SECRET_KEY: ${KRE_SECRET_KEY:?set KRE_SECRET_KEY in .env}
-  KRE_DEBUG: ${KRE_DEBUG:-true}
-  KRE_ALLOWED_HOSTS: ${KRE_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
-  KRE_DB_HOST: postgres
-  KRE_DB_NAME: ${POSTGRES_DB:-kre}
-  KRE_DB_USER: ${POSTGRES_USER:-kre}
-  KRE_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-  KRE_BROKER_URL: redis://redis:6379/0
-  KRE_RESULT_BACKEND: redis://redis:6379/1
-  KRE_OPENQUAKE_URL: http://openquake:8800
-  KRE_OASIS_API_URL: http://oasis-api:8000
-  KRE_KEYS_SERVICE_URL: http://keys:8010
-  KRE_CONVERTER_URL: http://converter:8020
-  KRE_CORS_ORIGINS: ${KRE_CORS_ORIGINS:-http://localhost:5173}
-  KRE_CSRF_TRUSTED_ORIGINS: ${KRE_CSRF_TRUSTED_ORIGINS:-http://localhost:5173}
+  DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-cass.settings.dev}
+  CASS_SECRET_KEY: ${CASS_SECRET_KEY:?set CASS_SECRET_KEY in .env}
+  CASS_DEBUG: ${CASS_DEBUG:-true}
+  CASS_ALLOWED_HOSTS: ${CASS_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
+  CASS_DB_HOST: postgres
+  CASS_DB_NAME: ${POSTGRES_DB:-cass}
+  CASS_DB_USER: ${POSTGRES_USER:-cass}
+  CASS_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  CASS_BROKER_URL: redis://redis:6379/0
+  CASS_RESULT_BACKEND: redis://redis:6379/1
+  CASS_OPENQUAKE_URL: http://openquake:8800
+  CASS_OASIS_API_URL: http://oasis-api:8000
+  CASS_KEYS_SERVICE_URL: http://keys:8010
+  CASS_CONVERTER_URL: http://converter:8020
+  CASS_CORS_ORIGINS: ${CASS_CORS_ORIGINS:-http://localhost:5173}
+  CASS_CSRF_TRUSTED_ORIGINS: ${CASS_CSRF_TRUSTED_ORIGINS:-http://localhost:5173}
 
 services:
   # -- control plane -------------------------------------------------------
   postgres:
     image: postgres:16.6-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-kre}
-      POSTGRES_USER: ${POSTGRES_USER:-kre}
+      POSTGRES_DB: ${POSTGRES_DB:-cass}
+      POSTGRES_USER: ${POSTGRES_USER:-cass}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kre} -d ${POSTGRES_DB:-kre}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cass} -d ${POSTGRES_DB:-cass}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -81,8 +81,8 @@ services:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kre-local}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-kre-local-secret}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-cass-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-cass-local-secret}
     volumes:
       - minio-data:/data
     ports:
@@ -101,19 +101,19 @@ services:
       minio:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kre-local}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-kre-local-secret}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-cass-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-cass-local-secret}
     entrypoint:
       - /bin/sh
       - -c
       - |
         set -e
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        for bucket in kre-upload kre-portfolio kre-model kre-hazard kre-result; do
+        for bucket in cass-upload cass-portfolio cass-model cass-hazard cass-result; do
           mc mb --ignore-existing "local/$$bucket"
           mc anonymous set none "local/$$bucket"
         done
-        echo "KRE buckets ready"
+        echo "CASS buckets ready"
     restart: "no"
 
   api:
@@ -130,7 +130,7 @@ services:
       minio-init:
         condition: service_completed_successfully
     ports:
-      - "${KRE_API_PORT:-8000}:8000"
+      - "${CASS_API_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health/')"]
       interval: 10s
@@ -148,10 +148,10 @@ services:
     command:
       - celery
       - -A
-      - kre
+      - cass
       - worker
       - --loglevel=INFO
-      - --concurrency=${KRE_WORKER_CONCURRENCY:-2}
+      - --concurrency=${CASS_WORKER_CONCURRENCY:-2}
       - --prefetch-multiplier=1
       - --max-tasks-per-child=20
     environment:
@@ -163,7 +163,7 @@ services:
       # CMD-SHELL, not CMD: the exec form runs without a shell, so $$HOSTNAME
       # would be pinged literally and the check would always fail while the
       # worker was in fact healthy.
-      test: ["CMD-SHELL", "celery -A kre inspect ping -d celery@$$(hostname) || exit 1"]
+      test: ["CMD-SHELL", "celery -A cass inspect ping -d celery@$$(hostname) || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -174,15 +174,15 @@ services:
       context: ..
       dockerfile: deploy/images/Dockerfile.frontend
       args:
-        KRE_API_ORIGIN: ${KRE_API_ORIGIN:-http://api:8000}
+        CASS_API_ORIGIN: ${CASS_API_ORIGIN:-http://api:8000}
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "${KRE_WEB_PORT:-8080}:8080"
+      - "${CASS_WEB_PORT:-8080}:8080"
 
-  # -- KRE engine-adjacent services ---------------------------------------
-  # The keys service and the converter are KRE product components, not engine
+  # -- CASS engine-adjacent services ---------------------------------------
+  # The keys service and the converter are CASS product components, not engine
   # forks. They are separate containers so the converter can be given a
   # model-build resource profile without that applying to the whole API.
   keys:
@@ -191,7 +191,7 @@ services:
       dockerfile: deploy/images/Dockerfile.keys
     environment:
       <<: *artifact-env
-      KRE_KEYS_PORT: "8010"
+      CASS_KEYS_PORT: "8010"
     expose:
       - "8010"
     profiles: ["engines"]
@@ -209,11 +209,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${KRE_CONVERTER_MEMORY:-16G}
+          memory: ${CASS_CONVERTER_MEMORY:-16G}
     profiles: ["engines"]
 
   # -- upstream engines ----------------------------------------------------
-  # Unmodified upstream images. KRE reaches them through adapters over their
+  # Unmodified upstream images. CASS reaches them through adapters over their
   # supported APIs; it never writes to their internal stores.
   openquake:
     image: ghcr.io/gem/oq-engine:3.23.1
@@ -254,7 +254,7 @@ services:
         condition: service_started
     volumes:
       - oasis-data:/shared-fs
-      - ${KRE_MODEL_DATA_PATH:-./model_data}:/home/worker/model_data:ro
+      - ${CASS_MODEL_DATA_PATH:-./model_data}:/home/worker/model_data:ro
     profiles: ["engines"]
 
 volumes:

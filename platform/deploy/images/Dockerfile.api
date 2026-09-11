@@ -1,4 +1,4 @@
-# The KRE control plane and its workers.
+# The CASS control plane and its workers.
 #
 # The API and the worker share one image: they run the same code and the same
 # migrations, and a version skew between them would be a source of exactly the
@@ -24,9 +24,9 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/packages ./packages
-RUN pip install --no-cache-dir ./packages/kre_core ./packages/kre_oed
+RUN pip install --no-cache-dir ./packages/cass_core ./packages/cass_oed
 
-COPY backend/kre_api ./kre_api
+COPY backend/cass_api ./cass_api
 COPY backend/adapters ./adapters
 
 # The official PiWind exposure, which section 12 makes the end-to-end
@@ -35,19 +35,19 @@ COPY tests/fixtures ./tests/fixtures
 
 # Run as a non-root user. Section 10 requires least privilege, and a container
 # that writes portfolio data has no reason to be root.
-RUN useradd --create-home --uid 10001 kre \
-    && chown -R kre:kre /app
-USER kre
+RUN useradd --create-home --uid 10001 cass \
+    && chown -R cass:cass /app
+USER cass
 
-WORKDIR /app/kre_api
-ENV PYTHONPATH=/app/kre_api:/app/adapters
+WORKDIR /app/cass_api
+ENV PYTHONPATH=/app/cass_api:/app/adapters
 
 EXPOSE 8000
 
 # gunicorn rather than runserver, in every environment. A development-only
 # server in one environment and a production one in another is a difference
 # that hides bugs until late.
-CMD ["gunicorn", "kre.wsgi:application", \
+CMD ["gunicorn", "cass.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "3", \
      "--timeout", "120", \

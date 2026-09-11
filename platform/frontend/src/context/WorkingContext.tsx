@@ -14,7 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import type { CatalogueModel, ExposureVersion, PerspectiveKey, Project } from "@/api/types";
 
-const STORAGE_KEY = "kre.working-context.v1";
+const STORAGE_KEY = "cass.working-context.v1";
 
 interface StoredSelection {
   projectId?: string;

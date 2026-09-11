@@ -1,4 +1,4 @@
-# Continuous integration for the KRE platform.
+# Continuous integration for the CASS platform.
 #
 # Section 17 asks for CI checks covering unit tests, contracts, container
 # builds, security scans and the PiWind baseline. Section 12 adds that a fresh
@@ -42,8 +42,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements-dev.txt
-          pip install -e backend/packages/kre_core \
-                      -e backend/packages/kre_oed \
+          pip install -e backend/packages/cass_core \
+                      -e backend/packages/cass_oed \
                       -e backend/services/keys \
                       -e backend/services/converter
 
@@ -58,18 +58,18 @@ jobs:
       # against. Generating it with --fail-on-warn means a viewset that cannot
       # describe itself breaks the build rather than the client.
       - name: Generate the OpenAPI schema
-        working-directory: platform/backend/kre_api
+        working-directory: platform/backend/cass_api
         env:
-          DJANGO_SETTINGS_MODULE: kre.settings.test
+          DJANGO_SETTINGS_MODULE: cass.settings.test
         run: python manage.py spectacular --fail-on-warn --file /tmp/openapi.yaml
 
       # Section 12: a fresh environment must build from version-controlled
       # configuration. Seeding on a clean database proves the migrations and
       # the demonstration path both still work.
       - name: Seed a clean installation
-        working-directory: platform/backend/kre_api
+        working-directory: platform/backend/cass_api
         env:
-          DJANGO_SETTINGS_MODULE: kre.settings.test
+          DJANGO_SETTINGS_MODULE: cass.settings.test
         run: |
           python - <<'PY'
           import django
@@ -140,7 +140,7 @@ jobs:
           file: platform/deploy/images/Dockerfile.${{ matrix.image }}
           push: false
           load: true
-          tags: kre-${{ matrix.image }}:ci
+          tags: cass-${{ matrix.image }}:ci
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
@@ -149,7 +149,7 @@ jobs:
       - name: Scan ${{ matrix.image }}
         uses: aquasecurity/trivy-action@0.29.0
         with:
-          image-ref: kre-${{ matrix.image }}:ci
+          image-ref: cass-${{ matrix.image }}:ci
           format: table
           exit-code: "1"
           ignore-unfixed: true
@@ -166,7 +166,7 @@ jobs:
       - name: Validate the compose file
         run: |
           cp deploy/.env.example .env
-          sed -i 's/^KRE_SECRET_KEY=$/KRE_SECRET_KEY=ci-only-not-a-real-secret/' .env
+          sed -i 's/^CASS_SECRET_KEY=$/CASS_SECRET_KEY=ci-only-not-a-real-secret/' .env
           sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci-only/' .env
           sed -i 's/^MINIO_ROOT_PASSWORD=$/MINIO_ROOT_PASSWORD=ci-only-secret/' .env
           sed -i 's/^OASIS_ADMIN_PASS=$/OASIS_ADMIN_PASS=ci-only/' .env

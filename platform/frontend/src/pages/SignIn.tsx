@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiError } from "@/api/client";
 import { useSignIn } from "@/api/hooks";
 import { Button, Field, Notice, TextInput } from "@/components/primitives";
+import logoBox from "@/assets/logo_box.png";
 
 import "./SignIn.css";
 
@@ -22,12 +23,10 @@ export function SignIn() {
     <div className="signin">
       <form className="signin__panel" onSubmit={submit}>
         <div className="signin__brand">
-          <span className="signin__mark" aria-hidden="true">
-            KRE
-          </span>
+          <img className="signin__logo" src={logoBox} alt="Klapton Re" />
           <div>
-            <h1 className="signin__title">Catastrophe Modelling Platform</h1>
-            <p className="signin__subtitle">Klapton Reinsurance PLC, internal use</p>
+            <h1 className="signin__title">CASS</h1>
+            <p className="signin__subtitle">Catastrophe Analytics and Scenario Suite.</p>
           </div>
         </div>
 

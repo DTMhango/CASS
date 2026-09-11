@@ -5,7 +5,7 @@
 }
 
 .decision {
-  padding-bottom: var(--space-3);
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--grey-100);
 }
 
@@ -22,6 +22,7 @@
 
 .decision__name {
   font-weight: 600;
+  color: var(--grey-900);
 }
 
 .decision__position {
@@ -32,4 +33,5 @@
 .decision__matters {
   margin-top: 2px;
   font-size: var(--text-sm);
+  color: var(--grey-600);
 }

@@ -1,9 +1,10 @@
 openapi: 3.0.3
 info:
-  title: KRE Catastrophe Modelling Platform API
+  title: CASS API
   version: 1.0.0
-  description: The KRE control-plane API. The React application calls only this API;
-    it never calls OpenQuake or Oasis directly.
+  description: The control-plane API of CASS, the Catastrophe Analytics and Scenario
+    Suite. The React application calls only this API; it never calls OpenQuake or
+    Oasis directly.
 paths:
   /api/v1/analysis-runs/:
     get:

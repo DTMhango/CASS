@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import pytest
 
-from kre_converter.bins import (
+from cass_converter.bins import (
     Bin,
     BinError,
     DamageBinSet,
@@ -19,7 +19,7 @@ from kre_converter.bins import (
     linear_bins,
     log_bins,
 )
-from kre_converter.footprint import (
+from cass_converter.footprint import (
     FootprintAccumulator,
     FootprintError,
     FootprintRow,
@@ -28,19 +28,19 @@ from kre_converter.footprint import (
     check_event_coverage,
     validate_footprint,
 )
-from kre_converter.identifiers import (
+from cass_converter.identifiers import (
     DeterministicIdMap,
     IdentifierError,
     assign_event_ids,
 )
-from kre_converter.occurrence import (
+from cass_converter.occurrence import (
     OccurrenceError,
     OccurrenceRow,
     check_frequency,
     empty_period_share,
     validate_occurrences,
 )
-from kre_converter.policy import (
+from cass_converter.policy import (
     ConversionPolicy,
     EventIdentity,
     IMTRepresentation,

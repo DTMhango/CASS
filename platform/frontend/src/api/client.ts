@@ -1,8 +1,8 @@
 /**
- * The single route to the KRE API.
+ * The single route to the CASS API.
  *
  * Build plan section 4 states the boundary plainly: the React application
- * calls only the KRE API and never an engine API directly. Keeping one client
+ * calls only the CASS API and never an engine API directly. Keeping one client
  * makes that checkable -- a `fetch` anywhere else in the application is a bug.
  */
 

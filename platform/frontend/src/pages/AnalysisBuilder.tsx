@@ -9,7 +9,7 @@
  * The builder checks those preconditions and says which are unmet. It does not
  * submit work yet: the Oasis and OpenQuake adapters are phase 2 and 3 of the
  * roadmap. Showing the gates now is deliberate -- section 13 requires each
- * engine capability to be exposed through a thin KRE workflow first.
+ * engine capability to be exposed through a thin CASS workflow first.
  */
 
 import { useMemo } from "react";

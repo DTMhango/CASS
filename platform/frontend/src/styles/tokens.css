@@ -1,21 +1,15 @@
 /*
- * KRE design tokens.
+ * CASS design tokens — aligned to Opus-Lite / Klapton Re visual standard.
  *
- * Build plan section 3 sets the palette: KRE blue #234A9E as the primary
- * action, navigation and selection colour; white as the principal workspace
- * surface; a restrained neutral grey scale for borders, secondary text,
- * inactive states and dense analytical views; black as the default reading
- * colour.
+ * Brand primary remains #234A9E (hsl 220 67% 38%). Surfaces follow Opus-Lite:
+ * near-white canvas, white cards, cool slate neutrals, white left chrome.
  *
  * Two rules are encoded here rather than left to each screen.
  *
- * Status is never carried by colour alone. Section 3 requires non-colour
- * status cues for WCAG 2.1 AA, so every status token pairs with a glyph and a
- * text label in the components that use it.
+ * Status is never carried by colour alone. Every status token pairs with a
+ * glyph and a text label in the components that use it.
  *
- * Assumed values look different from reported ones. Section 8 requires an
- * analyst to tell at a glance which attributes are inferred, so the evidence
- * tokens below are part of the design system, not a one-off style.
+ * Assumed values look different from reported ones (ADR 0006 evidence language).
  */
 
 :root {
@@ -28,27 +22,27 @@
   /* 3:1 against white: for large text and non-text indicators only. */
   --kre-blue-light: #5b7fc7;
 
-  /* -- neutrals --------------------------------------------------------- */
+  /* -- neutrals (cool slate, Opus-Lite) --------------------------------- */
   --grey-0: #ffffff;
-  --grey-25: #fbfcfd;
-  --grey-50: #f5f6f8;
-  --grey-100: #eceef2;
-  --grey-200: #dcdfe6;
-  --grey-300: #c3c8d2;
+  --grey-25: #fafbfc;
+  --grey-50: #f9fafb; /* ~ hsl(0 0% 98%) page canvas */
+  --grey-100: #f1f5f9; /* slate-100 */
+  --grey-200: #e2e8f0; /* slate-200 / gray-200 */
+  --grey-300: #cbd5e1; /* slate-300 */
   /* 4.6:1 on white: the lightest grey permitted for body-size text. */
-  --grey-500: #6b7280;
-  --grey-600: #545a66;
-  --grey-700: #3d424c;
-  --grey-900: #1a1d23;
-  --ink: #000000;
+  --grey-500: #64748b; /* slate-500 */
+  --grey-600: #475569; /* slate-600 */
+  --grey-700: #334155; /* slate-700 */
+  --grey-900: #0f172a; /* slate-900 */
+  --ink: #0f172a;
 
   /* -- status ----------------------------------------------------------- */
-  --status-ok: #1a7f4b;
-  --status-ok-subtle: #e8f5ee;
-  --status-warning: #8a5a00;
-  --status-warning-subtle: #fdf3e0;
-  --status-error: #b3261e;
-  --status-error-subtle: #fdecea;
+  --status-ok: #15803d;
+  --status-ok-subtle: #ecfdf3;
+  --status-warning: #a16207;
+  --status-warning-subtle: #fef9c3;
+  --status-error: #b91c1c;
+  --status-error-subtle: #fef2f2;
   --status-info: var(--kre-blue);
   --status-info-subtle: var(--kre-blue-subtle);
   --status-idle: var(--grey-500);
@@ -65,27 +59,31 @@
   --evidence-override-surface: #f7f0fa;
 
   /* -- surfaces --------------------------------------------------------- */
-  --surface-canvas: var(--grey-50);
+  --surface-canvas: hsl(0 0% 98%);
   --surface-raised: var(--grey-0);
-  --surface-sunken: var(--grey-25);
-  --surface-rail: #14243f;
-  --surface-rail-hover: #1e3358;
+  --surface-sunken: var(--grey-100);
+  /* White chrome sidebar (Opus-Lite), not dark navy. */
+  --surface-rail: var(--grey-0);
+  --surface-rail-hover: var(--grey-100);
   --surface-rail-active: var(--kre-blue);
+  --surface-rail-ink: var(--grey-700);
+  --surface-rail-ink-muted: var(--grey-600);
+  --surface-rail-border: var(--grey-200);
 
   /* -- borders and shape ------------------------------------------------ */
   --border-subtle: var(--grey-200);
   --border-strong: var(--grey-300);
-  --radius-sm: 3px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
 
-  /* -- elevation -------------------------------------------------------- */
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.1);
-  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.14);
+  /* -- elevation (Opus-Lite soft card shadows) -------------------------- */
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.06);
 
   /* -- type ------------------------------------------------------------- */
-  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   /* Tabular figures matter: loss tables must align by digit. */
   --font-mono: "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
 
@@ -113,10 +111,10 @@
   --space-12: 48px;
 
   /* -- layout ----------------------------------------------------------- */
-  --rail-width: 232px;
-  --rail-width-collapsed: 60px;
-  --header-height: 56px;
-  --context-bar-height: 40px;
+  --rail-width: 256px;
+  --rail-width-collapsed: 64px;
+  --header-height: 64px;
+  --context-bar-height: 44px;
 
   /* -- charts ----------------------------------------------------------- */
   /* KRE blue is reserved for the principal series. The remaining hues are

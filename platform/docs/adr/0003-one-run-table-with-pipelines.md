@@ -18,10 +18,10 @@ than an implementation detail.
 ## Decision
 
 One `Run` table holds the lifecycle, with a `kind` that selects a pipeline
-definition from `kre_core.runs`. Kind-specific detail lives in a one-to-one
+definition from `cass_core.runs`. Kind-specific detail lives in a one-to-one
 record: `HazardRun`, `ConversionRun`, `AnalysisRun`.
 
-The state machine itself lives in `kre_core`, not in the Django model, so the
+The state machine itself lives in `cass_core`, not in the Django model, so the
 workers, the converter and the keys service enforce the same rules as the API.
 
 Pipelines are data. The run monitor renders whatever stage list the API

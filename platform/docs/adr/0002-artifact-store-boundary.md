@@ -19,7 +19,7 @@ run manifest unreproducible on any other machine.
 
 ## Decision
 
-Every artifact is addressed by a `kre://bucket/key` URI and reached through one
+Every artifact is addressed by a `cass://bucket/key` URI and reached through one
 interface, with a filesystem backend and an S3 backend that expose identical
 operations.
 

@@ -2,7 +2,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-2);
+  padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid transparent;
   font-size: var(--text-xs);
@@ -13,7 +13,7 @@
 
 .status-badge--sm {
   font-size: 0.6875rem;
-  padding: 1px var(--space-1);
+  padding: 1px var(--space-2);
 }
 
 .status-badge__glyph {
@@ -24,32 +24,32 @@
 .status-badge--ok {
   color: var(--status-ok);
   background: var(--status-ok-subtle);
-  border-color: var(--status-ok);
+  border-color: color-mix(in srgb, var(--status-ok) 35%, transparent);
 }
 
 .status-badge--warning {
   color: var(--status-warning);
   background: var(--status-warning-subtle);
-  border-color: var(--status-warning);
+  border-color: color-mix(in srgb, var(--status-warning) 35%, transparent);
 }
 
 .status-badge--error {
   color: var(--status-error);
   background: var(--status-error-subtle);
-  border-color: var(--status-error);
+  border-color: color-mix(in srgb, var(--status-error) 35%, transparent);
 }
 
 .status-badge--info,
 .status-badge--running {
   color: var(--kre-blue);
   background: var(--kre-blue-subtle);
-  border-color: var(--kre-blue);
+  border-color: var(--kre-blue-border);
 }
 
 .status-badge--idle {
   color: var(--grey-600);
   background: var(--status-idle-subtle);
-  border-color: var(--border-strong);
+  border-color: var(--border-subtle);
 }
 
 /* A running badge pulses gently so an active run is noticeable without

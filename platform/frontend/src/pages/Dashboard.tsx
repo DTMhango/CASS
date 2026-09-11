@@ -98,6 +98,7 @@ export function Dashboard() {
         <Card
           title="Projects"
           description="Select one to scope the exposure, run and result screens."
+          padded={false}
         >
           {projectsLoading ? (
             <Spinner label="Loading projects" />
@@ -143,7 +144,7 @@ export function Dashboard() {
           )}
         </Card>
 
-        <Card title="Recent runs" description="The last ten, newest first.">
+        <Card title="Recent runs" description="The last ten, newest first." padded={false}>
           {runs && runs.length > 0 ? (
             <table className="data-table">
               <thead>

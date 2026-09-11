@@ -14,7 +14,7 @@
 .results__metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
@@ -27,10 +27,10 @@
 .caveats {
   margin-top: var(--space-4);
   padding: var(--space-4);
-  background: var(--surface-sunken);
-  border: 1px solid var(--border-subtle);
+  background: var(--kre-blue-subtle);
+  border: 1px solid var(--kre-blue-border);
   border-left: 3px solid var(--kre-blue);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
 }
 
 .caveats__heading {
