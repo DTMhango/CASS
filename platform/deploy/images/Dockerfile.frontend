@@ -1,0 +1,27 @@
+# The KRE analyst interface, built once and served as static assets.
+
+FROM node:22.12.0-alpine AS build
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+
+FROM nginx:1.27.3-alpine AS runtime
+
+ARG KRE_API_ORIGIN=http://api:8000
+ENV KRE_API_ORIGIN=${KRE_API_ORIGIN}
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY deploy/images/nginx.conf.template /etc/nginx/templates/default.conf.template
+
+# nginx runs unprivileged; 8080 rather than 80 so no capability is needed.
+EXPOSE 8080
+
+# The image entrypoint substitutes KRE_API_ORIGIN into the template, so the
+# same image serves a KRE-server and an approved local installation.

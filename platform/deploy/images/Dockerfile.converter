@@ -1,0 +1,31 @@
+# The KRE OpenQuake to Oasis converter.
+#
+# Stateless by design (section 7): it is called by a durable background job,
+# reads and writes through the artifact interface, and holds no state between
+# invocations. That is what lets a long conversion restart from a checkpoint
+# without a partially published model package.
+
+FROM python:3.11.11-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# HDF5 for reading OpenQuake ground-motion field exports.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libhdf5-103-1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY backend/packages ./packages
+COPY backend/services/converter ./services/converter
+RUN pip install --no-cache-dir ./packages/kre_core "./services/converter[hdf5]"
+
+RUN useradd --create-home --uid 10003 kre && chown -R kre:kre /app
+USER kre
+
+EXPOSE 8020
+
+CMD ["python", "-c", "import kre_converter; print('kre-converter', kre_converter.__version__)"]

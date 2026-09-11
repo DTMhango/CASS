@@ -1,0 +1,262 @@
+# KRE catastrophe modelling platform: development and first controlled deployment.
+#
+# Build plan section 4 makes Docker the common execution boundary from
+# development onward, and section 11 requires the same versioned container set
+# to serve both a KRE-server installation and an approved local one.
+#
+# Two things are deliberate here.
+#
+# Engine containers are unmodified upstream images. Section 10 notes that
+# OpenQuake is AGPL-3.0 and the main OasisLMF repository is BSD; keeping the
+# engines unmodified and the KRE logic in separate adapter services is the
+# design that keeps the licence position simple. Service separation is not a
+# substitute for licence analysis, but modifying an engine image would make
+# that analysis harder rather than easier.
+#
+# Images are pinned by tag here and must be pinned by digest before any
+# governed deployment. Section 18 requires pinned digests rather than moving
+# latest tags, and `make pin-digests` records them.
+
+name: kre-platform
+
+x-artifact-env: &artifact-env
+  KRE_ARTIFACT_BACKEND: ${KRE_ARTIFACT_BACKEND:-s3}
+  KRE_S3_ENDPOINT: http://minio:9000
+  KRE_S3_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-kre-local}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-kre-local-secret}
+
+x-django-env: &django-env
+  DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-kre.settings.dev}
+  KRE_SECRET_KEY: ${KRE_SECRET_KEY:?set KRE_SECRET_KEY in .env}
+  KRE_DEBUG: ${KRE_DEBUG:-true}
+  KRE_ALLOWED_HOSTS: ${KRE_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
+  KRE_DB_HOST: postgres
+  KRE_DB_NAME: ${POSTGRES_DB:-kre}
+  KRE_DB_USER: ${POSTGRES_USER:-kre}
+  KRE_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  KRE_BROKER_URL: redis://redis:6379/0
+  KRE_RESULT_BACKEND: redis://redis:6379/1
+  KRE_OPENQUAKE_URL: http://openquake:8800
+  KRE_OASIS_API_URL: http://oasis-api:8000
+  KRE_KEYS_SERVICE_URL: http://keys:8010
+  KRE_CONVERTER_URL: http://converter:8020
+  KRE_CORS_ORIGINS: ${KRE_CORS_ORIGINS:-http://localhost:5173}
+  KRE_CSRF_TRUSTED_ORIGINS: ${KRE_CSRF_TRUSTED_ORIGINS:-http://localhost:5173}
+
+services:
+  # -- control plane -------------------------------------------------------
+  postgres:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kre}
+      POSTGRES_USER: ${POSTGRES_USER:-kre}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kre} -d ${POSTGRES_DB:-kre}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published to the host by default: the control-plane database is
+    # reachable only from the compose network.
+    expose:
+      - "5432"
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    expose:
+      - "6379"
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kre-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-kre-local-secret}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates the buckets section 5 separates by purpose and retention, then
+  # exits. Bucket creation is idempotent, so a restart is harmless.
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kre-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-kre-local-secret}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        for bucket in kre-upload kre-portfolio kre-model kre-hazard kre-result; do
+          mc mb --ignore-existing "local/$$bucket"
+          mc anonymous set none "local/$$bucket"
+        done
+        echo "KRE buckets ready"
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.api
+    environment:
+      <<: [*django-env, *artifact-env]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "${KRE_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Durable background execution. Section 11 requires declared limits rather
+  # than inherited maximum parallelism, so concurrency is set explicitly and
+  # the worker prefetches one task at a time.
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.api
+    command:
+      - celery
+      - -A
+      - kre
+      - worker
+      - --loglevel=INFO
+      - --concurrency=${KRE_WORKER_CONCURRENCY:-2}
+      - --prefetch-multiplier=1
+      - --max-tasks-per-child=20
+    environment:
+      <<: [*django-env, *artifact-env]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "celery", "-A", "kre", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.frontend
+      args:
+        KRE_API_ORIGIN: ${KRE_API_ORIGIN:-http://api:8000}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${KRE_WEB_PORT:-8080}:8080"
+
+  # -- KRE engine-adjacent services ---------------------------------------
+  # The keys service and the converter are KRE product components, not engine
+  # forks. They are separate containers so the converter can be given a
+  # model-build resource profile without that applying to the whole API.
+  keys:
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.keys
+    environment:
+      <<: *artifact-env
+      KRE_KEYS_PORT: "8010"
+    expose:
+      - "8010"
+    profiles: ["engines"]
+
+  converter:
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.converter
+    environment:
+      <<: *artifact-env
+    expose:
+      - "8020"
+    # Section 11 separates the model-build profile from the portfolio-analysis
+    # one: a country-scale conversion needs memory an analysis does not.
+    deploy:
+      resources:
+        limits:
+          memory: ${KRE_CONVERTER_MEMORY:-16G}
+    profiles: ["engines"]
+
+  # -- upstream engines ----------------------------------------------------
+  # Unmodified upstream images. KRE reaches them through adapters over their
+  # supported APIs; it never writes to their internal stores.
+  openquake:
+    image: ghcr.io/gem/oq-engine:3.23.1
+    command: ["oq", "webui", "start", "0.0.0.0:8800", "-s"]
+    volumes:
+      - openquake-data:/home/openquake/oqdata
+    expose:
+      - "8800"
+    profiles: ["engines"]
+
+  oasis-api:
+    image: coreoasis/api_server:2.5.7
+    environment:
+      OASIS_ADMIN_USER: ${OASIS_ADMIN_USER:-admin}
+      OASIS_ADMIN_PASS: ${OASIS_ADMIN_PASS:?set OASIS_ADMIN_PASS in .env}
+      OASIS_SERVER_DB_HOST: postgres
+      OASIS_CELERY_BROKER_URL: redis://redis:6379/2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - oasis-data:/shared-fs
+    expose:
+      - "8000"
+    profiles: ["engines"]
+
+  oasis-worker:
+    image: coreoasis/model_worker:2.5.7
+    environment:
+      OASIS_MODEL_SUPPLIER_ID: ${OASIS_MODEL_SUPPLIER_ID:-KRE}
+      OASIS_MODEL_ID: ${OASIS_MODEL_ID:-EQ}
+      OASIS_MODEL_VERSION_ID: ${OASIS_MODEL_VERSION_ID:-1}
+      OASIS_CELERY_BROKER_URL: redis://redis:6379/2
+    depends_on:
+      oasis-api:
+        condition: service_started
+    volumes:
+      - oasis-data:/shared-fs
+      - ${KRE_MODEL_DATA_PATH:-./model_data}:/home/worker/model_data:ro
+    profiles: ["engines"]
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  openquake-data:
+  oasis-data:

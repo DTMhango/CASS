@@ -1,0 +1,6456 @@
+openapi: 3.0.3
+info:
+  title: KRE Catastrophe Modelling Platform API
+  version: 1.0.0
+  description: The KRE control-plane API. The React application calls only this API;
+    it never calls OpenQuake or Oasis directly.
+paths:
+  /api/v1/analysis-runs/:
+    get:
+      operationId: api_v1_analysis_runs_list
+      parameters:
+      - in: query
+        name: exposure_version
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: model_version
+        schema:
+          type: string
+          format: uuid
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAnalysisRunList'
+          description: ''
+    post:
+      operationId: api_v1_analysis_runs_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRun'
+          description: ''
+  /api/v1/analysis-runs/{id}/:
+    get:
+      operationId: api_v1_analysis_runs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this analysis run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRun'
+          description: ''
+    put:
+      operationId: api_v1_analysis_runs_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this analysis run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRun'
+          description: ''
+    patch:
+      operationId: api_v1_analysis_runs_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this analysis run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAnalysisRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAnalysisRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAnalysisRunRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRun'
+          description: ''
+    delete:
+      operationId: api_v1_analysis_runs_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this analysis run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/approvals/:
+    get:
+      operationId: api_v1_approvals_list
+      parameters:
+      - in: query
+        name: decision
+        schema:
+          type: string
+          enum:
+          - approved
+          - rejected
+          - requested
+          - withdrawn
+        description: |-
+          * `requested` - Requested
+          * `approved` - Approved
+          * `rejected` - Rejected
+          * `withdrawn` - Withdrawn
+      - in: query
+        name: gate
+        schema:
+          type: string
+          enum:
+          - converter_candidate
+          - data_rights
+          - exposure_enrichment
+          - hazard_candidate
+          - model_release
+          - platform_release
+          - run_exception
+          - vulnerability_candidate
+        description: |-
+          * `hazard_candidate` - Hazard candidate
+          * `exposure_enrichment` - Exposure-enrichment candidate
+          * `converter_candidate` - Converter candidate
+          * `vulnerability_candidate` - Vulnerability candidate
+          * `data_rights` - Data-rights gate
+          * `model_release` - Model release
+          * `platform_release` - Platform release
+          * `run_exception` - Permitted run exception
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: subject_id
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: subject_type
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedApprovalList'
+          description: ''
+    post:
+      operationId: api_v1_approvals_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+          description: ''
+  /api/v1/approvals/{id}/:
+    get:
+      operationId: api_v1_approvals_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this approval.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+          description: ''
+    put:
+      operationId: api_v1_approvals_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this approval.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+          description: ''
+    patch:
+      operationId: api_v1_approvals_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this approval.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedApprovalRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedApprovalRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedApprovalRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+          description: ''
+    delete:
+      operationId: api_v1_approvals_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this approval.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/approvals/{id}/decide/:
+    post:
+      operationId: api_v1_approvals_decide_create
+      description: |-
+        Grant or refuse a gate.
+
+        Independence is enforced: a person may not decide a gate they
+        requested, and the role must permit the decision.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this approval.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+          description: ''
+  /api/v1/artifacts/:
+    get:
+      operationId: api_v1_artifacts_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: retention
+        schema:
+          type: string
+          enum:
+          - diagnostic
+          - hazard_intermediate
+          - model_asset
+          - operational
+          - permanent
+          - portfolio
+          - result
+        description: |-
+          * `permanent` - Permanent
+          * `model_asset` - Model Asset
+          * `hazard_intermediate` - Hazard Intermediate
+          * `portfolio` - Portfolio
+          * `result` - Result
+          * `diagnostic` - Diagnostic
+          * `operational` - Operational
+      - in: query
+        name: role
+        schema:
+          type: string
+      - in: query
+        name: state
+        schema:
+          type: string
+          enum:
+          - expired
+          - pending
+          - quarantined
+          - registered
+        description: |-
+          * `pending` - Awaiting upload
+          * `registered` - Registered
+          * `quarantined` - Quarantined
+          * `expired` - Expired
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedArtifactList'
+          description: ''
+  /api/v1/artifacts/{id}/:
+    get:
+      operationId: api_v1_artifacts_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this artifact.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
+  /api/v1/artifacts/{id}/download/:
+    get:
+      operationId: api_v1_artifacts_download_retrieve
+      description: Stream an artifact after checking entitlement, and record the access.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this artifact.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
+  /api/v1/artifacts/upload-session/:
+    post:
+      operationId: api_v1_artifacts_upload_session_create
+      description: |-
+        Issue a short-lived direct-to-store upload grant.
+
+        Section 5 has the browser upload large files straight to object
+        storage; Django registers the artifact only once the bytes are present
+        and checksummed.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
+  /api/v1/assumption-sets/:
+    get:
+      operationId: api_v1_assumption_sets_list
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - in: query
+        name: flavour
+        schema:
+          type: string
+          enum:
+          - baseline
+          - more_robust
+          - more_vulnerable
+        description: |-
+          * `baseline` - Baseline
+          * `more_robust` - More robust
+          * `more_vulnerable` - More vulnerable
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAssumptionSetList'
+          description: ''
+    post:
+      operationId: api_v1_assumption_sets_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssumptionSetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AssumptionSetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AssumptionSetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssumptionSet'
+          description: ''
+  /api/v1/assumption-sets/{id}/:
+    get:
+      operationId: api_v1_assumption_sets_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this assumption set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssumptionSet'
+          description: ''
+    put:
+      operationId: api_v1_assumption_sets_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this assumption set.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssumptionSetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AssumptionSetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AssumptionSetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssumptionSet'
+          description: ''
+    patch:
+      operationId: api_v1_assumption_sets_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this assumption set.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAssumptionSetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAssumptionSetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAssumptionSetRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssumptionSet'
+          description: ''
+    delete:
+      operationId: api_v1_assumption_sets_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this assumption set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/audit-events/:
+    get:
+      operationId: api_v1_audit_events_list
+      description: 'Read-only by construction: the table is append-only.'
+      parameters:
+      - in: query
+        name: action
+        schema:
+          type: string
+          enum:
+          - approve
+          - cancel
+          - configure
+          - create
+          - delete
+          - download
+          - override
+          - publish
+          - read
+          - reject
+          - retry
+          - sign_in
+          - sign_in_failed
+          - submit
+          - update
+          - upload
+        description: |-
+          * `create` - Created
+          * `update` - Updated
+          * `delete` - Deleted
+          * `read` - Read
+          * `download` - Downloaded
+          * `upload` - Uploaded
+          * `publish` - Published
+          * `submit` - Submitted
+          * `cancel` - Cancelled
+          * `retry` - Retried
+          * `approve` - Approved
+          * `reject` - Rejected
+          * `override` - Overrode a value
+          * `configure` - Changed configuration
+          * `sign_in` - Signed in
+          * `sign_in_failed` - Sign-in failed
+      - in: query
+        name: correlation_id
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: subject_id
+        schema:
+          type: string
+      - in: query
+        name: subject_type
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditEventList'
+          description: ''
+  /api/v1/audit-events/{id}/:
+    get:
+      operationId: api_v1_audit_events_retrieve
+      description: 'Read-only by construction: the table is append-only.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this audit event.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+          description: ''
+  /api/v1/comparisons/:
+    get:
+      operationId: api_v1_comparisons_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResultComparisonList'
+          description: ''
+    post:
+      operationId: api_v1_comparisons_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultComparisonRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResultComparisonRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResultComparisonRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultComparison'
+          description: ''
+  /api/v1/comparisons/{id}/:
+    get:
+      operationId: api_v1_comparisons_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result comparison.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultComparison'
+          description: ''
+    put:
+      operationId: api_v1_comparisons_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result comparison.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultComparisonRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResultComparisonRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResultComparisonRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultComparison'
+          description: ''
+    patch:
+      operationId: api_v1_comparisons_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result comparison.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedResultComparisonRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedResultComparisonRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedResultComparisonRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultComparison'
+          description: ''
+    delete:
+      operationId: api_v1_comparisons_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result comparison.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/conversion-runs/:
+    get:
+      operationId: api_v1_conversion_runs_list
+      parameters:
+      - in: query
+        name: hazard_run
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: model_version
+        schema:
+          type: string
+          format: uuid
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: qa_state
+        schema:
+          type: string
+          enum:
+          - failed
+          - passed
+          - pending
+          - waived
+        description: |-
+          * `pending` - Pending
+          * `passed` - Passed
+          * `failed` - Failed
+          * `waived` - Waived with rationale
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedConversionRunList'
+          description: ''
+    post:
+      operationId: api_v1_conversion_runs_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConversionRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversionRunRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionRun'
+          description: ''
+  /api/v1/conversion-runs/{id}/:
+    get:
+      operationId: api_v1_conversion_runs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionRun'
+          description: ''
+    put:
+      operationId: api_v1_conversion_runs_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConversionRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversionRunRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionRun'
+          description: ''
+    patch:
+      operationId: api_v1_conversion_runs_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedConversionRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedConversionRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedConversionRunRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionRun'
+          description: ''
+    delete:
+      operationId: api_v1_conversion_runs_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/enrichment-runs/:
+    get:
+      operationId: api_v1_enrichment_runs_list
+      parameters:
+      - in: query
+        name: assumption_set
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: exposure_version
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: reconciled
+        schema:
+          type: boolean
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedEnrichmentRunList'
+          description: ''
+  /api/v1/enrichment-runs/{id}/:
+    get:
+      operationId: api_v1_enrichment_runs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this enrichment run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrichmentRun'
+          description: ''
+  /api/v1/exposure-versions/:
+    get:
+      operationId: api_v1_exposure_versions_list
+      parameters:
+      - in: query
+        name: cedant
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: state
+        schema:
+          type: string
+          enum:
+          - draft
+          - published
+          - rejected
+          - validated
+          - validating
+        description: |-
+          * `draft` - Draft
+          * `validating` - Validating
+          * `validated` - Validated
+          * `published` - Published
+          * `rejected` - Rejected
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedExposureVersionList'
+          description: ''
+    post:
+      operationId: api_v1_exposure_versions_create
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+  /api/v1/exposure-versions/{id}/:
+    get:
+      operationId: api_v1_exposure_versions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+    put:
+      operationId: api_v1_exposure_versions_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+    patch:
+      operationId: api_v1_exposure_versions_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedExposureVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedExposureVersionRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedExposureVersionRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+    delete:
+      operationId: api_v1_exposure_versions_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/exposure-versions/{id}/files/:
+    post:
+      operationId: api_v1_exposure_versions_files_create
+      description: Attach one OED source file to a draft version.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+  /api/v1/exposure-versions/{id}/findings/:
+    get:
+      operationId: api_v1_exposure_versions_findings_retrieve
+      description: Validation findings, optionally filtered by severity or code.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+  /api/v1/exposure-versions/{id}/preview/:
+    get:
+      operationId: api_v1_exposure_versions_preview_retrieve
+      description: |-
+        Show the OED interpretation before a run.
+
+        Section 8 requires the platform to display what it will generate and
+        let the analyst download the exact files.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+  /api/v1/exposure-versions/{id}/publish/:
+    post:
+      operationId: api_v1_exposure_versions_publish_create
+      description: Freeze the version so analyses may use it.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+  /api/v1/exposure-versions/{id}/validate/:
+    post:
+      operationId: api_v1_exposure_versions_validate_create
+      description: Run validation and return the findings in business language.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+  /api/v1/grids/:
+    get:
+      operationId: api_v1_grids_list
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAreaPerilGridList'
+          description: ''
+    post:
+      operationId: api_v1_grids_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AreaPerilGridRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AreaPerilGridRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AreaPerilGridRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AreaPerilGrid'
+          description: ''
+  /api/v1/grids/{id}/:
+    get:
+      operationId: api_v1_grids_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this area peril grid.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AreaPerilGrid'
+          description: ''
+    put:
+      operationId: api_v1_grids_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this area peril grid.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AreaPerilGridRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AreaPerilGridRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AreaPerilGridRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AreaPerilGrid'
+          description: ''
+    patch:
+      operationId: api_v1_grids_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this area peril grid.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAreaPerilGridRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAreaPerilGridRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAreaPerilGridRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AreaPerilGrid'
+          description: ''
+    delete:
+      operationId: api_v1_grids_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this area peril grid.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/hazard-runs/:
+    get:
+      operationId: api_v1_hazard_runs_list
+      parameters:
+      - in: query
+        name: grid
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: model_version
+        schema:
+          type: string
+          format: uuid
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedHazardRunList'
+          description: ''
+    post:
+      operationId: api_v1_hazard_runs_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HazardRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HazardRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HazardRunRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardRun'
+          description: ''
+  /api/v1/hazard-runs/{id}/:
+    get:
+      operationId: api_v1_hazard_runs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardRun'
+          description: ''
+    put:
+      operationId: api_v1_hazard_runs_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HazardRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HazardRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HazardRunRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardRun'
+          description: ''
+    patch:
+      operationId: api_v1_hazard_runs_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedHazardRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedHazardRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedHazardRunRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardRun'
+          description: ''
+    delete:
+      operationId: api_v1_hazard_runs_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/model-versions/:
+    get:
+      operationId: api_v1_model_versions_list
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - in: query
+        name: is_research_prototype
+        schema:
+          type: boolean
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: peril
+        schema:
+          type: string
+          enum:
+          - QEQ
+        description: '* `QEQ` - Earthquake shake'
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedModelVersionList'
+          description: ''
+    post:
+      operationId: api_v1_model_versions_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
+  /api/v1/model-versions/{id}/:
+    get:
+      operationId: api_v1_model_versions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this model version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
+    put:
+      operationId: api_v1_model_versions_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this model version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
+    patch:
+      operationId: api_v1_model_versions_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this model version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedModelVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedModelVersionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedModelVersionRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
+    delete:
+      operationId: api_v1_model_versions_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this model version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/model-versions/{id}/publish/:
+    post:
+      operationId: api_v1_model_versions_publish_create
+      description: |-
+        Publish a model version, refusing while blockers stand.
+
+        Section 6 forbids the SA-only package being published as a complete
+        country model while material exposure maps to PGA functions, and
+        section 10 requires the data-rights gate to be cleared first. Both are
+        enforced here rather than left to a reviewer to remember.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this model version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
+  /api/v1/model-versions/catalogue/:
+    get:
+      operationId: api_v1_model_versions_catalogue_retrieve
+      description: 'The analyst-facing catalogue: what may be selected, and why not.'
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
+  /api/v1/platform/:
+    get:
+      operationId: api_v1_platform_retrieve
+      description: |-
+        Versions, profiles and engine endpoints.
+
+        Section 4 requires local installations to show whether they are approved
+        and unmodified, and section 11 requires an exportable support bundle
+        containing versions and health without portfolio contents. This is the
+        metadata half of that.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformInfo'
+          description: ''
+  /api/v1/projects/:
+    get:
+      operationId: api_v1_projects_list
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - active
+          - archived
+        description: |-
+          * `active` - Active
+          * `archived` - Archived
+      - in: query
+        name: team
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProjectList'
+          description: ''
+    post:
+      operationId: api_v1_projects_create
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+  /api/v1/projects/{id}/:
+    get:
+      operationId: api_v1_projects_retrieve
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this project.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    put:
+      operationId: api_v1_projects_update
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this project.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    patch:
+      operationId: api_v1_projects_partial_update
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this project.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    delete:
+      operationId: api_v1_projects_destroy
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this project.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/projects/{id}/members/:
+    get:
+      operationId: api_v1_projects_members_retrieve
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this project.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    post:
+      operationId: api_v1_projects_members_create
+      description: |-
+        Projects the signed-in user may see.
+
+        The queryset is filtered by membership rather than filtered in the view, so
+        an object the user cannot reach is a 404 rather than a 403 that confirms it
+        exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this project.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+  /api/v1/results/:
+    get:
+      operationId: api_v1_results_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: perspective
+        schema:
+          type: string
+          enum:
+          - ground_up
+          - insured
+          - reinsurance
+        description: |-
+          * `ground_up` - Ground-up loss
+          * `insured` - Insured loss
+          * `reinsurance` - Reinsurance loss
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: run
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: state
+        schema:
+          type: string
+          enum:
+          - approved
+          - draft
+          - research
+          - withdrawn
+        description: |-
+          * `draft` - Awaiting review
+          * `approved` - Approved for decision use
+          * `research` - Research only
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResultSetList'
+          description: ''
+    post:
+      operationId: api_v1_results_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
+  /api/v1/results/{id}/:
+    get:
+      operationId: api_v1_results_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
+    put:
+      operationId: api_v1_results_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
+    patch:
+      operationId: api_v1_results_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedResultSetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedResultSetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedResultSetRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
+    delete:
+      operationId: api_v1_results_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/results/{id}/approve/:
+    post:
+      operationId: api_v1_results_approve_create
+      description: |-
+        Release a result for decision use.
+
+        Section 9 requires approved decision outputs to be operationally
+        distinct from research runs, and section 10 requires independent
+        challenge, so the reviewer role is checked and the run must have
+        succeeded.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResultSetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
+  /api/v1/results/{id}/export/:
+    get:
+      operationId: api_v1_results_export_retrieve
+      description: |-
+        The auditable result package header.
+
+        Section 12 requires every result to be traceable to immutable exposure,
+        model, engine, converter and settings versions, so the export carries
+        the run manifest alongside the metrics.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
+  /api/v1/runs/:
+    get:
+      operationId: api_v1_runs_list
+      description: Runs are created through their kind-specific endpoints, then monitored
+        here.
+      parameters:
+      - in: query
+        name: kind
+        schema:
+          type: string
+          enum:
+          - analysis
+          - conversion
+          - hazard
+        description: |-
+          * `hazard` - Hazard run
+          * `conversion` - Conversion run
+          * `analysis` - Analysis run
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: state
+        schema:
+          type: string
+          enum:
+          - blocked
+          - cancelled
+          - cancelling
+          - draft
+          - failed
+          - queued
+          - running
+          - succeeded
+        description: |-
+          * `draft` - Draft
+          * `queued` - Queued
+          * `running` - Running
+          * `blocked` - Blocked
+          * `cancelling` - Cancelling
+          * `cancelled` - Cancelled
+          * `failed` - Failed
+          * `succeeded` - Succeeded
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRunList'
+          description: ''
+  /api/v1/runs/{id}/:
+    get:
+      operationId: api_v1_runs_retrieve
+      description: Runs are created through their kind-specific endpoints, then monitored
+        here.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+  /api/v1/runs/{id}/artifacts/:
+    get:
+      operationId: api_v1_runs_artifacts_retrieve
+      description: Inputs and outputs recorded against this run.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+  /api/v1/runs/{id}/cancel/:
+    post:
+      operationId: api_v1_runs_cancel_create
+      description: |-
+        Request cancellation.
+
+        The run moves to CANCELLING so the worker can unwind to a clean point;
+        section 11 requires cancellation to leave no published partial result.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+  /api/v1/runs/{id}/events/:
+    get:
+      operationId: api_v1_runs_events_retrieve
+      description: The stage history that explains what happened and when.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+  /api/v1/runs/{id}/retry/:
+    post:
+      operationId: api_v1_runs_retry_create
+      description: |-
+        Create a fresh run from a failed one.
+
+        A retry is a new run rather than a reset of the old one, so the failed
+        attempt keeps its evidence and the lineage of both stays intact.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+  /api/v1/session/:
+    get:
+      operationId: api_v1_session_retrieve
+      description: Sign in, sign out and identify the current user.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+          description: ''
+    post:
+      operationId: api_v1_session_create
+      description: Sign in, sign out and identify the current user.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+          description: ''
+    delete:
+      operationId: api_v1_session_destroy
+      description: Sign in, sign out and identify the current user.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '204':
+          description: No response body
+  /api/v1/users/:
+    get:
+      operationId: api_v1_users_list
+      description: User directory, used when granting project membership.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: platform_role
+        schema:
+          type: string
+          enum:
+          - admin
+          - analyst
+          - modeller
+          - reviewer
+          - underwriter
+        description: |-
+          Service-wide capability. Project access is granted separately.
+
+          * `analyst` - Portfolio analyst
+          * `modeller` - Catastrophe modeller
+          * `underwriter` - Underwriter or pricing user
+          * `reviewer` - Reviewer or approver
+          * `admin` - Platform administrator
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUserList'
+          description: ''
+  /api/v1/users/{id}/:
+    get:
+      operationId: api_v1_users_retrieve
+      description: User directory, used when granting project membership.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this user.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/v1/users/me/:
+    get:
+      operationId: api_v1_users_me_retrieve
+      description: User directory, used when granting project membership.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/v1/vulnerability-sets/:
+    get:
+      operationId: api_v1_vulnerability_sets_list
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - in: query
+        name: licence_cleared
+        schema:
+          type: boolean
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedVulnerabilitySetList'
+          description: ''
+    post:
+      operationId: api_v1_vulnerability_sets_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VulnerabilitySet'
+          description: ''
+  /api/v1/vulnerability-sets/{id}/:
+    get:
+      operationId: api_v1_vulnerability_sets_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this vulnerability set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VulnerabilitySet'
+          description: ''
+    put:
+      operationId: api_v1_vulnerability_sets_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this vulnerability set.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VulnerabilitySet'
+          description: ''
+    patch:
+      operationId: api_v1_vulnerability_sets_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this vulnerability set.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedVulnerabilitySetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedVulnerabilitySetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedVulnerabilitySetRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VulnerabilitySet'
+          description: ''
+    delete:
+      operationId: api_v1_vulnerability_sets_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this vulnerability set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /health/:
+    get:
+      operationId: health_retrieve
+      description: Liveness and readiness, unauthenticated so a probe can reach it.
+      tags:
+      - health
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+          description: ''
+components:
+  schemas:
+    AccessEnum:
+      enum:
+      - project
+      - model
+      - platform
+      type: string
+      description: |-
+        * `project` - Project
+        * `model` - Model
+        * `platform` - Platform
+    ActionEnum:
+      enum:
+      - create
+      - update
+      - delete
+      - read
+      - download
+      - upload
+      - publish
+      - submit
+      - cancel
+      - retry
+      - approve
+      - reject
+      - override
+      - configure
+      - sign_in
+      - sign_in_failed
+      type: string
+      description: |-
+        * `create` - Created
+        * `update` - Updated
+        * `delete` - Deleted
+        * `read` - Read
+        * `download` - Downloaded
+        * `upload` - Uploaded
+        * `publish` - Published
+        * `submit` - Submitted
+        * `cancel` - Cancelled
+        * `retry` - Retried
+        * `approve` - Approved
+        * `reject` - Rejected
+        * `override` - Overrode a value
+        * `configure` - Changed configuration
+        * `sign_in` - Signed in
+        * `sign_in_failed` - Sign-in failed
+    AnalysisRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        run:
+          type: string
+          format: uuid
+        run_detail:
+          allOf:
+          - $ref: '#/components/schemas/Run'
+          readOnly: true
+        exposure_version:
+          type: string
+          format: uuid
+        enrichment_run:
+          type: string
+          format: uuid
+          nullable: true
+        model_version:
+          type: string
+          format: uuid
+        perspectives:
+          description: Requested perspectives, checked against the source data.
+        analysis_settings: {}
+        run_currency:
+          type: string
+          maxLength: 3
+        oasis_analysis_id:
+          type: string
+          readOnly: true
+        oasis_portfolio_id:
+          type: string
+          readOnly: true
+        keys_summary:
+          readOnly: true
+        keys_reconciled:
+          type: boolean
+          readOnly: true
+          nullable: true
+        may_proceed_past_keys:
+          type: boolean
+          readOnly: true
+        exception_approval:
+          type: string
+          format: uuid
+          nullable: true
+          description: The approval that permitted an unreconciled or exceptional
+            run to proceed.
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - exposure_version
+      - id
+      - keys_reconciled
+      - keys_summary
+      - may_proceed_past_keys
+      - model_version
+      - oasis_analysis_id
+      - oasis_portfolio_id
+      - run
+      - run_detail
+    AnalysisRunRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        exposure_version:
+          type: string
+          format: uuid
+        enrichment_run:
+          type: string
+          format: uuid
+          nullable: true
+        model_version:
+          type: string
+          format: uuid
+        perspectives:
+          description: Requested perspectives, checked against the source data.
+        analysis_settings: {}
+        run_currency:
+          type: string
+          maxLength: 3
+        exception_approval:
+          type: string
+          format: uuid
+          nullable: true
+          description: The approval that permitted an unreconciled or exceptional
+            run to proceed.
+      required:
+      - exposure_version
+      - model_version
+      - run
+    Approval:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        gate:
+          $ref: '#/components/schemas/GateEnum'
+        decision:
+          allOf:
+          - $ref: '#/components/schemas/DecisionEnum'
+          readOnly: true
+        subject_type:
+          type: string
+          maxLength: 64
+        subject_id:
+          type: string
+          format: uuid
+        requested_by:
+          type: string
+          format: uuid
+          nullable: true
+        requested_by_label:
+          type: string
+          readOnly: true
+        decided_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        decided_by_label:
+          type: string
+          readOnly: true
+        decided_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rationale:
+          type: string
+          description: Why the gate was cleared or refused.
+        evidence:
+          description: Artifact URIs and check results the decision rested on.
+        is_open:
+          type: boolean
+          readOnly: true
+        is_cleared:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - decided_at
+      - decided_by
+      - decided_by_label
+      - decision
+      - gate
+      - id
+      - is_cleared
+      - is_open
+      - requested_by_label
+      - subject_id
+      - subject_type
+    ApprovalRequest:
+      type: object
+      properties:
+        gate:
+          $ref: '#/components/schemas/GateEnum'
+        subject_type:
+          type: string
+          minLength: 1
+          maxLength: 64
+        subject_id:
+          type: string
+          format: uuid
+        requested_by:
+          type: string
+          format: uuid
+          nullable: true
+        rationale:
+          type: string
+          description: Why the gate was cleared or refused.
+        evidence:
+          description: Artifact URIs and check results the decision rested on.
+      required:
+      - gate
+      - subject_id
+      - subject_type
+    AreaPerilGrid:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        country_code:
+          type: string
+          maxLength: 2
+        version:
+          type: string
+          description: Stable grid version. A change of geometry or mapping logic
+            needs a new one.
+          maxLength: 32
+        label:
+          type: string
+          maxLength: 200
+        reference:
+          type: string
+          readOnly: true
+        base_resolution_deg:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+        refined_resolution_deg:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+        refinement_rule:
+          type: string
+          description: How refined cells are selected, such as exposure density or
+            hazard gradient.
+        cell_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        excludes_offshore:
+          type: boolean
+          description: Indonesia's grid should avoid unnecessary calculation points
+            over ocean.
+        site_condition_source:
+          type: string
+          description: Provenance of Vs30, soil class and any basin parameters.
+          maxLength: 200
+        site_condition_fallback:
+          type: string
+          description: Fallback hierarchy where site parameters are unavailable.
+        border_policy:
+          type: string
+          description: Treatment of locations near national borders and coastlines.
+        mapping_tolerance_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          description: Distance beyond which a location is reported rather than snapped.
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        supersedes:
+          type: string
+          format: uuid
+          nullable: true
+        notes:
+          type: string
+        is_frozen:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - base_resolution_deg
+      - country_code
+      - created_at
+      - id
+      - is_frozen
+      - label
+      - reference
+      - refined_resolution_deg
+      - refinement_rule
+      - version
+    AreaPerilGridRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        version:
+          type: string
+          minLength: 1
+          description: Stable grid version. A change of geometry or mapping logic
+            needs a new one.
+          maxLength: 32
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        base_resolution_deg:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+        refined_resolution_deg:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+        refinement_rule:
+          type: string
+          minLength: 1
+          description: How refined cells are selected, such as exposure density or
+            hazard gradient.
+        cell_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        excludes_offshore:
+          type: boolean
+          description: Indonesia's grid should avoid unnecessary calculation points
+            over ocean.
+        site_condition_source:
+          type: string
+          description: Provenance of Vs30, soil class and any basin parameters.
+          maxLength: 200
+        site_condition_fallback:
+          type: string
+          description: Fallback hierarchy where site parameters are unavailable.
+        border_policy:
+          type: string
+          description: Treatment of locations near national borders and coastlines.
+        mapping_tolerance_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          description: Distance beyond which a location is reported rather than snapped.
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        supersedes:
+          type: string
+          format: uuid
+          nullable: true
+        notes:
+          type: string
+      required:
+      - base_resolution_deg
+      - country_code
+      - label
+      - refined_resolution_deg
+      - refinement_rule
+      - version
+    Artifact:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        uri:
+          type: string
+          readOnly: true
+        checksum:
+          type: string
+          readOnly: true
+          description: Algorithm-prefixed content digest, recorded at registration.
+        size_bytes:
+          type: integer
+          readOnly: true
+        content_type:
+          type: string
+          readOnly: true
+        retention:
+          allOf:
+          - $ref: '#/components/schemas/RetentionEnum'
+          readOnly: true
+        access:
+          allOf:
+          - $ref: '#/components/schemas/AccessEnum'
+          readOnly: true
+        state:
+          allOf:
+          - $ref: '#/components/schemas/ArtifactStateEnum'
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        role:
+          type: string
+          readOnly: true
+          description: What this artifact is in its manifest, such as oed_location
+            or footprint.
+        original_filename:
+          type: string
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        readable:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - access
+      - checksum
+      - content_type
+      - created_at
+      - expires_at
+      - id
+      - original_filename
+      - project
+      - readable
+      - retention
+      - role
+      - size_bytes
+      - state
+      - uri
+    ArtifactStateEnum:
+      enum:
+      - pending
+      - registered
+      - quarantined
+      - expired
+      type: string
+      description: |-
+        * `pending` - Awaiting upload
+        * `registered` - Registered
+        * `quarantined` - Quarantined
+        * `expired` - Expired
+    AssumptionSet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        country_code:
+          type: string
+          maxLength: 2
+        flavour:
+          $ref: '#/components/schemas/FlavourEnum'
+        version:
+          type: string
+          maxLength: 32
+        label:
+          type: string
+          maxLength: 200
+        reference:
+          type: string
+          readOnly: true
+        segment:
+          type: string
+          description: Portfolio segment the set applies to, such as facultative commercial.
+          maxLength: 120
+        rules: {}
+        provenance:
+          type: string
+          description: Where the priors come from and how they were calibrated.
+        weighting_basis:
+          allOf:
+          - $ref: '#/components/schemas/WeightingBasisEnum'
+          description: |-
+            Section 8 prefers cost or area weighting over building counts for facultative risks.
+
+            * `replacement_cost` - Replacement cost
+            * `floor_area` - Floor area
+            * `building_count` - Building count
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        is_frozen:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - country_code
+      - created_at
+      - flavour
+      - id
+      - is_frozen
+      - label
+      - reference
+      - version
+    AssumptionSetRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        flavour:
+          $ref: '#/components/schemas/FlavourEnum'
+        version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        segment:
+          type: string
+          description: Portfolio segment the set applies to, such as facultative commercial.
+          maxLength: 120
+        rules: {}
+        provenance:
+          type: string
+          description: Where the priors come from and how they were calibrated.
+        weighting_basis:
+          allOf:
+          - $ref: '#/components/schemas/WeightingBasisEnum'
+          description: |-
+            Section 8 prefers cost or area weighting over building counts for facultative risks.
+
+            * `replacement_cost` - Replacement cost
+            * `floor_area` - Floor area
+            * `building_count` - Building count
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+      required:
+      - country_code
+      - flavour
+      - label
+      - version
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        actor_label:
+          type: string
+          readOnly: true
+          description: Actor name captured at the time, so the record survives user
+            deletion.
+        action:
+          allOf:
+          - $ref: '#/components/schemas/ActionEnum'
+          readOnly: true
+        subject_type:
+          type: string
+          readOnly: true
+        subject_id:
+          type: string
+          readOnly: true
+        subject_label:
+          type: string
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        before_reference:
+          readOnly: true
+          nullable: true
+        after_reference:
+          readOnly: true
+          nullable: true
+        correlation_id:
+          type: string
+          readOnly: true
+          description: Follows one run across Django, the workers and the engine adapters.
+        source_ip:
+          type: string
+          readOnly: true
+          nullable: true
+        detail:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - action
+      - actor_label
+      - after_reference
+      - before_reference
+      - correlation_id
+      - created_at
+      - detail
+      - id
+      - project
+      - source_ip
+      - subject_id
+      - subject_label
+      - subject_type
+    ConversionRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        run:
+          type: string
+          format: uuid
+        run_detail:
+          allOf:
+          - $ref: '#/components/schemas/Run'
+          readOnly: true
+        hazard_run:
+          type: string
+          format: uuid
+        model_version:
+          type: string
+          format: uuid
+          nullable: true
+        converter_version:
+          type: string
+          maxLength: 32
+        event_policy:
+          type: string
+          description: The approved event identity specification applied.
+          maxLength: 64
+        occurrence_policy:
+          type: string
+          maxLength: 64
+        intensity_bin_set:
+          type: string
+          maxLength: 64
+        source_checksum:
+          type: string
+          maxLength: 80
+        target_checksum:
+          type: string
+          maxLength: 80
+        qa_state:
+          $ref: '#/components/schemas/QaStateEnum'
+        qa_report: {}
+        frequency_preserved:
+          type: boolean
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - hazard_run
+      - id
+      - run
+      - run_detail
+    ConversionRunRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        hazard_run:
+          type: string
+          format: uuid
+        model_version:
+          type: string
+          format: uuid
+          nullable: true
+        converter_version:
+          type: string
+          maxLength: 32
+        event_policy:
+          type: string
+          description: The approved event identity specification applied.
+          maxLength: 64
+        occurrence_policy:
+          type: string
+          maxLength: 64
+        intensity_bin_set:
+          type: string
+          maxLength: 64
+        source_checksum:
+          type: string
+          maxLength: 80
+        target_checksum:
+          type: string
+          maxLength: 80
+        qa_state:
+          $ref: '#/components/schemas/QaStateEnum'
+        qa_report: {}
+        frequency_preserved:
+          type: boolean
+          nullable: true
+      required:
+      - hazard_run
+      - run
+    DecisionEnum:
+      enum:
+      - requested
+      - approved
+      - rejected
+      - withdrawn
+      type: string
+      description: |-
+        * `requested` - Requested
+        * `approved` - Approved
+        * `rejected` - Rejected
+        * `withdrawn` - Withdrawn
+    EnrichmentRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        exposure_version:
+          type: string
+          format: uuid
+          readOnly: true
+        assumption_set:
+          type: string
+          format: uuid
+          readOnly: true
+        reported_count:
+          type: integer
+          readOnly: true
+        derived_count:
+          type: integer
+          readOnly: true
+        corroborated_count:
+          type: integer
+          readOnly: true
+        imputed_count:
+          type: integer
+          readOnly: true
+        override_count:
+          type: integer
+          readOnly: true
+        mean_confidence:
+          type: number
+          format: double
+          readOnly: true
+        assumption_share:
+          type: number
+          format: double
+          readOnly: true
+        missingness_profile:
+          readOnly: true
+          description: Field completeness before enrichment, by count and by value.
+        attribute_lineage:
+          readOnly: true
+          description: Per-attribute evidence class distribution and rule versions.
+        reconciliation:
+          readOnly: true
+        reconciled:
+          type: boolean
+          readOnly: true
+        exceptions:
+          readOnly: true
+          description: Records that could not be enriched and the reason.
+        output_checksum:
+          type: string
+          readOnly: true
+        is_usable:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assumption_set
+      - assumption_share
+      - attribute_lineage
+      - corroborated_count
+      - created_at
+      - derived_count
+      - exceptions
+      - exposure_version
+      - id
+      - imputed_count
+      - is_usable
+      - mean_confidence
+      - missingness_profile
+      - output_checksum
+      - override_count
+      - reconciled
+      - reconciliation
+      - reported_count
+    ExposureVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 200
+        version:
+          type: integer
+          readOnly: true
+          description: Increments within a project; a correction never edits in place.
+        state:
+          allOf:
+          - $ref: '#/components/schemas/ExposureVersionStateEnum'
+          readOnly: true
+        cedant:
+          type: string
+          maxLength: 200
+        valuation_date:
+          type: string
+          format: date
+          nullable: true
+        source_description:
+          type: string
+          description: Where the portfolio came from and the extract date.
+        run_currency:
+          type: string
+          maxLength: 3
+        oed_schema_version:
+          type: string
+          readOnly: true
+        location_count:
+          type: integer
+          readOnly: true
+        account_count:
+          type: integer
+          readOnly: true
+        total_tiv:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,20}(?:\.\d{0,2})?$
+          readOnly: true
+        tiv_by_coverage:
+          readOnly: true
+        tiv_by_country:
+          readOnly: true
+        tiv_by_currency:
+          readOnly: true
+        unmodelled_subperils:
+          readOnly: true
+        supported_perspectives:
+          readOnly: true
+          description: Perspectives the supplied files actually support.
+        validation_report:
+          readOnly: true
+          description: Findings, counts and summaries from the last validation pass.
+        attached_files:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        is_frozen:
+          type: boolean
+          readOnly: true
+        is_publishable:
+          type: boolean
+          readOnly: true
+        is_usable_by_runs:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - account_count
+      - attached_files
+      - created_at
+      - id
+      - is_frozen
+      - is_publishable
+      - is_usable_by_runs
+      - location_count
+      - name
+      - oed_schema_version
+      - project
+      - state
+      - supported_perspectives
+      - tiv_by_country
+      - tiv_by_coverage
+      - tiv_by_currency
+      - total_tiv
+      - unmodelled_subperils
+      - updated_at
+      - validation_report
+      - version
+    ExposureVersionRequest:
+      type: object
+      properties:
+        project:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        cedant:
+          type: string
+          maxLength: 200
+        valuation_date:
+          type: string
+          format: date
+          nullable: true
+        source_description:
+          type: string
+          description: Where the portfolio came from and the extract date.
+        run_currency:
+          type: string
+          maxLength: 3
+      required:
+      - name
+      - project
+    ExposureVersionStateEnum:
+      enum:
+      - draft
+      - validating
+      - validated
+      - published
+      - rejected
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `validating` - Validating
+        * `validated` - Validated
+        * `published` - Published
+        * `rejected` - Rejected
+    FlavourEnum:
+      enum:
+      - baseline
+      - more_robust
+      - more_vulnerable
+      type: string
+      description: |-
+        * `baseline` - Baseline
+        * `more_robust` - More robust
+        * `more_vulnerable` - More vulnerable
+    GateEnum:
+      enum:
+      - hazard_candidate
+      - exposure_enrichment
+      - converter_candidate
+      - vulnerability_candidate
+      - data_rights
+      - model_release
+      - platform_release
+      - run_exception
+      type: string
+      description: |-
+        * `hazard_candidate` - Hazard candidate
+        * `exposure_enrichment` - Exposure-enrichment candidate
+        * `converter_candidate` - Converter candidate
+        * `vulnerability_candidate` - Vulnerability candidate
+        * `data_rights` - Data-rights gate
+        * `model_release` - Model release
+        * `platform_release` - Platform release
+        * `run_exception` - Permitted run exception
+    HazardRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        run:
+          type: string
+          format: uuid
+        run_detail:
+          allOf:
+          - $ref: '#/components/schemas/Run'
+          readOnly: true
+        model_version:
+          type: string
+          format: uuid
+          nullable: true
+        grid:
+          type: string
+          format: uuid
+        openquake_calculation_id:
+          type: string
+          maxLength: 32
+        openquake_version:
+          type: string
+          maxLength: 32
+        image_digest:
+          type: string
+          maxLength: 120
+        job_settings: {}
+        imts: {}
+        investigation_time:
+          type: number
+          format: double
+          nullable: true
+        stochastic_event_sets:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        random_seed:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: Recorded so a reproducible run can be repeated exactly.
+        event_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        site_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        gmf_bytes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - grid
+      - id
+      - run
+      - run_detail
+    HazardRunRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        model_version:
+          type: string
+          format: uuid
+          nullable: true
+        grid:
+          type: string
+          format: uuid
+        openquake_calculation_id:
+          type: string
+          maxLength: 32
+        openquake_version:
+          type: string
+          maxLength: 32
+        image_digest:
+          type: string
+          maxLength: 120
+        job_settings: {}
+        imts: {}
+        investigation_time:
+          type: number
+          format: double
+          nullable: true
+        stochastic_event_sets:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        random_seed:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: Recorded so a reproducible run can be repeated exactly.
+        event_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        site_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        gmf_bytes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+      required:
+      - grid
+      - run
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+      required:
+      - checks
+      - status
+    KindEnum:
+      enum:
+      - hazard
+      - conversion
+      - analysis
+      type: string
+      description: |-
+        * `hazard` - Hazard run
+        * `conversion` - Conversion run
+        * `analysis` - Analysis run
+    ModelVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        country_code:
+          type: string
+          maxLength: 2
+        peril:
+          allOf:
+          - $ref: '#/components/schemas/PerilEnum'
+          default: QEQ
+        version:
+          type: string
+          maxLength: 32
+        label:
+          type: string
+          maxLength: 200
+        reference:
+          type: string
+          readOnly: true
+        grid:
+          type: string
+          format: uuid
+        grid_detail:
+          allOf:
+          - $ref: '#/components/schemas/AreaPerilGrid'
+          readOnly: true
+        vulnerability_set:
+          type: string
+          format: uuid
+        vulnerability_detail:
+          allOf:
+          - $ref: '#/components/schemas/VulnerabilitySet'
+          readOnly: true
+        hazard_source_model:
+          type: string
+          maxLength: 200
+        hazard_source_licence:
+          type: string
+          maxLength: 120
+        openquake_version:
+          type: string
+          maxLength: 32
+        oasis_version:
+          type: string
+          maxLength: 32
+        converter_version:
+          type: string
+          maxLength: 32
+        oed_schema_version:
+          type: string
+          maxLength: 32
+        imts:
+          description: Intensity measures this model version produces.
+        peril_scope:
+          description: 'Sub-peril treatment: included, proxied, excluded or not_material,
+            with rationale.'
+        known_limitations:
+          type: string
+        unsupported_taxonomy_report:
+          description: Vulnerability classes and TIV share this version cannot model.
+        is_research_prototype:
+          type: boolean
+          description: Research prototypes may be run but not used for decisions.
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        validation_date:
+          type: string
+          format: date
+          nullable: true
+        usable_for_decisions:
+          type: boolean
+          readOnly: true
+        publication_blockers:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        supersedes:
+          type: string
+          format: uuid
+          nullable: true
+        is_frozen:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - country_code
+      - created_at
+      - grid
+      - grid_detail
+      - id
+      - is_frozen
+      - label
+      - publication_blockers
+      - published_at
+      - reference
+      - usable_for_decisions
+      - version
+      - vulnerability_detail
+      - vulnerability_set
+    ModelVersionRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        peril:
+          allOf:
+          - $ref: '#/components/schemas/PerilEnum'
+          default: QEQ
+        version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        grid:
+          type: string
+          format: uuid
+        vulnerability_set:
+          type: string
+          format: uuid
+        hazard_source_model:
+          type: string
+          maxLength: 200
+        hazard_source_licence:
+          type: string
+          maxLength: 120
+        openquake_version:
+          type: string
+          maxLength: 32
+        oasis_version:
+          type: string
+          maxLength: 32
+        converter_version:
+          type: string
+          maxLength: 32
+        oed_schema_version:
+          type: string
+          maxLength: 32
+        imts:
+          description: Intensity measures this model version produces.
+        peril_scope:
+          description: 'Sub-peril treatment: included, proxied, excluded or not_material,
+            with rationale.'
+        known_limitations:
+          type: string
+        unsupported_taxonomy_report:
+          description: Vulnerability classes and TIV share this version cannot model.
+        is_research_prototype:
+          type: boolean
+          description: Research prototypes may be run but not used for decisions.
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        validation_date:
+          type: string
+          format: date
+          nullable: true
+        supersedes:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - country_code
+      - grid
+      - label
+      - version
+      - vulnerability_set
+    PaginatedAnalysisRunList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisRun'
+    PaginatedApprovalList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Approval'
+    PaginatedAreaPerilGridList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AreaPerilGrid'
+    PaginatedArtifactList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Artifact'
+    PaginatedAssumptionSetList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssumptionSet'
+    PaginatedAuditEventList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+    PaginatedConversionRunList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversionRun'
+    PaginatedEnrichmentRunList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnrichmentRun'
+    PaginatedExposureVersionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExposureVersion'
+    PaginatedHazardRunList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardRun'
+    PaginatedModelVersionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelVersion'
+    PaginatedProjectList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+    PaginatedResultComparisonList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultComparison'
+    PaginatedResultSetList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultSet'
+    PaginatedRunList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Run'
+    PaginatedUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+    PaginatedVulnerabilitySetList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/VulnerabilitySet'
+    PatchedAnalysisRunRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        exposure_version:
+          type: string
+          format: uuid
+        enrichment_run:
+          type: string
+          format: uuid
+          nullable: true
+        model_version:
+          type: string
+          format: uuid
+        perspectives:
+          description: Requested perspectives, checked against the source data.
+        analysis_settings: {}
+        run_currency:
+          type: string
+          maxLength: 3
+        exception_approval:
+          type: string
+          format: uuid
+          nullable: true
+          description: The approval that permitted an unreconciled or exceptional
+            run to proceed.
+    PatchedApprovalRequest:
+      type: object
+      properties:
+        gate:
+          $ref: '#/components/schemas/GateEnum'
+        subject_type:
+          type: string
+          minLength: 1
+          maxLength: 64
+        subject_id:
+          type: string
+          format: uuid
+        requested_by:
+          type: string
+          format: uuid
+          nullable: true
+        rationale:
+          type: string
+          description: Why the gate was cleared or refused.
+        evidence:
+          description: Artifact URIs and check results the decision rested on.
+    PatchedAreaPerilGridRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        version:
+          type: string
+          minLength: 1
+          description: Stable grid version. A change of geometry or mapping logic
+            needs a new one.
+          maxLength: 32
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        base_resolution_deg:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+        refined_resolution_deg:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+        refinement_rule:
+          type: string
+          minLength: 1
+          description: How refined cells are selected, such as exposure density or
+            hazard gradient.
+        cell_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        excludes_offshore:
+          type: boolean
+          description: Indonesia's grid should avoid unnecessary calculation points
+            over ocean.
+        site_condition_source:
+          type: string
+          description: Provenance of Vs30, soil class and any basin parameters.
+          maxLength: 200
+        site_condition_fallback:
+          type: string
+          description: Fallback hierarchy where site parameters are unavailable.
+        border_policy:
+          type: string
+          description: Treatment of locations near national borders and coastlines.
+        mapping_tolerance_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          description: Distance beyond which a location is reported rather than snapped.
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        supersedes:
+          type: string
+          format: uuid
+          nullable: true
+        notes:
+          type: string
+    PatchedAssumptionSetRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        flavour:
+          $ref: '#/components/schemas/FlavourEnum'
+        version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        segment:
+          type: string
+          description: Portfolio segment the set applies to, such as facultative commercial.
+          maxLength: 120
+        rules: {}
+        provenance:
+          type: string
+          description: Where the priors come from and how they were calibrated.
+        weighting_basis:
+          allOf:
+          - $ref: '#/components/schemas/WeightingBasisEnum'
+          description: |-
+            Section 8 prefers cost or area weighting over building counts for facultative risks.
+
+            * `replacement_cost` - Replacement cost
+            * `floor_area` - Floor area
+            * `building_count` - Building count
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+    PatchedConversionRunRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        hazard_run:
+          type: string
+          format: uuid
+        model_version:
+          type: string
+          format: uuid
+          nullable: true
+        converter_version:
+          type: string
+          maxLength: 32
+        event_policy:
+          type: string
+          description: The approved event identity specification applied.
+          maxLength: 64
+        occurrence_policy:
+          type: string
+          maxLength: 64
+        intensity_bin_set:
+          type: string
+          maxLength: 64
+        source_checksum:
+          type: string
+          maxLength: 80
+        target_checksum:
+          type: string
+          maxLength: 80
+        qa_state:
+          $ref: '#/components/schemas/QaStateEnum'
+        qa_report: {}
+        frequency_preserved:
+          type: boolean
+          nullable: true
+    PatchedExposureVersionRequest:
+      type: object
+      properties:
+        project:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        cedant:
+          type: string
+          maxLength: 200
+        valuation_date:
+          type: string
+          format: date
+          nullable: true
+        source_description:
+          type: string
+          description: Where the portfolio came from and the extract date.
+        run_currency:
+          type: string
+          maxLength: 3
+    PatchedHazardRunRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        model_version:
+          type: string
+          format: uuid
+          nullable: true
+        grid:
+          type: string
+          format: uuid
+        openquake_calculation_id:
+          type: string
+          maxLength: 32
+        openquake_version:
+          type: string
+          maxLength: 32
+        image_digest:
+          type: string
+          maxLength: 120
+        job_settings: {}
+        imts: {}
+        investigation_time:
+          type: number
+          format: double
+          nullable: true
+        stochastic_event_sets:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        random_seed:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: Recorded so a reproducible run can be repeated exactly.
+        event_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        site_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        gmf_bytes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+    PatchedModelVersionRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        peril:
+          allOf:
+          - $ref: '#/components/schemas/PerilEnum'
+          default: QEQ
+        version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        grid:
+          type: string
+          format: uuid
+        vulnerability_set:
+          type: string
+          format: uuid
+        hazard_source_model:
+          type: string
+          maxLength: 200
+        hazard_source_licence:
+          type: string
+          maxLength: 120
+        openquake_version:
+          type: string
+          maxLength: 32
+        oasis_version:
+          type: string
+          maxLength: 32
+        converter_version:
+          type: string
+          maxLength: 32
+        oed_schema_version:
+          type: string
+          maxLength: 32
+        imts:
+          description: Intensity measures this model version produces.
+        peril_scope:
+          description: 'Sub-peril treatment: included, proxied, excluded or not_material,
+            with rationale.'
+        known_limitations:
+          type: string
+        unsupported_taxonomy_report:
+          description: Vulnerability classes and TIV share this version cannot model.
+        is_research_prototype:
+          type: boolean
+          description: Research prototypes may be run but not used for decisions.
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        validation_date:
+          type: string
+          format: date
+          nullable: true
+        supersedes:
+          type: string
+          format: uuid
+          nullable: true
+    PatchedProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        reference:
+          type: string
+          minLength: 1
+          description: Short stable reference used in artifact keys and exports.
+          maxLength: 64
+          pattern: ^[-a-zA-Z0-9_]+$
+        purpose:
+          type: string
+          description: Why the analysis is being run. Appears on exported result packages.
+        team:
+          type: string
+          maxLength: 120
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+    PatchedResultComparisonRequest:
+      type: object
+      properties:
+        project:
+          type: string
+          format: uuid
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        baseline:
+          type: string
+          format: uuid
+        candidate:
+          type: string
+          format: uuid
+        differences:
+          description: AAL, return-period and segment differences with the drivers
+            identified.
+        commentary:
+          type: string
+    PatchedResultSetRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        project:
+          type: string
+          format: uuid
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        perspective:
+          $ref: '#/components/schemas/PerspectiveEnum'
+        state:
+          $ref: '#/components/schemas/ResultSetStateEnum'
+        average_annual_loss:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,20}(?:\.\d{0,2})?$
+          nullable: true
+        standard_deviation:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,20}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+          maxLength: 3
+        return_period_losses:
+          description: Approved reporting return periods to loss.
+        model_version_reference:
+          type: string
+          maxLength: 120
+        assumption_set_reference:
+          type: string
+          maxLength: 120
+        valuation_date:
+          type: string
+          format: date
+          nullable: true
+        exposure_quality:
+          description: Completeness, assumption share and unmapped TIV behind this
+            result.
+        peril_scope:
+          description: Sub-peril treatment for this model release.
+        material_exclusions:
+          description: What this number does not include, such as tsunami or business
+            interruption.
+        uncertainty_attribution:
+          description: Contribution of hazard, conversion, exposure, vulnerability
+            and financial uncertainty.
+    PatchedVulnerabilitySetRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        source:
+          type: string
+          minLength: 1
+          description: Provenance, such as GEM Global Vulnerability Model v2026.0.0.
+          maxLength: 200
+        source_commit:
+          type: string
+          maxLength: 64
+        taxonomy_generation:
+          type: string
+          description: Taxonomy release. Exposure and vulnerability generations must
+            match.
+          maxLength: 32
+        licence:
+          type: string
+          maxLength: 120
+        licence_cleared:
+          type: boolean
+          description: Whether commercial use has been confirmed in writing by the
+            licensor.
+        licence_note:
+          type: string
+        function_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        imts_used:
+          description: Distinct intensity measures the functions demand.
+        coverage_components:
+          description: Structural, non-structural, contents or business interruption.
+        damage_bin_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+    PerilEnum:
+      enum:
+      - QEQ
+      type: string
+      description: '* `QEQ` - Earthquake shake'
+    PerspectiveEnum:
+      enum:
+      - ground_up
+      - insured
+      - reinsurance
+      type: string
+      description: |-
+        * `ground_up` - Ground-up loss
+        * `insured` - Insured loss
+        * `reinsurance` - Reinsurance loss
+    PlatformInfo:
+      type: object
+      properties:
+        api_version:
+          type: string
+        oed_schema_version:
+          type: string
+        compatibility_matrix:
+          type: array
+          items: {}
+        execution_profiles:
+          type: object
+          additionalProperties: {}
+        default_execution_profile:
+          type: string
+        artifact_backend:
+          type: string
+        engines:
+          type: object
+          additionalProperties: {}
+      required:
+      - api_version
+      - artifact_backend
+      - compatibility_matrix
+      - default_execution_profile
+      - engines
+      - execution_profiles
+      - oed_schema_version
+    PlatformRoleEnum:
+      enum:
+      - analyst
+      - modeller
+      - underwriter
+      - reviewer
+      - admin
+      type: string
+      description: |-
+        * `analyst` - Portfolio analyst
+        * `modeller` - Catastrophe modeller
+        * `underwriter` - Underwriter or pricing user
+        * `reviewer` - Reviewer or approver
+        * `admin` - Platform administrator
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 200
+        reference:
+          type: string
+          description: Short stable reference used in artifact keys and exports.
+          maxLength: 64
+          pattern: ^[-a-zA-Z0-9_]+$
+        purpose:
+          type: string
+          description: Why the analysis is being run. Appears on exported result packages.
+        team:
+          type: string
+          maxLength: 120
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        my_role:
+          type: string
+          nullable: true
+          readOnly: true
+        exposure_version_count:
+          type: integer
+          readOnly: true
+        active_run_count:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - active_run_count
+      - created_at
+      - exposure_version_count
+      - id
+      - my_role
+      - name
+      - reference
+      - updated_at
+    ProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        reference:
+          type: string
+          minLength: 1
+          description: Short stable reference used in artifact keys and exports.
+          maxLength: 64
+          pattern: ^[-a-zA-Z0-9_]+$
+        purpose:
+          type: string
+          description: Why the analysis is being run. Appears on exported result packages.
+        team:
+          type: string
+          maxLength: 120
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+      required:
+      - name
+      - reference
+    PublicationStateEnum:
+      enum:
+      - draft
+      - candidate
+      - approved
+      - published
+      - superseded
+      - withdrawn
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `candidate` - Candidate awaiting approval
+        * `approved` - Approved
+        * `published` - Published
+        * `superseded` - Superseded
+        * `withdrawn` - Withdrawn
+    QaStateEnum:
+      enum:
+      - pending
+      - passed
+      - failed
+      - waived
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `passed` - Passed
+        * `failed` - Failed
+        * `waived` - Waived with rationale
+    ResultComparison:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+        label:
+          type: string
+          maxLength: 200
+        baseline:
+          type: string
+          format: uuid
+        candidate:
+          type: string
+          format: uuid
+        differences:
+          description: AAL, return-period and segment differences with the drivers
+            identified.
+        commentary:
+          type: string
+        is_like_for_like:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - baseline
+      - candidate
+      - created_at
+      - id
+      - is_like_for_like
+      - label
+      - project
+    ResultComparisonRequest:
+      type: object
+      properties:
+        project:
+          type: string
+          format: uuid
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        baseline:
+          type: string
+          format: uuid
+        candidate:
+          type: string
+          format: uuid
+        differences:
+          description: AAL, return-period and segment differences with the drivers
+            identified.
+        commentary:
+          type: string
+      required:
+      - baseline
+      - candidate
+      - label
+      - project
+    ResultSet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        run:
+          type: string
+          format: uuid
+        project:
+          type: string
+          format: uuid
+        label:
+          type: string
+          maxLength: 200
+        perspective:
+          $ref: '#/components/schemas/PerspectiveEnum'
+        state:
+          $ref: '#/components/schemas/ResultSetStateEnum'
+        average_annual_loss:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,20}(?:\.\d{0,2})?$
+          nullable: true
+        standard_deviation:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,20}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+          maxLength: 3
+        return_period_losses:
+          description: Approved reporting return periods to loss.
+        model_version_reference:
+          type: string
+          maxLength: 120
+        assumption_set_reference:
+          type: string
+          maxLength: 120
+        valuation_date:
+          type: string
+          format: date
+          nullable: true
+        exposure_quality:
+          description: Completeness, assumption share and unmapped TIV behind this
+            result.
+        peril_scope:
+          description: Sub-peril treatment for this model release.
+        material_exclusions:
+          description: What this number does not include, such as tsunami or business
+            interruption.
+        uncertainty_attribution:
+          description: Contribution of hazard, conversion, exposure, vulnerability
+            and financial uncertainty.
+        usable_for_decisions:
+          type: boolean
+          readOnly: true
+        caveats:
+          type: object
+          additionalProperties: {}
+          description: 'Section 9: the caveat block travels with every decision view.'
+          readOnly: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        is_frozen:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approved_at
+      - caveats
+      - created_at
+      - id
+      - is_frozen
+      - label
+      - perspective
+      - project
+      - run
+      - usable_for_decisions
+    ResultSetRequest:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        project:
+          type: string
+          format: uuid
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        perspective:
+          $ref: '#/components/schemas/PerspectiveEnum'
+        state:
+          $ref: '#/components/schemas/ResultSetStateEnum'
+        average_annual_loss:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,20}(?:\.\d{0,2})?$
+          nullable: true
+        standard_deviation:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,20}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+          maxLength: 3
+        return_period_losses:
+          description: Approved reporting return periods to loss.
+        model_version_reference:
+          type: string
+          maxLength: 120
+        assumption_set_reference:
+          type: string
+          maxLength: 120
+        valuation_date:
+          type: string
+          format: date
+          nullable: true
+        exposure_quality:
+          description: Completeness, assumption share and unmapped TIV behind this
+            result.
+        peril_scope:
+          description: Sub-peril treatment for this model release.
+        material_exclusions:
+          description: What this number does not include, such as tsunami or business
+            interruption.
+        uncertainty_attribution:
+          description: Contribution of hazard, conversion, exposure, vulnerability
+            and financial uncertainty.
+      required:
+      - label
+      - perspective
+      - project
+      - run
+    ResultSetStateEnum:
+      enum:
+      - draft
+      - approved
+      - research
+      - withdrawn
+      type: string
+      description: |-
+        * `draft` - Awaiting review
+        * `approved` - Approved for decision use
+        * `research` - Research only
+        * `withdrawn` - Withdrawn
+    RetentionEnum:
+      enum:
+      - permanent
+      - model_asset
+      - hazard_intermediate
+      - portfolio
+      - result
+      - diagnostic
+      - operational
+      type: string
+      description: |-
+        * `permanent` - Permanent
+        * `model_asset` - Model Asset
+        * `hazard_intermediate` - Hazard Intermediate
+        * `portfolio` - Portfolio
+        * `result` - Result
+        * `diagnostic` - Diagnostic
+        * `operational` - Operational
+    Run:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/KindEnum'
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          description: Null for model-build runs, which belong to a model version
+            rather than a project.
+        label:
+          type: string
+          readOnly: true
+        state:
+          allOf:
+          - $ref: '#/components/schemas/RunStateEnum'
+          readOnly: true
+        stage:
+          type: string
+          readOnly: true
+          description: Current pipeline stage key.
+        stage_label:
+          type: string
+          readOnly: true
+        progress:
+          type: number
+          format: double
+          readOnly: true
+        pipeline:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        execution_profile:
+          type: string
+          readOnly: true
+          description: Declared CPU, memory and timeout envelope from section 11.
+        correlation_id:
+          type: string
+          readOnly: true
+        queued_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        duration_seconds:
+          type: integer
+          readOnly: true
+          nullable: true
+        peak_memory_mb:
+          type: integer
+          readOnly: true
+          nullable: true
+        failure_stage:
+          type: string
+          readOnly: true
+        failure_summary:
+          type: string
+          readOnly: true
+        failure_detail:
+          type: string
+          readOnly: true
+        settings_hash:
+          type: string
+          readOnly: true
+        retry_of:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        may_retry:
+          type: boolean
+          readOnly: true
+        may_publish_results:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - correlation_id
+      - created_at
+      - duration_seconds
+      - execution_profile
+      - failure_detail
+      - failure_stage
+      - failure_summary
+      - finished_at
+      - id
+      - is_active
+      - kind
+      - label
+      - may_publish_results
+      - may_retry
+      - peak_memory_mb
+      - pipeline
+      - progress
+      - project
+      - queued_at
+      - retry_of
+      - settings_hash
+      - stage
+      - stage_label
+      - started_at
+      - state
+    RunStateEnum:
+      enum:
+      - draft
+      - queued
+      - running
+      - blocked
+      - cancelling
+      - cancelled
+      - failed
+      - succeeded
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `queued` - Queued
+        * `running` - Running
+        * `blocked` - Blocked
+        * `cancelling` - Cancelling
+        * `cancelled` - Cancelled
+        * `failed` - Failed
+        * `succeeded` - Succeeded
+    Session:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          $ref: '#/components/schemas/User'
+      required:
+      - authenticated
+    SignInRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password
+      - username
+    StatusEnum:
+      enum:
+      - active
+      - archived
+      type: string
+      description: |-
+        * `active` - Active
+        * `archived` - Archived
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        full_name:
+          type: string
+          readOnly: true
+        platform_role:
+          allOf:
+          - $ref: '#/components/schemas/PlatformRoleEnum'
+          description: |-
+            Service-wide capability. Project access is granted separately.
+
+            * `analyst` - Portfolio analyst
+            * `modeller` - Catastrophe modeller
+            * `underwriter` - Underwriter or pricing user
+            * `reviewer` - Reviewer or approver
+            * `admin` - Platform administrator
+        job_title:
+          type: string
+          maxLength: 120
+        local_install_approved:
+          type: boolean
+          description: Whether this user may run an approved local Docker installation.
+        capabilities:
+          type: object
+          additionalProperties: {}
+          description: |-
+            What the interface should offer this person.
+
+            Returned as data rather than inferred in the browser, so the React
+            application never has to reimplement a permission rule.
+          readOnly: true
+      required:
+      - capabilities
+      - full_name
+      - id
+      - username
+    VulnerabilitySet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        country_code:
+          type: string
+          maxLength: 2
+        version:
+          type: string
+          maxLength: 32
+        source:
+          type: string
+          description: Provenance, such as GEM Global Vulnerability Model v2026.0.0.
+          maxLength: 200
+        source_commit:
+          type: string
+          maxLength: 64
+        taxonomy_generation:
+          type: string
+          description: Taxonomy release. Exposure and vulnerability generations must
+            match.
+          maxLength: 32
+        licence:
+          type: string
+          maxLength: 120
+        licence_cleared:
+          type: boolean
+          description: Whether commercial use has been confirmed in writing by the
+            licensor.
+        licence_note:
+          type: string
+        function_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        imts_used:
+          description: Distinct intensity measures the functions demand.
+        unsupported_imts:
+          type: array
+          items: {}
+          readOnly: true
+        coverage_components:
+          description: Structural, non-structural, contents or business interruption.
+        damage_bin_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+        is_frozen:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - country_code
+      - created_at
+      - id
+      - is_frozen
+      - source
+      - unsupported_imts
+      - version
+    VulnerabilitySetRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        source:
+          type: string
+          minLength: 1
+          description: Provenance, such as GEM Global Vulnerability Model v2026.0.0.
+          maxLength: 200
+        source_commit:
+          type: string
+          maxLength: 64
+        taxonomy_generation:
+          type: string
+          description: Taxonomy release. Exposure and vulnerability generations must
+            match.
+          maxLength: 32
+        licence:
+          type: string
+          maxLength: 120
+        licence_cleared:
+          type: boolean
+          description: Whether commercial use has been confirmed in writing by the
+            licensor.
+        licence_note:
+          type: string
+        function_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        imts_used:
+          description: Distinct intensity measures the functions demand.
+        coverage_components:
+          description: Structural, non-structural, contents or business interruption.
+        damage_bin_count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        publication_state:
+          $ref: '#/components/schemas/PublicationStateEnum'
+      required:
+      - country_code
+      - source
+      - version
+    WeightingBasisEnum:
+      enum:
+      - replacement_cost
+      - floor_area
+      - building_count
+      type: string
+      description: |-
+        * `replacement_cost` - Replacement cost
+        * `floor_area` - Floor area
+        * `building_count` - Building count
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+    tokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Token-based authentication with required prefix "Token"

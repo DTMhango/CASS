@@ -1,0 +1,57 @@
+# Serves the built interface and proxies the KRE API.
+#
+# The browser reaches one origin. That keeps the session cookie first-party and
+# means the boundary rule of section 4 -- the interface calls only the KRE API --
+# holds in the deployed topology as well as in the code.
+
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Portfolio and model data are confidential; nothing here should be cached
+    # by an intermediary.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "same-origin" always;
+
+    # Hashed asset filenames are safe to cache for a long time; index.html is
+    # not, or an upgraded installation would keep serving the old application.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    location /api/ {
+        proxy_pass ${KRE_API_ORIGIN};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Correlation IDs follow a run across services (section 4).
+        proxy_set_header X-Correlation-ID $request_id;
+
+        # Exposure files can be large, and a long analysis submission should
+        # not be cut off by a proxy timeout.
+        client_max_body_size 512m;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location /health/ {
+        proxy_pass ${KRE_API_ORIGIN};
+        access_log off;
+    }
+
+    # The interface is a single-page application: unknown paths are routes,
+    # not missing files.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

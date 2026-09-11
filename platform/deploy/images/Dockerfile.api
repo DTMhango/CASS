@@ -1,0 +1,51 @@
+# The KRE control plane and its workers.
+#
+# The API and the worker share one image: they run the same code and the same
+# migrations, and a version skew between them would be a source of exactly the
+# lineage problems section 5 is written to prevent.
+
+FROM python:3.11.11-slim-bookworm AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# libpq for psycopg; curl for the healthcheck and support bundle.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libpq5 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Dependencies are installed before the source is copied, so a code change
+# does not invalidate the dependency layer.
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/packages ./packages
+RUN pip install --no-cache-dir ./packages/kre_core ./packages/kre_oed
+
+COPY backend/kre_api ./kre_api
+COPY backend/adapters ./adapters
+
+# Run as a non-root user. Section 10 requires least privilege, and a container
+# that writes portfolio data has no reason to be root.
+RUN useradd --create-home --uid 10001 kre \
+    && chown -R kre:kre /app
+USER kre
+
+WORKDIR /app/kre_api
+ENV PYTHONPATH=/app/kre_api:/app/adapters
+
+EXPOSE 8000
+
+# gunicorn rather than runserver, in every environment. A development-only
+# server in one environment and a production one in another is a difference
+# that hides bugs until late.
+CMD ["gunicorn", "kre.wsgi:application", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "3", \
+     "--timeout", "120", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-"]

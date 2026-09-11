@@ -1,0 +1,174 @@
+# Continuous integration for the KRE platform.
+#
+# Section 17 asks for CI checks covering unit tests, contracts, container
+# builds, security scans and the PiWind baseline. Section 12 adds that a fresh
+# environment must be buildable from version-controlled configuration, which is
+# what the container-build job proves on every change.
+
+name: platform
+
+on:
+  push:
+    branches: [main]
+    paths: ["platform/**", ".github/workflows/platform.yml"]
+  pull_request:
+    paths: ["platform/**", ".github/workflows/platform.yml"]
+
+concurrency:
+  group: platform-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: platform
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: platform/backend/requirements-dev.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-dev.txt
+          pip install -e backend/packages/kre_core \
+                      -e backend/packages/kre_oed \
+                      -e backend/services/keys \
+                      -e backend/services/converter
+
+      - name: Lint
+        run: ruff check backend
+
+      - name: Test
+        working-directory: platform/backend
+        run: pytest -q --cov --cov-report=term-missing
+
+      # The OpenAPI schema is the contract the React application is written
+      # against. Generating it with --fail-on-warn means a viewset that cannot
+      # describe itself breaks the build rather than the client.
+      - name: Generate the OpenAPI schema
+        working-directory: platform/backend/kre_api
+        env:
+          DJANGO_SETTINGS_MODULE: kre.settings.test
+        run: python manage.py spectacular --fail-on-warn --file /tmp/openapi.yaml
+
+      # Section 12: a fresh environment must build from version-controlled
+      # configuration. Seeding on a clean database proves the migrations and
+      # the demonstration path both still work.
+      - name: Seed a clean installation
+        working-directory: platform/backend/kre_api
+        env:
+          DJANGO_SETTINGS_MODULE: kre.settings.test
+        run: |
+          python - <<'PY'
+          import django
+          django.setup()
+          from django.test.utils import setup_test_environment, teardown_test_environment
+          from django.test.runner import DiscoverRunner
+          from django.core.management import call_command
+
+          setup_test_environment()
+          runner = DiscoverRunner(verbosity=0, interactive=False)
+          config = runner.setup_databases()
+          try:
+              call_command("seed_demo", verbosity=1)
+          finally:
+              runner.teardown_databases(config)
+              teardown_test_environment()
+          PY
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: platform/frontend/package-lock.json
+
+      - name: Install
+        working-directory: platform/frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: platform/frontend
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: platform/frontend
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: platform/frontend
+        run: npm run test
+
+      - name: Build
+        working-directory: platform/frontend
+        run: npm run build
+
+  images:
+    name: Container images
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, frontend, keys, converter]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: platform
+          file: platform/deploy/images/Dockerfile.${{ matrix.image }}
+          push: false
+          load: true
+          tags: kre-${{ matrix.image }}:ci
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      # Section 10 requires dependency and image scanning, with a software bill
+      # of materials for releases.
+      - name: Scan ${{ matrix.image }}
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: kre-${{ matrix.image }}:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+  compose:
+    name: Compose configuration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Catches a malformed compose file or an unset required variable before
+      # anyone tries to bring the stack up.
+      - name: Validate the compose file
+        run: |
+          cp deploy/.env.example .env
+          sed -i 's/^KRE_SECRET_KEY=$/KRE_SECRET_KEY=ci-only-not-a-real-secret/' .env
+          sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci-only/' .env
+          sed -i 's/^MINIO_ROOT_PASSWORD=$/MINIO_ROOT_PASSWORD=ci-only-secret/' .env
+          sed -i 's/^OASIS_ADMIN_PASS=$/OASIS_ADMIN_PASS=ci-only/' .env
+          docker compose -f deploy/docker-compose.yml --env-file .env config --quiet
+          docker compose -f deploy/docker-compose.yml --env-file .env --profile engines config --quiet

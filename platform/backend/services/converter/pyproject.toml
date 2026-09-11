@@ -1,0 +1,16 @@
+[project]
+name = "kre-converter"
+version = "0.1.0"
+description = "KRE OpenQuake to Oasis converter."
+requires-python = ">=3.11"
+dependencies = ["kre-core"]
+
+[project.optional-dependencies]
+hdf5 = ["h5py>=3.11", "numpy>=1.26"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["kre_converter*"]
