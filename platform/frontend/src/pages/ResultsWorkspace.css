@@ -1,0 +1,83 @@
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.results__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.results__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.notice + .results__metrics {
+  margin-top: var(--space-4);
+}
+
+/* The caveat block is visually attached to the metrics above it, because
+   section 9 requires the two to be read together. */
+.caveats {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--kre-blue);
+  border-radius: var(--radius-md);
+}
+
+.caveats__heading {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--grey-600);
+  margin-bottom: var(--space-3);
+}
+
+.caveats__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+.caveats__fact dt {
+  font-size: var(--text-xs);
+  color: var(--grey-600);
+}
+
+.caveats__fact dd {
+  margin: 2px 0 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.caveats__uncertainty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.caveats__uncertainty li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+.caveats__source {
+  text-transform: capitalize;
+}
+
+.disclosure + .caveats {
+  margin-top: var(--space-4);
+}

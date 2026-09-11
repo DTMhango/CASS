@@ -1,0 +1,44 @@
+.context-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  min-height: var(--context-bar-height);
+  padding: var(--space-2) var(--space-6);
+  background: var(--kre-blue-subtle);
+  border-bottom: 1px solid var(--kre-blue-border);
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
+.context-bar__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.context-bar__label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--grey-600);
+}
+
+.context-bar__value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 500;
+  min-width: 0;
+}
+
+.context-bar__version {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--grey-0);
+  border: 1px solid var(--kre-blue-border);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}

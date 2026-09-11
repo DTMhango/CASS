@@ -1,0 +1,144 @@
+/*
+ * KRE design tokens.
+ *
+ * Build plan section 3 sets the palette: KRE blue #234A9E as the primary
+ * action, navigation and selection colour; white as the principal workspace
+ * surface; a restrained neutral grey scale for borders, secondary text,
+ * inactive states and dense analytical views; black as the default reading
+ * colour.
+ *
+ * Two rules are encoded here rather than left to each screen.
+ *
+ * Status is never carried by colour alone. Section 3 requires non-colour
+ * status cues for WCAG 2.1 AA, so every status token pairs with a glyph and a
+ * text label in the components that use it.
+ *
+ * Assumed values look different from reported ones. Section 8 requires an
+ * analyst to tell at a glance which attributes are inferred, so the evidence
+ * tokens below are part of the design system, not a one-off style.
+ */
+
+:root {
+  /* -- brand ------------------------------------------------------------ */
+  --kre-blue: #234a9e;
+  --kre-blue-hover: #1c3c80;
+  --kre-blue-active: #17326b;
+  --kre-blue-subtle: #eef2fb;
+  --kre-blue-border: #c3d0ec;
+  /* 3:1 against white: for large text and non-text indicators only. */
+  --kre-blue-light: #5b7fc7;
+
+  /* -- neutrals --------------------------------------------------------- */
+  --grey-0: #ffffff;
+  --grey-25: #fbfcfd;
+  --grey-50: #f5f6f8;
+  --grey-100: #eceef2;
+  --grey-200: #dcdfe6;
+  --grey-300: #c3c8d2;
+  /* 4.6:1 on white: the lightest grey permitted for body-size text. */
+  --grey-500: #6b7280;
+  --grey-600: #545a66;
+  --grey-700: #3d424c;
+  --grey-900: #1a1d23;
+  --ink: #000000;
+
+  /* -- status ----------------------------------------------------------- */
+  --status-ok: #1a7f4b;
+  --status-ok-subtle: #e8f5ee;
+  --status-warning: #8a5a00;
+  --status-warning-subtle: #fdf3e0;
+  --status-error: #b3261e;
+  --status-error-subtle: #fdecea;
+  --status-info: var(--kre-blue);
+  --status-info-subtle: var(--kre-blue-subtle);
+  --status-idle: var(--grey-500);
+  --status-idle-subtle: var(--grey-100);
+
+  /* -- evidence --------------------------------------------------------- */
+  /* Reported data reads as ordinary text. Inferred values carry a tint and a
+     dotted underline, so the distinction survives greyscale printing. */
+  --evidence-reported-ink: var(--ink);
+  --evidence-assumed-ink: #5b4a00;
+  --evidence-assumed-surface: #fdfaef;
+  --evidence-assumed-rule: #b99a2e;
+  --evidence-override-ink: #6b2d86;
+  --evidence-override-surface: #f7f0fa;
+
+  /* -- surfaces --------------------------------------------------------- */
+  --surface-canvas: var(--grey-50);
+  --surface-raised: var(--grey-0);
+  --surface-sunken: var(--grey-25);
+  --surface-rail: #14243f;
+  --surface-rail-hover: #1e3358;
+  --surface-rail-active: var(--kre-blue);
+
+  /* -- borders and shape ------------------------------------------------ */
+  --border-subtle: var(--grey-200);
+  --border-strong: var(--grey-300);
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* -- elevation -------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.1);
+  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.14);
+
+  /* -- type ------------------------------------------------------------- */
+  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  /* Tabular figures matter: loss tables must align by digit. */
+  --font-mono: "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* -- spacing ---------------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* -- layout ----------------------------------------------------------- */
+  --rail-width: 232px;
+  --rail-width-collapsed: 60px;
+  --header-height: 56px;
+  --context-bar-height: 40px;
+
+  /* -- charts ----------------------------------------------------------- */
+  /* KRE blue is reserved for the principal series. The remaining hues are
+     chosen to stay distinguishable under deuteranopia and protanopia, and to
+     separate by lightness so they survive greyscale. */
+  --chart-1: var(--kre-blue);
+  --chart-2: #b8860b;
+  --chart-3: #0f766e;
+  --chart-4: #9a3412;
+  --chart-5: #6b21a8;
+  --chart-grid: var(--grey-200);
+  --chart-axis: var(--grey-500);
+
+  --focus-ring: 0 0 0 2px var(--grey-0), 0 0 0 4px var(--kre-blue);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

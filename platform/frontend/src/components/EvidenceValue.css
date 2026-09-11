@@ -1,0 +1,75 @@
+/* Observed values read as ordinary text; the mark is the only addition, so a
+   dense table of reported data stays quiet. */
+.evidence {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.evidence__mark {
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.evidence--observed .evidence__value {
+  color: var(--evidence-reported-ink);
+}
+
+.evidence--observed .evidence__mark {
+  color: var(--grey-600);
+  background: var(--grey-100);
+  border-color: var(--border-subtle);
+}
+
+/* Assumed values carry a tint and a dotted rule. Both survive greyscale
+   printing, which colour alone would not. */
+.evidence--assumed .evidence__value {
+  color: var(--evidence-assumed-ink);
+  background: var(--evidence-assumed-surface);
+  border-bottom: 1px dotted var(--evidence-assumed-rule);
+  padding: 0 2px;
+}
+
+.evidence--assumed .evidence__mark {
+  color: var(--evidence-assumed-ink);
+  background: var(--evidence-assumed-surface);
+  border-color: var(--evidence-assumed-rule);
+}
+
+.evidence--override .evidence__value {
+  color: var(--evidence-override-ink);
+  background: var(--evidence-override-surface);
+  border-bottom: 1px dashed var(--evidence-override-ink);
+  padding: 0 2px;
+}
+
+.evidence--override .evidence__mark {
+  color: var(--evidence-override-ink);
+  background: var(--evidence-override-surface);
+  border-color: var(--evidence-override-ink);
+}
+
+.evidence-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--grey-600);
+}
+
+.evidence-legend__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.evidence-legend dt,
+.evidence-legend dd {
+  margin: 0;
+}
