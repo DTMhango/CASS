@@ -1,0 +1,13 @@
+[project]
+name = "kre-adapters"
+version = "0.1.0"
+description = "KRE engine adapters: the versioned boundary to OpenQuake and Oasis."
+requires-python = ">=3.11"
+dependencies = ["kre-core", "requests>=2.32"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["kre_adapters*"]

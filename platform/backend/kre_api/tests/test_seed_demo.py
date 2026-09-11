@@ -126,6 +126,22 @@ def test_piwind_baseline_supports_every_perspective(seeded):
     assert available == {"ground_up", "insured", "reinsurance"}
 
 
+def test_reseeding_restores_a_missing_regression_baseline(seeded, capsys):
+    """A re-run must attempt every portfolio, not stop at the first one present.
+
+    PiWind seeding used to be nested inside the demonstration-portfolio branch,
+    so a second run that found the demonstration portfolio returned early and
+    never created the regression baseline.
+    """
+    ExposureVersion.objects.filter(name="PiWind baseline").delete()
+    assert not ExposureVersion.objects.filter(name="PiWind baseline").exists()
+
+    call_command("seed_demo", verbosity=0)
+    capsys.readouterr()
+
+    assert ExposureVersion.objects.filter(name="PiWind baseline").exists()
+
+
 def test_seed_is_idempotent(seeded, capsys):
     call_command("seed_demo", verbosity=0)
     capsys.readouterr()

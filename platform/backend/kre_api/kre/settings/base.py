@@ -130,6 +130,11 @@ KRE_BUCKETS = {
     "result": env("KRE_BUCKET_RESULT", "kre-result"),
 }
 
+#: Cross-service fixtures, including the official PiWind exposure. The
+#: repository layout and the container layout differ, so the location is a
+#: setting rather than a walk up from __file__.
+KRE_FIXTURE_ROOT = env("KRE_FIXTURE_ROOT", str(BASE_DIR.parent / "tests" / "fixtures"))
+
 #: Largest upload the API will register. Larger scientific artifacts are
 #: written by workers directly into the store, never through Django.
 KRE_MAX_UPLOAD_BYTES = int(env("KRE_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))

@@ -29,6 +29,10 @@ RUN pip install --no-cache-dir ./packages/kre_core ./packages/kre_oed
 COPY backend/kre_api ./kre_api
 COPY backend/adapters ./adapters
 
+# The official PiWind exposure, which section 12 makes the end-to-end
+# regression baseline. Small, and needed by seed_demo on a clean install.
+COPY tests/fixtures ./tests/fixtures
+
 # Run as a non-root user. Section 10 requires least privilege, and a container
 # that writes portfolio data has no reason to be root.
 RUN useradd --create-home --uid 10001 kre \

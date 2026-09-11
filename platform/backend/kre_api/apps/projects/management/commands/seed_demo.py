@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
@@ -31,9 +32,19 @@ from apps.modelregistry.models import (
 from apps.projects.models import Project, ProjectMembership, ProjectRole
 from kre_oed.schema import FileKind
 
-# .../platform/backend/kre_api/apps/projects/management/commands/seed_demo.py
-# parents[6] is platform/, which holds the shared cross-service fixtures.
-FIXTURES = Path(__file__).resolve().parents[6] / "tests" / "fixtures" / "piwind"
+
+def _fixture_root() -> Path:
+    """Where the shared fixtures live.
+
+    The repository puts them at platform/tests/fixtures; the container copies
+    them to /app/tests/fixtures. The setting names whichever applies.
+    """
+    configured = Path(settings.KRE_FIXTURE_ROOT) / "piwind"
+    if configured.is_dir():
+        return configured
+    # Fall back to the repository layout, for a checkout run outside Docker
+    # with no setting overridden.
+    return Path(__file__).resolve().parents[6] / "tests" / "fixtures" / "piwind"
 
 DEMO_PASSWORD = "kre-demo-password"
 
@@ -72,6 +83,10 @@ class Command(BaseCommand):
         model_version = self._seed_model(users["modeller"])
         self._seed_assumption_sets(users["modeller"])
         exposure = self._seed_exposure(project, users["analyst"])
+        # Seeded alongside the demonstration portfolio rather than inside it:
+        # nesting the two meant a re-run that found the demonstration portfolio
+        # returned early and never attempted the regression baseline.
+        self._seed_piwind(project, users["analyst"])
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("Demonstration workspace ready."))
@@ -305,15 +320,14 @@ class Command(BaseCommand):
         )
         exposure_services.run_validation(exposure, actor=analyst)
         self.stdout.write("created and validated the demonstration portfolio")
-
-        self._seed_piwind(project, analyst)
         return exposure
 
     def _seed_piwind(self, project: Project, analyst: User) -> None:
         """The official PiWind portfolio, as the section 12 regression baseline."""
-        if not FIXTURES.is_dir():
+        fixtures = _fixture_root()
+        if not fixtures.is_dir():
             self.stdout.write(
-                self.style.WARNING(f"PiWind fixtures not found at {FIXTURES}; skipping")
+                self.style.WARNING(f"PiWind fixtures not found at {fixtures}; skipping")
             )
             return
         if ExposureVersion.objects.filter(project=project, name="PiWind baseline").exists():
@@ -334,7 +348,7 @@ class Command(BaseCommand):
             (FileKind.REINS_INFO, "SourceReinsInfoOEDPiWind.csv"),
             (FileKind.REINS_SCOPE, "SourceReinsScopeOEDPiWind.csv"),
         ):
-            path = FIXTURES / filename
+            path = fixtures / filename
             if not path.is_file():
                 raise CommandError(f"missing PiWind fixture {path}")
             exposure_services.attach_file(

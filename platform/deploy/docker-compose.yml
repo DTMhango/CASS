@@ -160,7 +160,10 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "celery", "-A", "kre", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      # CMD-SHELL, not CMD: the exec form runs without a shell, so $$HOSTNAME
+      # would be pinged literally and the check would always fail while the
+      # worker was in fact healthy.
+      test: ["CMD-SHELL", "celery -A kre inspect ping -d celery@$$(hostname) || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5

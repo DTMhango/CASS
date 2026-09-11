@@ -11,24 +11,36 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Portfolio and model data are confidential; nothing here should be cached
-    # by an intermediary.
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "same-origin" always;
+    # nginx discards every inherited add_header in any location that declares
+    # one of its own, so the security headers are repeated in each location
+    # rather than set once on the server. Setting them once here looks correct
+    # and silently produces responses without them.
+    #
+    # Portfolio and model data are confidential, so these are not optional.
 
-    # Hashed asset filenames are safe to cache for a long time; index.html is
-    # not, or an upgraded installation would keep serving the old application.
     location /assets/ {
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "same-origin" always;
+        # Asset filenames are content-hashed, so they can be cached hard.
+        add_header Cache-Control "public, immutable" always;
         expires 1y;
-        add_header Cache-Control "public, immutable";
     }
 
     location = /index.html {
-        add_header Cache-Control "no-cache, must-revalidate";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "same-origin" always;
+        # index.html must not be cached, or an upgraded installation would keep
+        # serving the previous application against the new API.
+        add_header Cache-Control "no-cache, must-revalidate" always;
     }
 
     location /api/ {
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "same-origin" always;
+
         proxy_pass ${KRE_API_ORIGIN};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -52,6 +64,9 @@ server {
     # The interface is a single-page application: unknown paths are routes,
     # not missing files.
     location / {
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "same-origin" always;
         try_files $uri $uri/ /index.html;
     }
 }
