@@ -1,0 +1,15 @@
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "C4", "DJ"]
+ignore = ["E501"]
+
+[lint.isort]
+# Without this, the shared packages and the Django apps are treated as
+# third-party and sorted above django and rest_framework.
+known-first-party = ["apps", "kre", "kre_core", "kre_oed", "kre_converter", "kre_keys", "kre_adapters"]
+
+[lint.per-file-ignores]
+"*/migrations/*" = ["E", "F", "I", "UP", "B", "DJ"]
+"*/settings/*" = ["F403", "F405"]

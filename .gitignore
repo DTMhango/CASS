@@ -1,0 +1,42 @@
+# Local engine scratch environments (not part of the platform repository)
+.native_oasis_test/
+.piwind_e2e_main/
+qa_render/
+
+# Pinned upstream GEM clones carry their own .git; tracked via models/gem/*/MODEL_MANIFEST.md
+models/gem/*/global_exposure_model/
+models/gem/*/global_vulnerability_model/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local runtime state
+platform/.env
+platform/.artifacts/
+platform/**/db.sqlite3
+platform/**/staticfiles/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+
+# Backend local state
+platform/backend/.venv/
+platform/backend/.test-artifacts/
