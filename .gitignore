@@ -49,3 +49,7 @@ platform/backend/.test-artifacts/
 # Generated deployment records
 platform/deploy/image-digests.txt
 platform/model_data/
+
+# Confidential portfolio extracts. Commit only masked/synthetic structural fixtures.
+premium_policies_2026-06-30_geocoded.xlsx
+data/private/

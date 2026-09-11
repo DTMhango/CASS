@@ -11,8 +11,8 @@ This plan is the product and engineering baseline. Model assumptions remain subj
 
 | Prepared for | Klapton Reinsurance PLC |
 | --- | --- |
-| Planning date | 11 September 2026 |
-| Document version | 1.5 SA-First Converter Baseline |
+| Planning date | 12 September 2026 |
+| Document version | 1.6 Geocoded Portfolio Test Baseline |
 | Initial peril | Earthquake |
 | Pilot countries | Indonesia and Nepal |
 | Deployment | KRE servers or approved local Docker installations |
@@ -47,6 +47,8 @@ The first technical model gate is an SA-only prototype using SA(0.3), SA(0.6) an
 **Current Evidence**
 
 The official PiWind model has already completed end to end in the Oasis 2.5.7 model worker container against a Windows bind-mounted workspace. The test produced ground-up, insured and reinsurance outputs and passed the model validation check. This proves the selected local container boundary. It does not yet prove earthquake model correctness, production capacity or platform security; those are explicit workstreams in this plan.
+
+A KRE portfolio snapshot dated 30 June 2026 is now available for controlled testing. It contains 1,353 policy rows and 224 geocoded risk-location rows linked to 213 businesses across Indonesia and Nepal. All location rows have valid coordinate pairs, but 115 require review. `gross_limit` is confirmed as TIV at KRE's share, all monetary values are USD and every policy is assumed to cover earthquake. Total policy TIV is USD 3.328 billion, of which USD 822.817 million belongs to businesses with coordinates. The extract remains incomplete for vulnerability selection because it lacks coverage-component values and building attributes. It is scoped first as an import, hierarchy, geospatial and workflow asset, then as a KRE-share research loss portfolio under explicit allocation and enrichment assumptions. Detailed implementation instructions are in [KRE Geocoded Portfolio Test Dataset Integration Instructions](KRE%20Geocoded%20Portfolio%20Test%20Dataset%20Integration%20Instructions.md).
 
 **Recommended Release Boundary**
 
@@ -532,6 +534,14 @@ GEM exposure represents the general building stock and must not be treated as a 
 
 Release one will support at least three approved, versioned assumption sets: Baseline, More Robust and More Vulnerable. Later releases may add stochastic sampling once scenario behaviour, performance and explanation are validated.
 
+### Available KRE geocoded portfolio test extract
+
+The 30 June 2026 KRE extract is the first representative portfolio source for the pilot. Its policy sheet contains 1,353 rows across 1,351 business identifiers. Its risk-location sheet contains 224 valid coordinate rows for 213 businesses: 194 in Indonesia and 30 in Nepal. Ten businesses have multiple locations. All primary coordinates reconcile between the sheets, but two business identifiers occur on more than one policy row and must not create a many-to-many join.
+
+The source will be divided into governed coordinate cohorts rather than filtered only on coordinate presence. Cohort A contains 63 no-review parcel, street or embedded locations and is the automated geospatial test set. Cohort B contains 46 no-review locality, postcode or administrative-level locations and is the geocoding sensitivity set. Cohort C contains 115 review-required locations and remains outside the automated benchmark until reviewed or explicitly approved. The first physical-damage benchmark requires every location of a selected business to qualify: it contains 42 Cohort A Fire businesses and locations, 39 in Indonesia and 3 in Nepal, with USD 147.045 million of KRE-share TIV. Engineering remains a separate classification workstream and Liability is excluded from physical-damage testing.
+
+The extract's `gross_limit` is confirmed as TIV at KRE's share, all monetary fields are USD and earthquake is assumed covered throughout. The full extract contains USD 3.328 billion of reported KRE-share TIV; geocoded businesses contain USD 822.817 million. This supports a real-valued research loss test, but KRE must not apply the share again or call the output 100%-of-risk ground-up loss. The source does not split TIV by building, contents, machinery, stock or business interruption. Ten multi-location businesses hold USD 55.176 million of geocoded TIV. In the absence of site-value evidence, the baseline allocates each policy's TIV equally across all its locations; required sensitivities concentrate 70% at the primary site and calculate a 100%-at-each-site loss envelope. Every scenario reconciles to the policy TIV using deterministic decimal rounding. Geometry-only, KRE-share research and decision-use modes remain distinct. Portfolio coordinates map to the fixed country grids; portfolio-specific OpenQuake sites are used only for validation. Source protection, mappings, cohort rules, allocation scenarios, platform work packages and acceptance tests are specified in the linked dataset integration instructions.
+
 ### Exposure quality and review workflow
 
 - Produce a field-completeness and usability profile before enrichment, segmented by country, cedant, occupancy and TIV band so systematic missingness is visible.
@@ -799,6 +809,8 @@ With overlap between platform, interface and model work, an internal earthquake 
 | Hazard implementation drifts back to portfolio-specific sites | Repeated GMF generation, high storage and inconsistent comparisons | Enforce the confirmed fixed adaptive-grid contract; permit portfolio-specific sites only for controlled validation or specialist studies |
 | Third-party data rights are unclear | Model cannot be deployed or shared | Complete a source and vulnerability licence register in phase zero |
 | GEM national stock is treated as the insured portfolio | False precision and biased vulnerability mix | Use GEM only as a conditional prior, calibrate for facultative selection and publish assumption sensitivity |
+| KRE-share TIV is treated as 100%-of-risk TIV or the share is applied twice | Misstated exposure and loss | Preserve `gross_limit` as reported KRE-share USD TIV, label the output KRE-share gross damage and reconcile every allocation without another share adjustment |
+| Coordinate presence is treated as coordinate quality | False concentration and grid precision | Use governed precision/review cohorts, test spatial sensitivity and retain repeated locations without coordinate-based deduplication |
 | Assumed attributes overwrite reported data | Loss of lineage and unrepeatable decisions | Preserve immutable raw exposure and attribute-level evidence, confidence and assumption versions |
 | Weighted exposure splitting duplicates or loses TIV | Material loss misstatement | Require record-, location- and portfolio-level TIV reconciliation for every enrichment run |
 | Secondary perils or BI are omitted without disclosure | Earthquake loss is understated or misinterpreted | Publish a peril and coverage scope statement beside every approved result |
@@ -829,7 +841,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 | Multi-IMT representation | Prototype correlated IMT channels, custom GUL and OpenQuake-loss fallback; do not default to common-IMT conversion | Open | Determines whether GEM vulnerability can be represented faithfully in Oasis |
 | Initial IMT scope | SA-only converter prototype: SA(0.3) first, then SA(0.6) and SA(1.0); PGA deferred from the prototype but not assumed unnecessary for production | Confirmed | Narrows early engineering while preventing incomplete taxonomy coverage from being presented as a full country model |
 | Deployment | KRE servers or controlled Docker installations on approved devices | Confirmed | Requires equivalent results, secure packaging, upgrades and local support procedures |
-| Portfolio scale | Measure small, median and largest expected portfolios | Open | Sets upload, mapping, queue, storage and result-view requirements |
+| Portfolio scale | The first extract contains 1,353 policies and 224 geocoded locations; larger and non-geocoded portfolios still require measurement | Partially confirmed | Provides a realistic small pilot while leaving median, maximum and enrichment workloads to be measured |
 | OED compatibility baseline | Pin the OED schema and ODS Tools version tested with the selected Oasis 2.5.x worker | Open | Controls generated fields, validation semantics and upgrade behavior |
 | Oasis static storage format | Retain governed source tables and select Parquet or binary runtime assets through performance tests | Open | Earthquake footprints may be too large for uncompressed CSV or unsuitable storage choices |
 | Input-file ownership | KRE creates business records and immutable OED; KRE keys maps exposure; pinned OasisLMF creates portfolio kernel and financial files | Proposed | Prevents duplicated Oasis logic while keeping a complete user-facing workflow |
@@ -848,7 +860,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 
 1. Approve the Indonesia and Nepal earthquake source-model versions, data rights, peril scope and model approval roles.
 
-1. Obtain a representative, approved KRE portfolio extract and data dictionary. Profile field completeness, usability, geocoding quality, TIV components, signed shares, occupancy evidence and systematic missingness by cedant and segment.
+1. Register the available 30 June 2026 KRE portfolio extract as a restricted immutable artifact. Implement its parser, join report and coordinate cohorts using `gross_limit` as KRE-share TIV, USD as the currency and earthquake as covered; then complete the outstanding data dictionary for TIV component allocation, multi-location allocation, financial terms and occupancy evidence.
 
 1. Approve the exposure evidence hierarchy and prototype Baseline, More Robust and More Vulnerable conditional-prior assumption sets with exact TIV reconciliation.
 
