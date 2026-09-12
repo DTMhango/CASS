@@ -23,7 +23,19 @@ local knowledge reads them, and the version will move with them.
 
 from __future__ import annotations
 
-from .enrichment import DesignEra, Enrichment, Weighting
+import pathlib
+from collections.abc import Sequence
+
+from .enrichment import (
+    DesignEra,
+    Enrichment,
+    StockPrior,
+    Weighting,
+    apply_taxonomy_mapping,
+    read_stock_prior,
+    read_taxonomy_mapping,
+)
+from .gem import LossCategory, VulnerabilityModel, read_country
 
 #: Bumped with any change to a country's eras or overrides.
 PILOT_VERSION = "0.1.0-draft"
@@ -36,10 +48,10 @@ _SHARED_QUESTIONS = (
     "only correction the published summaries support on their own; it does not "
     "make this a facultative prior. Survey, underwriting review and claims are "
     "what should replace it.",
-    "The mapping from GEM's exposure macro classes to its vulnerability "
-    "taxonomies is reconstructed from the taxonomy strings. GEM publishes the "
-    "real mapping, and it is one of the licensed assets the release manifest "
-    "records as still outstanding.",
+    "Where GEM's published taxonomy mapping is supplied, each vulnerability "
+    "function receives exactly the exposure value that maps to it. Without it "
+    "the weights fall back to macro classes reconstructed from the taxonomy "
+    "strings, which divides a class's value equally among its functions.",
     "OED construction 5100 covers both unreinforced and confined masonry, which "
     "behave very differently in a moderate shake. A risk stating it reaches both "
     "as a mixture, so the difference shows up as width rather than as a choice -- "
@@ -63,6 +75,7 @@ INDONESIA = Enrichment(
     name="id_gem_stock",
     version=PILOT_VERSION,
     country_code="ID",
+    iso3="IDN",
     weighting=Weighting.VALUE,
     design_eras=(
         DesignEra(
@@ -113,6 +126,7 @@ NEPAL = Enrichment(
     name="np_gem_stock",
     version=PILOT_VERSION,
     country_code="NP",
+    iso3="NPL",
     weighting=Weighting.VALUE,
     design_eras=(
         DesignEra(
@@ -176,3 +190,57 @@ def enrichment(country_code: str) -> Enrichment:
             + ", ".join(sorted(PILOT_ENRICHMENTS))
             + "."
         ) from None
+
+
+#: Where each pilot country sits in the GEM repositories. A table rather than a
+#: rule, because the regional folders are GEM's editorial choice and Nepal being
+#: South_Asia while Indonesia is Southeast_Asia is not derivable from anything.
+GEM_LAYOUT: dict[str, tuple[str, str]] = {
+    "ID": ("Southeast_Asia", "Indonesia"),
+    "NP": ("South_Asia", "Nepal"),
+}
+
+#: GEM's published exposure-taxonomy to vulnerability-function mapping, relative
+#: to the release root. One file for the world, keyed by ISO alpha-3.
+MAPPING_PATH = "global_exposure_model/World/summaries/Vulnerability_mapping_country.csv"
+
+
+def load(
+    root: str | pathlib.Path,
+    country_code: str,
+    *,
+    categories: Sequence[LossCategory] | None = None,
+    use_published_mapping: bool = True,
+) -> tuple[dict[LossCategory, VulnerabilityModel], StockPrior, Enrichment]:
+    """Everything one pilot country's build needs, from a GEM release directory.
+
+    The published taxonomy mapping is applied by default, so each vulnerability
+    function receives the exposure value GEM says maps to it. Passing
+    ``use_published_mapping=False`` falls back to the macro-class reconstruction
+    -- worth keeping, because comparing the two is how the difference the
+    mapping makes gets measured rather than asserted.
+    """
+    base = pathlib.Path(root)
+    chosen = enrichment(country_code)
+    region, name = GEM_LAYOUT[chosen.country_code]
+
+    models = read_country(
+        base / "global_vulnerability_model" / region / name,
+        country_code=chosen.country_code,
+        categories=categories,
+    )
+    prior = read_stock_prior(
+        base
+        / "global_exposure_model"
+        / region
+        / name
+        / "summaries"
+        / "Exposure_Summary_Taxonomy.csv",
+        country_code=chosen.country_code,
+        weighting=chosen.weighting,
+    )
+    if use_published_mapping:
+        mapping = read_taxonomy_mapping(base / MAPPING_PATH, iso3=chosen.iso3)
+        prior = apply_taxonomy_mapping(prior, mapping)
+
+    return models, prior, chosen

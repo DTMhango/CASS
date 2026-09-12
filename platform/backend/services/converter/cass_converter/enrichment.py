@@ -54,7 +54,7 @@ import dataclasses
 import enum
 import hashlib
 import pathlib
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 from .gem import GemError, OccupancyClass, Taxonomy, VulnerabilityModel
@@ -359,38 +359,76 @@ def read_stock_prior(
     )
 
 
-#: Column names GEM's ``Vulnerability_mapping_ISO3.csv`` is expected to use.
-#: Both are overridable, because this file ships with the licensed download
-#: rather than the public repository and CASS has not seen one: if the headers
-#: differ, ``read_vulnerability_mapping`` says which columns it did find rather
-#: than guessing between them.
-MAPPING_TAXONOMY_COLUMNS = ("taxonomy", "TAXONOMY", "exposure_taxonomy", "asset_taxonomy")
-MAPPING_FUNCTION_COLUMNS = (
-    "vulnerability_function",
-    "VULNERABILITY_FUNCTION",
-    "vulnerabilityFunction",
-    "vuln_function",
-    "VULN_FUNC",
-    "function_id",
-)
+#: The columns of GEM's published mapping file.
+MAPPING_COLUMNS = ("ID_0", "TAXONOMY", "VUL_MAPPING", "WEIGHT")
+
+#: How far a taxonomy's weights may sum from 1 before the file is refused.
+WEIGHT_TOLERANCE = 1e-06
 
 
-def read_vulnerability_mapping(
-    source: str | pathlib.Path,
-    *,
-    taxonomy_column: str | None = None,
-    function_column: str | None = None,
-) -> tuple[Mapping[str, str], str, str]:
-    """Read GEM's exposure-taxonomy to vulnerability-function mapping.
+@dataclasses.dataclass(frozen=True, slots=True)
+class TaxonomyMapping:
+    """GEM's own mapping from exposure taxonomy to vulnerability function.
 
-    Returns the mapping, the file name and its checksum, so a build records
-    which mapping it used alongside which vulnerability model.
+    Published as ``World/summaries/Vulnerability_mapping_country.csv`` in the
+    exposure repository -- one row per country, exposure taxonomy and target
+    function, with a weight. This is the file that makes ``macro_class``
+    unnecessary: rather than grouping a vulnerability taxonomy by reading its
+    string and dividing a macro class's value equally among its members, each
+    function receives exactly the exposure value GEM says maps to it.
 
-    This is what replaces the reconstruction in ``macro_class``. Reading a
-    taxonomy string to guess its macro class works and is coarse -- a macro
-    class holding four functions divides its value equally between them. GEM's
-    mapping says which function each exposure taxonomy actually uses, so every
-    function gets the value that belongs to it.
+    The weight is not decoration. An exposure taxonomy banded as ``H:3-4``
+    reaches two published functions, and GEM states the split -- 70% to the
+    three-storey function and 30% to the four-storey one for Nepali confined
+    masonry. That is the same mixture idea CASS applies to a Klapton Re risk,
+    published one level up.
+    """
+
+    country_code: str
+    entries: Mapping[str, tuple[tuple[str, float], ...]]
+    source_name: str
+    checksum: str
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+    @property
+    def targets(self) -> frozenset[str]:
+        """Every vulnerability function this mapping can reach."""
+        return frozenset(
+            function for values in self.entries.values() for function, _ in values
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "country_code": self.country_code,
+            "source_name": self.source_name,
+            "checksum": self.checksum,
+            "exposure_taxonomies": len(self.entries),
+            "vulnerability_functions": len(self.targets),
+            "weighted_taxonomies": sum(
+                1 for values in self.entries.values() if len(values) > 1
+            ),
+        }
+
+
+def read_taxonomy_mapping(
+    source: str | pathlib.Path, *, iso3: str
+) -> TaxonomyMapping:
+    """Read one country out of GEM's vulnerability mapping file.
+
+    Two shapes of repeated row appear in the published file and they mean
+    different things, so they are handled differently rather than both being
+    treated as a mixture.
+
+    An identical row repeated -- same taxonomy, same target, same weight --
+    is a duplicate. Indonesia has six, and they are exactly the six taxonomies
+    its exposure summary splits into urban and rural, so the mapping carries a
+    row per settlement class. Summing them would double the weight.
+
+    Different targets with weights summing to one is a real mixture. Nepal has
+    five, where an exposure taxonomy banded across two storey counts is split
+    between the two published functions.
     """
     path = pathlib.Path(source)
     try:
@@ -402,61 +440,78 @@ def read_vulnerability_mapping(
     if not rows:
         raise EnrichmentError(f"{path.name} has no rows.")
 
-    columns = list(rows[0])
-    taxonomy_key = taxonomy_column or _first_present(columns, MAPPING_TAXONOMY_COLUMNS)
-    function_key = function_column or _first_present(columns, MAPPING_FUNCTION_COLUMNS)
-    if taxonomy_key is None or function_key is None:
+    missing = sorted(set(MAPPING_COLUMNS) - set(rows[0]))
+    if missing:
         raise EnrichmentError(
-            f"{path.name} does not carry the columns this reader expects. It has: "
-            + ", ".join(columns)
-            + ". Pass taxonomy_column and function_column to name them explicitly; "
-            "the file is a licensed GEM asset and CASS does not assume its headers."
+            f"{path.name} is missing columns: {', '.join(missing)}. It should be "
+            "GEM's Vulnerability_mapping_country.csv."
         )
 
-    mapping: dict[str, str] = {}
+    wanted = iso3.strip().upper()
+    seen: dict[str, dict[str, float]] = {}
     for row in rows:
-        exposure = (row.get(taxonomy_key) or "").strip()
-        function = (row.get(function_key) or "").strip()
-        if not exposure or not function:
+        if (row.get("ID_0") or "").strip().upper() != wanted:
             continue
-        existing = mapping.get(exposure)
-        if existing is not None and existing != function:
+        taxonomy = (row.get("TAXONOMY") or "").strip()
+        function = (row.get("VUL_MAPPING") or "").strip()
+        if not taxonomy or not function:
+            continue
+        try:
+            weight = float((row.get("WEIGHT") or "").strip())
+        except ValueError:
             raise EnrichmentError(
-                f"{path.name} maps {exposure!r} to both {existing!r} and "
-                f"{function!r}. Which applied would depend on row order."
+                f"{path.name}: {taxonomy!r} has an unreadable weight "
+                f"{row.get('WEIGHT')!r}."
+            ) from None
+        if weight <= 0.0:
+            continue
+
+        targets = seen.setdefault(taxonomy, {})
+        existing = targets.get(function)
+        if existing is None:
+            targets[function] = weight
+        elif abs(existing - weight) > WEIGHT_TOLERANCE:
+            raise EnrichmentError(
+                f"{path.name}: {taxonomy!r} maps to {function!r} at two different "
+                f"weights ({existing} and {weight}). Which applied would depend on "
+                "row order."
             )
-        mapping[exposure] = function
+        # An identical repeat is a duplicate row, not a second share of the
+        # mixture, so the weight is kept rather than added.
 
-    if not mapping:
+    if not seen:
         raise EnrichmentError(
-            f"{path.name} carries no usable rows in {taxonomy_key!r}/{function_key!r}."
+            f"{path.name} carries no rows for {wanted!r}. It is keyed by ISO 3166 "
+            "alpha-3, so Indonesia is IDN and Nepal is NPL."
         )
-    return mapping, path.name, hashlib.sha256(payload).hexdigest()
+
+    entries: dict[str, tuple[tuple[str, float], ...]] = {}
+    for taxonomy, targets in seen.items():
+        total = sum(targets.values())
+        if abs(total - 1.0) > WEIGHT_TOLERANCE:
+            raise EnrichmentError(
+                f"{path.name}: the weights for {taxonomy!r} sum to {total} rather "
+                "than 1, so the value mapped through it would be scaled."
+            )
+        entries[taxonomy] = tuple(sorted(targets.items()))
+
+    return TaxonomyMapping(
+        country_code=wanted,
+        entries=entries,
+        source_name=path.name,
+        checksum=hashlib.sha256(payload).hexdigest(),
+    )
 
 
-def _first_present(columns: Sequence[str], candidates: Sequence[str]) -> str | None:
-    lowered = {item.lower(): item for item in columns}
-    for candidate in candidates:
-        found = lowered.get(candidate.lower())
-        if found is not None:
-            return found
-    return None
-
-
-def apply_vulnerability_mapping(
-    prior: StockPrior,
-    mapping: Mapping[str, str],
-    *,
-    source_name: str = "",
-    checksum: str = "",
-) -> StockPrior:
+def apply_taxonomy_mapping(prior: StockPrior, mapping: TaxonomyMapping) -> StockPrior:
     """A prior that weights vulnerability functions directly, not macro classes.
 
-    Every exposure taxonomy's value is attributed to the vulnerability function
-    GEM says it uses, and the shares are normalised within each occupancy. An
-    exposure taxonomy the mapping does not cover is left out and reported by
-    ``mapping_coverage``, rather than being spread over the functions that are
-    covered -- that would move value onto buildings it does not belong to.
+    Each exposure taxonomy's value is attributed to the functions GEM says it
+    maps to, in the weights GEM states, and the shares are normalised within
+    each occupancy. An exposure taxonomy the mapping does not cover is left out
+    rather than spread over the ones it does -- that would move value onto
+    buildings it does not belong to -- and ``mapping_coverage`` reports how much
+    was left out.
     """
     if not prior.by_exposure_taxonomy:
         raise EnrichmentError(
@@ -466,12 +521,13 @@ def apply_vulnerability_mapping(
 
     totals: dict[tuple[str, str], float] = {}
     for (occupancy, exposure), (buildings, cost) in prior.by_exposure_taxonomy.items():
-        function = mapping.get(exposure)
-        if function is None:
+        targets = mapping.entries.get(exposure)
+        if not targets:
             continue
         amount = cost if prior.weighting is Weighting.VALUE else buildings
-        key = (occupancy, function)
-        totals[key] = totals.get(key, 0.0) + amount
+        for function, weight in targets:
+            key = (occupancy, function)
+            totals[key] = totals.get(key, 0.0) + amount * weight
 
     by_occupancy: dict[str, float] = {}
     for (occupancy, _), amount in totals.items():
@@ -491,24 +547,23 @@ def apply_vulnerability_mapping(
     return dataclasses.replace(
         prior,
         by_taxonomy=shares,
-        mapping_source=source_name,
-        mapping_checksum=checksum,
+        mapping_source=mapping.source_name,
+        mapping_checksum=mapping.checksum,
     )
 
 
-def mapping_coverage(
-    prior: StockPrior, mapping: Mapping[str, str]
-) -> dict[str, Any]:
+def mapping_coverage(prior: StockPrior, mapping: TaxonomyMapping) -> dict[str, Any]:
     """How much of the country's value the mapping actually places.
 
-    A mapping that covers 99% of value is fine and a mapping that covers 60% is
-    a finding, and the difference is invisible unless somebody measures it.
+    A mapping covering 99% of value is fine and one covering 60% is a finding,
+    and the difference is invisible unless somebody measures it. Both pilot
+    countries currently come out at 100%.
     """
     covered = uncovered = 0.0
     missing: list[str] = []
     for (_, exposure), (buildings, cost) in prior.by_exposure_taxonomy.items():
         amount = cost if prior.weighting is Weighting.VALUE else buildings
-        if exposure in mapping:
+        if exposure in mapping.entries:
             covered += amount
         else:
             uncovered += amount
@@ -517,11 +572,13 @@ def mapping_coverage(
     total = covered + uncovered
     return {
         "country_code": prior.country_code,
+        "mapping_source": mapping.source_name,
         "weighting": str(prior.weighting),
         "covered_share": covered / total if total else 0.0,
         "uncovered_taxonomies": sorted(set(missing))[:20],
         "uncovered_count": len(set(missing)),
     }
+
 
 def _number(value: str | None) -> float:
     try:
@@ -611,6 +668,9 @@ class Mixture:
     def __len__(self) -> int:
         return len(self.candidates)
 
+    def __iter__(self) -> Iterator[Candidate]:
+        return iter(self.candidates)
+
     @property
     def resolved(self) -> bool:
         return bool(self.candidates)
@@ -678,6 +738,11 @@ class Enrichment:
     name: str
     version: str
     country_code: str
+    #: ISO 3166 alpha-3, because GEM's mapping file is keyed by it and the rest
+    #: of CASS is keyed by alpha-2. Stated rather than derived: there is no rule
+    #: that turns ID into IDN, only a table, and a wrong one would silently read
+    #: another country's mapping.
+    iso3: str = ""
     design_eras: tuple[DesignEra, ...] = ()
     weighting: Weighting = Weighting.VALUE
     #: Candidates below this height are dropped. Unset by default. A model
@@ -915,6 +980,7 @@ class Enrichment:
             "version": self.version,
             "reference": self.reference,
             "country_code": self.country_code,
+            "iso3": self.iso3,
             "weighting": str(self.weighting),
             "minimum_storeys": self.minimum_storeys,
             "weight_overrides": dict(self.weight_overrides),

@@ -19,7 +19,7 @@ import pytest
 from cass_converter import pilot_enrichment
 from cass_converter.bins import DamageBinSet, IntensityBinSet, log_bins, oasis_damage_bins
 from cass_converter.enrichment import Attributes, Evidence, OccupancyClass, read_stock_prior
-from cass_converter.gem import LossCategory, read_country
+from cass_converter.gem import LossCategory
 from cass_converter.model_build import (
     build_country,
     dictionary,
@@ -41,20 +41,9 @@ IMTS = ("PGA", "SA(0.3)", "SA(0.6)", "SA(1.0)")
 COUNTRIES = {"ID": ("Southeast_Asia", "Indonesia"), "NP": ("South_Asia", "Nepal")}
 
 
-def sources(code: str):
-    region, name = COUNTRIES[code]
-    root = Path(GEM_PATH)
-    models = read_country(
-        root / "global_vulnerability_model" / region / name, country_code=code
-    )
-    prior = read_stock_prior(
-        root
-        / "global_exposure_model"
-        / region
-        / name
-        / "summaries"
-        / "Exposure_Summary_Taxonomy.csv",
-        country_code=code,
+def sources(code: str, *, mapped: bool = True):
+    models, prior, _ = pilot_enrichment.load(
+        GEM_PATH, code, use_published_mapping=mapped
     )
     return models, prior
 
@@ -305,4 +294,117 @@ def test_the_open_questions_survive_into_the_build(code, policy, bins):
     build = built(code, policy, bins)
     questions = build.as_dict()["open_questions"]
     assert any("facultative" in item for item in questions)
-    assert any("licensed" in item for item in questions)
+    assert any("Only shake is modelled" in item for item in questions)
+
+
+# -- GEM's published mapping, now that it is to hand --------------------------------
+
+@needs_gem
+@pytest.mark.parametrize("code", ["ID", "NP"])
+def test_the_published_mapping_places_every_dollar_of_stock(code):
+    """100% in both countries, and the taxonomy strings match exactly.
+
+    Worth asserting rather than assuming: the exposure summaries and the
+    mapping are separate files, and a release that renamed a taxonomy in one
+    would leave value with nowhere to go.
+    """
+    from cass_converter.enrichment import mapping_coverage, read_taxonomy_mapping
+
+    enrichment = pilot_enrichment.enrichment(code)
+    _, prior = sources(code, mapped=False)
+    mapping = read_taxonomy_mapping(
+        Path(GEM_PATH) / pilot_enrichment.MAPPING_PATH, iso3=enrichment.iso3
+    )
+    assert mapping_coverage(prior, mapping)["covered_share"] == pytest.approx(1.0)
+
+
+@needs_gem
+@pytest.mark.parametrize("code", ["ID", "NP"])
+def test_the_mapping_reaches_every_published_function(code):
+    """A function nothing maps to would be a curve no risk could ever use."""
+    from cass_converter.enrichment import read_taxonomy_mapping
+
+    enrichment = pilot_enrichment.enrichment(code)
+    models, _ = sources(code)
+    mapping = read_taxonomy_mapping(
+        Path(GEM_PATH) / pilot_enrichment.MAPPING_PATH, iso3=enrichment.iso3
+    )
+    published = set(models[LossCategory.STRUCTURAL].by_taxonomy)
+    assert mapping.targets == published
+
+
+@needs_gem
+def test_indonesias_repeated_rows_are_duplicates_and_nepals_are_mixtures():
+    """The same shape in the file means two different things by country.
+
+    Indonesia repeats six taxonomies with an identical target and weight -- its
+    six urban/rural exposure splits. Nepal states five real mixtures, where an
+    exposure band covering two storey counts is split between the two published
+    functions. Summing the first would double a weight; collapsing the second
+    would throw a split away.
+    """
+    from cass_converter.enrichment import read_taxonomy_mapping
+
+    path = Path(GEM_PATH) / pilot_enrichment.MAPPING_PATH
+    indonesia = read_taxonomy_mapping(path, iso3="IDN")
+    nepal = read_taxonomy_mapping(path, iso3="NPL")
+
+    assert all(len(values) == 1 for values in indonesia.entries.values())
+    mixed = [values for values in nepal.entries.values() if len(values) > 1]
+    assert len(mixed) == 5
+    assert all(
+        sum(weight for _, weight in values) == pytest.approx(1.0) for values in mixed
+    )
+
+
+@needs_gem
+@pytest.mark.parametrize("code", ["ID", "NP"])
+def test_the_published_weights_are_not_the_macro_class_fallback(code):
+    """Which is the point of reading the file.
+
+    The fallback divides a macro class's value equally among its functions, so
+    a concrete mixture comes out flat. GEM's mapping gives each function the
+    value that maps to it, and the shape is nothing like flat.
+    """
+    from cass_converter.enrichment import Attributes
+
+    enrichment = pilot_enrichment.enrichment(code)
+    models, exact = sources(code)
+    _, coarse = sources(code, mapped=False)
+    structural = models[LossCategory.STRUCTURAL]
+
+    attributes = Attributes("1100", "5150")
+    flat = enrichment.resolve(attributes, structural, coarse)
+    weighted = enrichment.resolve(attributes, structural, exact)
+
+    assert coarse.uses_exact_weights is False
+    assert exact.uses_exact_weights is True
+    assert len(flat) == len(weighted)
+
+    flat_weights = [round(item.weight, 9) for item in flat.candidates]
+    exact_weights = [round(item.weight, 9) for item in weighted.candidates]
+    assert sorted(flat_weights) != pytest.approx(sorted(exact_weights))
+
+    # The fallback divides each macro class equally, so its weights repeat.
+    # GEM's mapping gives every function its own share, so they do not.
+    assert len(set(flat_weights)) < len(set(exact_weights))
+    assert len(set(exact_weights)) == len(exact_weights)
+
+
+@needs_gem
+@pytest.mark.parametrize("code", ["ID", "NP"])
+def test_the_build_records_which_weighting_produced_it(code, policy, bins):
+    """Two releases weighted differently are different models."""
+    damage, intensity = bins
+    models, prior = sources(code)
+    build = build_country(
+        enrichment=pilot_enrichment.enrichment(code),
+        models=models,
+        prior=prior,
+        intensity_bins=intensity,
+        damage_bins=damage,
+        policy=policy,
+    )
+    assert prior.uses_exact_weights
+    assert prior.mapping_checksum
+    assert build.sources["exposure_summary"] == prior.checksum

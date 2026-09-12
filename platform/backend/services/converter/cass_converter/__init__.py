@@ -37,14 +37,15 @@ from .enrichment import (
     Evidence,
     Mixture,
     StockPrior,
+    TaxonomyMapping,
     Weighting,
-    apply_vulnerability_mapping,
+    apply_taxonomy_mapping,
     coverage,
     macro_class,
     mapping_coverage,
     mixture_report,
     read_stock_prior,
-    read_vulnerability_mapping,
+    read_taxonomy_mapping,
     resolve_all,
 )
 from .footprint import (
@@ -95,7 +96,7 @@ from .occurrence import (
     empty_period_share,
     validate_occurrences,
 )
-from .pilot_enrichment import PILOT_ENRICHMENTS, enrichment
+from .pilot_enrichment import PILOT_ENRICHMENTS, enrichment, load
 from .policy import (
     ConversionPolicy,
     EventIdentity,
@@ -125,9 +126,11 @@ from .vulnerability import (
 __version__ = "0.1.0"
 
 __all__ = [
-    "read_vulnerability_mapping",
+    "load",
+    "read_taxonomy_mapping",
     "mapping_coverage",
-    "apply_vulnerability_mapping",
+    "TaxonomyMapping",
+    "apply_taxonomy_mapping",
     "Attributes",
     "BetaError",
     "Bin",

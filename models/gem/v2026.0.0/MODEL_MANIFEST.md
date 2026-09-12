@@ -21,17 +21,29 @@ The public exposure repository contains Indonesia and Nepal national, Adm1 and t
 
 The vulnerability repository contains structural, non-structural, contents and fatalities XMLs for both Indonesia and Nepal.
 
-## Outstanding licensed assets
+## Taxonomy mapping
 
-Commercial use has been cleared, but the files below still have to be requested and downloaded; clearance is not delivery. CASS reads them the moment they are placed beside the summaries.
+GEM's exposure-taxonomy to vulnerability-function mapping is published in the
+public repository, at `global_exposure_model/World/summaries/Vulnerability_mapping_country.csv`
+rather than in the country folders. It is keyed by ISO alpha-3 (`IDN`, `NPL`),
+carries a weight per target, and covers 100% of both pilot countries'
+replacement cost with taxonomy strings matching the exposure summaries exactly.
 
-| File | Where it goes | What it changes |
+CASS reads it by default. `cass_converter.pilot_enrichment.load` applies it, and
+`StockPrior.uses_exact_weights` records that it did.
+
+It matters. Without it CASS falls back to reconstructing GEM's macro classes
+from the vulnerability taxonomy strings, which divides a class's value equally
+among its functions and can mis-bin one entirely: the fallback gave Nepal's
+`CR/LFINF/CDM+ERL/H:4/COM` a nominal 0.02% of commercial concrete value because
+it reads as ductile and the summary reports no ductile commercial stock, where
+GEM's mapping gives it 28.78%.
+
+## Still outstanding
+
+| Asset | Route | What it would change |
 | --- | --- | --- |
-| `Vulnerability_mapping_IDN.csv` | `global_exposure_model/Southeast_Asia/Indonesia/` | Replaces the reconstructed macro-class grouping in `cass_converter.enrichment.macro_class` with GEM's own exposure-taxonomy to vulnerability-function mapping. Each vulnerability function then receives exactly the replacement cost that maps to it, instead of an equal share of its macro class. Read it with `read_vulnerability_mapping` and apply it with `apply_vulnerability_mapping`; `mapping_coverage` reports how much of the country's value it places. |
-| `Vulnerability_mapping_NPL.csv` | `global_exposure_model/South_Asia/Nepal/` | As above. It matters more for Nepal, where 45 residential taxonomies fall into four macro classes and the equal split inside each is at its crudest. |
-| Spatially disaggregated exposure (~1 km, `csv.gz`) | either country folder | Not yet read by CASS. It would allow the stock prior to be conditioned on administrative area rather than on the country as a whole, which is the next thing that would narrow a mixture. |
-
-Until they arrive the build runs on the reconstructed grouping and says so: every `StockPrior` carries `uses_exact_weights`, and it is `false`.
+| Spatially disaggregated exposure (~1 km, `csv.gz`) | [GEM licence request](https://www.globalquakemodel.org/license-request/global-exposure-model) | Not read by CASS. It would let the stock prior be conditioned on administrative area rather than on the country as a whole, which is the next thing that would narrow a mixture -- Jakarta's commercial stock is not Indonesia's. |
 
 ## SHA-256 — pilot-country machine-readable files
 
