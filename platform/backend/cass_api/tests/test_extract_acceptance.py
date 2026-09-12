@@ -534,7 +534,8 @@ def test_the_promoted_oed_names_no_counterparty(batch, analyst):
     assert len(rows) == 42
     assert set(rows[0]) == {
         "PortNumber", "AccNumber", "LocNumber", "CountryCode", "Latitude",
-        "Longitude", "OccupancyCode", "ConstructionCode", "LocPerilsCovered",
+        "Longitude", "OccupancyCode", "ConstructionCode", "NumberOfStoreys",
+        "LocPerilsCovered",
         "BuildingTIV", "OtherTIV", "ContentsTIV", "BITIV", "LocCurrency",
     }
     # Business references only, never a name.

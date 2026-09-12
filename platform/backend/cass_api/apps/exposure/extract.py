@@ -297,6 +297,7 @@ def _stage_risks(batch: ImportBatch, records, assignments) -> None:
                 longitude=record.get("longitude"),
                 total_insured_value=record.get("location_tiv"),
                 currency=str(record.get("currency") or "")[:8],
+                storeys=_storeys(record.get("storeys")),
                 precision=str(record.get("precision") or "")[:32],
                 needs_review=bool(record.get("needs_review")),
                 class_of_business=str(record.get("class_of_business") or "")[:120],
@@ -468,6 +469,24 @@ def _as_stream(payload: bytes):
     import io
 
     return io.BytesIO(payload)
+
+
+def _storeys(value) -> int | None:
+    """The stated storey count, or nothing where the schedule left it blank.
+
+    An unreadable value reads as unstated rather than as an error. The intake
+    validator has already reported it as a finding, and refusing the whole
+    import over one malformed height would hold up the other 223 risks -- while
+    treating the bad value as real would put a risk in the wrong height band,
+    which is worse than putting it in none.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _jsonable(values: Mapping[str, Any]) -> dict[str, Any]:

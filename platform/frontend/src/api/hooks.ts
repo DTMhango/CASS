@@ -19,11 +19,15 @@ import type {
   CatalogueModel,
   ExposurePreview,
   ExposureVersion,
+  ImportResults,
   OEDFileKind,
   Paginated,
+  PortfolioImport,
   PlatformInfo,
   Project,
   ResultSet,
+  ReviewDecisionRecord,
+  ReviewQueue,
   Run,
   RunStageEvent,
   Session,
@@ -289,5 +293,62 @@ export function useResults(projectId?: UUID) {
           projectId ? { project: projectId } : undefined,
         ),
       ),
+  });
+}
+
+// -- the import review, work package 2 ---------------------------------------
+
+export function usePortfolioImports(projectId?: UUID) {
+  return useQuery({
+    queryKey: ["portfolio-imports", projectId ?? "all"] as const,
+    queryFn: async () =>
+      rows(
+        await api.get<Paginated<PortfolioImport>>(
+          "/portfolio-imports/",
+          projectId ? { project: projectId } : undefined,
+        ),
+      ),
+  });
+}
+
+export function useImportResults(id: UUID | undefined) {
+  return useQuery({
+    queryKey: ["portfolio-imports", id ?? "", "results"] as const,
+    queryFn: () => api.get<ImportResults>(`/portfolio-imports/${id}/import-results/`),
+    enabled: Boolean(id),
+  });
+}
+
+export function useReviewQueue(id: UUID | undefined) {
+  return useQuery({
+    queryKey: ["portfolio-imports", id ?? "", "queue"] as const,
+    queryFn: () => api.get<ReviewQueue>(`/portfolio-imports/${id}/review-queue/`),
+    enabled: Boolean(id),
+  });
+}
+
+/**
+ * Record one review decision.
+ *
+ * Both queries are invalidated on success rather than patched, because a
+ * decision changes more than the row it names: a cohort override moves a
+ * location between the counts on the summary, and a storey count changes how
+ * much of the book can be modelled at all.
+ */
+export function useRecordDecision(batchId: UUID) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      locationId: UUID;
+      field: string;
+      value: string | number | null;
+      rationale: string;
+    }) =>
+      api.post<{ location: Record<string, unknown>; history: ReviewDecisionRecord[] }>(
+        `/portfolio-imports/${batchId}/locations/${input.locationId}/decide/`,
+        { field: input.field, value: input.value, rationale: input.rationale },
+      ),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: ["portfolio-imports", batchId] }),
   });
 }

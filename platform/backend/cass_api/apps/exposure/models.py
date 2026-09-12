@@ -438,6 +438,17 @@ class SourceRiskLocation(BaseModel):
     latitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True)
     longitude = models.DecimalField(max_digits=12, decimal_places=8, null=True, blank=True)
 
+    #: Storeys as the schedule stated them, or null where it did not.
+    #:
+    #: Worth more than it looks. Height decides the spectral period a structure
+    #: responds at, so a risk that states it reaches GEM candidates at one
+    #: measure and a risk that does not reaches them across four -- which no
+    #: choice of damage bins can make into a single Oasis function. On this
+    #: book a commercial reinforced-concrete risk with no storey count cannot
+    #: be answered at all until the multi-IMT representation is approved; the
+    #: same risk at two storeys resolves to PGA alone.
+    storeys = models.IntegerField(null=True, blank=True)
+
     precision = models.CharField(max_length=32, blank=True)
     needs_review = models.BooleanField(default=False)
     class_of_business = models.CharField(max_length=120, blank=True)
@@ -488,3 +499,51 @@ class SourceRiskLocation(BaseModel):
         if self.latitude is None or self.longitude is None:
             return ""
         return f"{self.latitude},{self.longitude}"
+
+
+class DecisionField(models.TextChoices):
+    """What a reviewer is allowed to decide about a staged location."""
+
+    COHORT = "cohort", "Coordinate-quality cohort"
+    REVIEW_STATE = "review_state", "Review outcome"
+    STOREYS = "storeys", "Number of storeys"
+
+
+class ReviewDecision(BaseModel):
+    """One recorded decision a person made about one staged location.
+
+    Append-only, and that is the whole design. The integration brief allows an
+    analyst to change a cohort decision "only by recording a rationale", and
+    says the change "creates a new derived exposure version; it does not edit
+    the source artifact". Both halves matter: a staged row is what the source
+    said, and a row edited in place would leave nothing able to answer what the
+    workbook contained. So a decision is a separate record laid over the row,
+    and promotion reads the overlay.
+
+    The rationale is required at the database level rather than by a form. A
+    reviewer's reason is the only thing that distinguishes a corrected geocode
+    from a number somebody preferred, and it is what an auditor reads two years
+    later when the loss is being questioned.
+    """
+
+    location = models.ForeignKey(
+        SourceRiskLocation, on_delete=models.CASCADE, related_name="decisions"
+    )
+    field = models.CharField(max_length=32, choices=DecisionField.choices)
+    #: Held as text whatever the field's type, because this is a record of what
+    #: somebody decided rather than a typed value to compute with. The typed
+    #: reading happens where the overlay is applied.
+    previous_value = models.CharField(max_length=200, blank=True)
+    new_value = models.CharField(max_length=200, blank=True)
+    rationale = models.TextField()
+    decided_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="review_decisions",
+    )
+
+    class Meta:
+        ordering = ["location", "created_at"]
+        indexes = [models.Index(fields=["location", "field"])]
+
+    def __str__(self) -> str:
+        return f"{self.location}: {self.field} -> {self.new_value}"

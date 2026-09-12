@@ -34,7 +34,7 @@ from cass_extract import template as intake_template
 from cass_oed.schema import FileKind
 
 from . import extract as extract_service
-from . import promotion, scenarios, services
+from . import promotion, review, scenarios, services
 from .models import (
     AttributeOverride,
     EnrichmentRun,
@@ -664,6 +664,83 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response(
             promotion.promotion_summary(exposure), status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=["get"], url_path="import-results")
+    def import_results(self, request, pk=None, version=None):
+        """Everything work package 2's screen shows, in one response.
+
+        One payload rather than six calls, because the screen's whole job is to
+        let a person see the import as a single picture -- what came in, what
+        was excluded and why, how value was allocated, what a review has
+        changed, and which mode the result may be used in. Six requests would
+        let it render half a picture and look complete.
+        """
+        batch = self.get_object()
+        return Response(review.import_results(batch))
+
+    @action(detail=True, methods=["get"], url_path="review-queue")
+    def review_queue(self, request, pk=None, version=None):
+        """The locations a person still owes a decision on."""
+        batch = self.get_object()
+        return Response(review.queue(batch))
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"locations/(?P<location_id>[^/.]+)/decide",
+    )
+    def decide(self, request, pk=None, version=None, location_id=None):
+        """Record one review decision, with the reason for it.
+
+        The staged row is not edited. A decision is a separate record laid over
+        it, so the batch keeps saying what the workbook said and a later
+        promotion reads the overlay.
+        """
+        batch = self.get_object()
+        if not batch.project.may_write(request.user):
+            return Response(
+                {"detail": "You may not review imports in this project."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        location = batch.location_rows.filter(pk=location_id).first()
+        if location is None:
+            return Response(
+                {"detail": "That location is not part of this import."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            decision = review.decide(
+                location,
+                field=str(request.data.get("field") or ""),
+                value=request.data.get("value"),
+                rationale=str(request.data.get("rationale") or ""),
+                actor=request.user,
+            )
+        except review.ReviewError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        audit.record(
+            action=AuditAction.UPDATE,
+            subject_type="import_batch",
+            subject_id=batch.id,
+            actor=request.user,
+            project=batch.project,
+            subject_label=str(location),
+            request=request,
+            before={decision.field: decision.previous_value},
+            after={decision.field: decision.new_value},
+            # The reason belongs in the trail, not only in the row it changed:
+            # an auditor reads the events, and one that recorded the change
+            # without the reason would record the least useful half.
+            detail=decision.rationale,
+        )
+        return Response(
+            {
+                "location": review.overlay(location).as_dict(),
+                "history": review.history(location),
+            },
+            status=status.HTTP_201_CREATED,
         )
 
     @action(detail=True, methods=["post"])

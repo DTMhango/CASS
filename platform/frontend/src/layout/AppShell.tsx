@@ -47,6 +47,12 @@ const NAVIGATION: NavItem[] = [
     description: "Create, import, validate and publish portfolio inputs",
   },
   {
+    to: "/import-review",
+    label: "Import review",
+    glyph: "◫",
+    description: "Eligibility, missing inputs and the review backlog",
+  },
+  {
     to: "/analysis",
     label: "Analysis builder",
     glyph: "▷",

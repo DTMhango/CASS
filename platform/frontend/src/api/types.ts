@@ -293,3 +293,121 @@ export interface Paginated<T> {
   previous: string | null;
   results: T[];
 }
+
+// -- the import review, work package 2 ---------------------------------------
+
+export interface PortfolioImport {
+  id: UUID;
+  project: UUID;
+  source_filename: string;
+  source_checksum: string;
+  parser_version: string;
+  cohort_rule_version: string;
+  policy_row_count: number;
+  risk_row_count: number;
+  state: string;
+  findings: Finding[];
+}
+
+export interface StoreyCoverage {
+  locations: number;
+  stated_in_source: number;
+  established_in_review: number;
+  unstated: number;
+  stated_share: number;
+  value_stated_in_source: number;
+  value_established_in_review: number;
+  value_unstated: number;
+  value_stated_share: number;
+  note: string;
+}
+
+export interface ReviewDecisionRecord {
+  field: string;
+  from: string;
+  to: string;
+  rationale: string;
+  decided_by: string;
+  decided_at: string;
+}
+
+export interface QueuedLocation {
+  id: UUID;
+  business_id: string;
+  location_number: string;
+  primary_location: boolean;
+  class_of_business: string;
+  country_code: string;
+  coordinate: string;
+  precision: string;
+  needs_review: boolean;
+  total_insured_value: number | null;
+  cohort: string;
+  cohort_reason: string;
+  storeys: number | null;
+  storeys_are_reviewed: boolean;
+  history: ReviewDecisionRecord[];
+}
+
+export interface ReviewQueue {
+  batch: UUID;
+  outstanding: number;
+  outstanding_value: number;
+  locations: QueuedLocation[];
+}
+
+export interface ImportResults {
+  batch: {
+    id: UUID;
+    filename: string;
+    source_checksum: string;
+    parser_version: string;
+    cohort_rule_version: string;
+    overlay_version: string;
+    policy_row_count: number;
+    risk_row_count: number;
+    state: string;
+  };
+  included: {
+    country_code: string;
+    class_of_business: string;
+    cohort: string;
+    locations: number;
+    value: number;
+  }[];
+  total_value: number;
+  review: {
+    overlay_version: string;
+    cohort_rule_version: string;
+    locations: number;
+    by_cohort: Record<string, number>;
+    by_review_state: Record<string, number>;
+    outstanding: number;
+    decided: number;
+    decisions: Record<string, unknown>[];
+    storeys: StoreyCoverage;
+  };
+  missing_model_inputs: {
+    field: string;
+    locations: number;
+    value: number;
+    consequence: string;
+  }[];
+  multi_location_businesses: {
+    business_id: string;
+    locations: number;
+    value: number;
+    states_own_values: boolean;
+  }[];
+  repeated_coordinates: {
+    coordinate: string;
+    count: number;
+    businesses: string[];
+    value: number;
+  }[];
+  findings: Finding[];
+  intake_report: Record<string, unknown>;
+  cohort_profile: Record<string, unknown>;
+  use_modes: { mode: string; meaning: string }[];
+  allocation_note: string;
+}

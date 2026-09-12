@@ -43,7 +43,7 @@ from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from cass_oed.schema import FileKind
 
-from . import services
+from . import review, services
 from .models import ExposureVersion, ImportBatch, SourcePolicyRow, SourceRiskLocation
 
 #: OED's own code for an occupancy that is not known. Writing it states a fact;
@@ -68,6 +68,7 @@ LOCATION_COLUMNS = (
     "Longitude",
     "OccupancyCode",
     "ConstructionCode",
+    "NumberOfStoreys",
     "LocPerilsCovered",
     *(str(coverage) for coverage in extract.COVERAGE_ORDER),
     "LocCurrency",
@@ -117,6 +118,7 @@ def promote(
     allocation = prepared.allocation
     coverage_record = prepared.coverage_record
     taxonomy_record = prepared.taxonomy_record
+    height_record = prepared.height_record
 
     version = _create_version(
         batch,
@@ -127,6 +129,7 @@ def promote(
         allocation=allocation,
         coverage_record=coverage_record,
         taxonomy_record=taxonomy_record,
+        height_record=height_record,
         selected_businesses=selected_businesses,
         selected_locations=selected_locations,
         actor=actor,
@@ -189,6 +192,7 @@ class PreparedSelection:
     rows: list[dict[str, Any]]
     coverage_record: dict[str, Any]
     taxonomy_record: dict[str, Any]
+    height_record: dict[str, Any]
 
     @property
     def total_tiv(self) -> Decimal:
@@ -250,6 +254,7 @@ def prepare(
         rows=_location_rows(batch, locations, components, taxonomy),
         coverage_record=coverage_record,
         taxonomy_record=taxonomy_record,
+        height_record=_height_record(locations),
     )
 
 
@@ -469,6 +474,7 @@ def _create_version(
     allocation,
     coverage_record: dict[str, Any],
     taxonomy_record: dict[str, Any],
+    height_record: dict[str, Any],
     selected_businesses: set[str],
     selected_locations: list[SourceRiskLocation],
     actor,
@@ -523,7 +529,7 @@ def _create_version(
                 "OccupancyCode": taxonomy_record["basis"],
                 "ConstructionCode": taxonomy_record["basis"],
                 "YearBuilt": "Not in the source and not inferred.",
-                "NumberOfStoreys": "Not in the source and not inferred.",
+                "NumberOfStoreys": height_record["basis"],
                 "coverage_components": coverage_record["basis"],
             },
             "decision_use": (
@@ -539,6 +545,56 @@ def _create_version(
     )
 
 
+def _height_record(locations: list[SourceRiskLocation]) -> dict[str, Any]:
+    """Where each storey count came from, and what the gap costs.
+
+    Section 8 forbids an assumed attribute looking like a reported one, and
+    height is the case where that matters most: it decides which spectral
+    period answers a risk, so a version that could not say whether a height was
+    reported, established in review or absent would let a guess become a
+    function.
+    """
+    coverage = review.storey_coverage(locations)
+    stated = coverage["stated_in_source"] + coverage["established_in_review"]
+    if stated == 0:
+        basis = (
+            "Not stated by any risk and never inferred. Every location reaches "
+            "vulnerability candidates across several intensity measures."
+        )
+    elif coverage["unstated"] == 0:
+        basis = (
+            f"Stated for all {stated} locations "
+            f"({coverage['established_in_review']} established in review)."
+        )
+    else:
+        basis = (
+            f"Stated for {stated} of {coverage['locations']} locations "
+            f"({coverage['established_in_review']} established in review); the "
+            f"remaining {coverage['unstated']} are written blank rather than "
+            "defaulted, because a height band decides which function answers a "
+            "risk and a guess is a different function rather than a small error."
+        )
+    return {"basis": basis, **coverage}
+
+
+def _storeys(value: int | None) -> str:
+    """The stated height, or blank. Never a default."""
+    return "" if value is None else str(value)
+
+
+def _heights(
+    locations: list[SourceRiskLocation],
+) -> dict[tuple[str, str], int | None]:
+    """Each location's storey count after any review decision is applied.
+
+    The overlay rather than the staged value, because establishing a height is
+    exactly what work package 2's review is for and a promotion that ignored it
+    would leave the reviewer's work out of the model.
+    """
+    applied = review.overlays(locations)
+    return {_key(row): applied[row.id].storeys for row in locations}
+
+
 def _location_rows(
     batch: ImportBatch,
     locations: list[SourceRiskLocation],
@@ -552,6 +608,7 @@ def _location_rows(
     location. Names are never identifiers -- an insured name is confidential and
     is not stable enough to key on even where it is permitted.
     """
+    heights = _heights(locations)
     rows: list[dict[str, Any]] = []
     for row in sorted(locations, key=lambda item: (item.business_id, item.location_number)):
         amounts = components.get((row.business_id, row.location_number))
@@ -575,6 +632,11 @@ def _location_rows(
                 "Longitude": _coordinate(row.longitude),
                 "OccupancyCode": codes["OccupancyCode"],
                 "ConstructionCode": codes["ConstructionCode"],
+                # Blank where nobody knows. Writing a default here would put
+                # the risk in a height band the schedule never claimed, and the
+                # band decides which spectral period answers it -- so a guess
+                # is not a small approximation, it is a different function.
+                "NumberOfStoreys": _storeys(heights.get(_key(row))),
                 "LocPerilsCovered": COVERED_PERIL,
                 "LocCurrency": CURRENCY,
                 **{

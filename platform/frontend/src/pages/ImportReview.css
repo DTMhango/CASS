@@ -1,0 +1,182 @@
+/* The import review screen.
+ *
+ * Layout only. Everything that carries meaning -- a value beside a count, a
+ * consequence beside a gap -- is in the markup, because a reader who copies a
+ * number out of this page should not lose the thing that made it matter.
+ */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* Provenance ------------------------------------------------------------- */
+
+.provenance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+.provenance dt {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--grey-600);
+  margin-bottom: 2px;
+}
+
+.provenance dd {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+/* Tables ----------------------------------------------------------------- */
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.grid th,
+.grid td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--grey-200);
+  vertical-align: top;
+}
+
+.grid thead th {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--grey-600);
+  border-bottom-width: 2px;
+}
+
+.grid .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The consequence column is prose and needs to read as prose, not as data. */
+.grid .consequence {
+  color: var(--grey-700);
+  max-width: 42ch;
+}
+
+/* Use modes -------------------------------------------------------------- */
+
+.modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.modes li strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.modes li span {
+  color: var(--grey-700);
+  font-size: var(--text-sm);
+}
+
+/* Review queue ----------------------------------------------------------- */
+
+.queue {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.queue__row {
+  border: 1px solid var(--grey-200);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.queue__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.queue__id {
+  font-weight: 600;
+}
+
+.queue__id em {
+  font-style: normal;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kre-blue);
+  margin-left: var(--space-2);
+}
+
+.queue__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.queue__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.queue__facts dt {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--grey-600);
+  margin-bottom: 2px;
+}
+
+.queue__facts dd {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+/* The rationale field takes the width, because the rule of this screen is
+   that a decision without a reason is not a decision. */
+.queue__form {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(120px, 0.6fr) minmax(240px, 2fr) auto;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+@media (max-width: 900px) {
+  .queue__form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.history {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.history p {
+  margin: 2px 0 0;
+  color: var(--grey-700);
+}
