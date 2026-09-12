@@ -109,25 +109,47 @@ def test_the_reported_totals_match_the_brief(batch):
 
 
 @needs_extract
-def test_the_cohorts_are_the_sizes_the_brief_states(batch):
+def test_the_cohorts_are_the_sizes_the_country_screen_leaves(batch):
+    """The brief states 63/46/115; the country screen makes it 61/44/114 plus 5.
+
+    The difference is exactly the five rows whose coordinates are not in the
+    country they name. The brief's figures were computed from precision and the
+    review flag alone, which is what the screen exists to correct -- two of the
+    five reach street or better precision and carry no review flag.
+    """
     counts = batch.cohort_profile["counts"]
-    assert counts["A"] == 63
-    assert counts["B"] == 46
-    assert counts["C"] == 115
+    assert counts["A"] == 61
+    assert counts["B"] == 44
+    assert counts["C"] == 114
+    assert counts["unclassified"] == 5
     assert sum(counts.values()) == 224
 
 
 @needs_extract
-def test_the_cohorts_split_by_country_as_the_brief_states(batch):
+def test_the_cohorts_split_by_country(batch):
     by_country = batch.cohort_profile["by_country"]
-    assert by_country["A"] == {"Indonesia": 53, "Nepal": 10}
-    assert by_country["B"] == {"Indonesia": 31, "Nepal": 15}
-    assert by_country["C"] == {"Indonesia": 110, "Nepal": 5}
+    assert by_country["A"] == {"Indonesia": 51, "Nepal": 10}
+    assert by_country["B"] == {"Indonesia": 29, "Nepal": 15}
+    assert by_country["C"] == {"Indonesia": 110, "Nepal": 4}
 
 
 @needs_extract
-def test_the_review_backlog_is_the_flagged_cohort(batch):
-    assert transformation_manifest(batch)["review_queue"]["pending"] == 115
+def test_the_five_wrong_country_rows_are_named_and_excluded(batch):
+    """Two of them would otherwise have entered the automated cohort."""
+    from apps.exposure.models import SourceRiskLocation
+
+    unclassified = SourceRiskLocation.objects.filter(batch=batch, cohort="unclassified")
+    assert unclassified.count() == 5
+    assert all("outside" in row.cohort_reason for row in unclassified)
+    assert {row.business_id for row in unclassified} == {
+        "PFAC6368", "PFAC10240", "PFAC10241", "PFAC11086", "PFAC11588",
+    }
+
+
+@needs_extract
+def test_the_review_backlog_holds_the_flagged_and_the_unplaceable(batch):
+    """114 flagged plus the 5 the rules could not place."""
+    assert transformation_manifest(batch)["review_queue"]["pending"] == 119
 
 
 @needs_extract
@@ -393,7 +415,7 @@ def test_the_benchmark_total_holds_under_every_coverage_split(batch, analyst, sp
         actor=analyst,
     )
     assert version.total_tiv == Decimal("147044599.14")
-    assert version.source_lineage["coverage_split"]["reconciliation"]["reconciles"] is True
+    assert version.source_lineage["coverage"]["reconciliation"]["reconciles"] is True
 
 
 @needs_extract

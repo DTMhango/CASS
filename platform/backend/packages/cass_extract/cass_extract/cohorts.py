@@ -11,9 +11,18 @@ fields into three cohorts, every source row is preserved, and the rule version
 that made the assignment is recorded with it. A later rule change produces a
 new assignment rather than silently reinterpreting an old run.
 
+A coarse country screen runs before either field, because mapping the real
+extract to the pilot grids found five rows whose coordinates are not in the
+country they name -- one in Beirut and one on the Adriatic coast, both at
+street or better precision with no review flag. A geocoder can be confident and
+wrong, so neither the provider's precision nor the absence of a human flag is
+sufficient on its own. Those rows are unclassified: not eligible for anything,
+and in the queue for a person.
+
 The cohorts are not a quality ranking of the geocoder. They are a statement
 about what each row is fit for: A for automated mapping, B for mapping whose
-sensitivity has to be reported separately, C for work a person still owes.
+sensitivity has to be reported separately, C for work a person still owes, and
+unclassified for a row the rules could not place at all.
 """
 
 from __future__ import annotations
@@ -25,7 +34,7 @@ from decimal import Decimal
 from typing import Any
 
 #: Bumped whenever an eligibility rule changes. Stored with each assignment.
-COHORT_RULE_VERSION = "1.0.0"
+COHORT_RULE_VERSION = "1.1.0"
 
 
 class Cohort(enum.StrEnum):
@@ -51,6 +60,39 @@ class Cohort(enum.StrEnum):
             Cohort.C: "Analyst-review backlog",
             Cohort.UNCLASSIFIED: "Unclassified",
         }[self]
+
+
+#: Generous national bounds for the pilot countries, as a coarse screen only.
+#:
+#: Not a boundary polygon and not a substitute for one: they are wide enough to
+#: include water and neighbouring territory, and they exist to catch a geocode
+#: that landed on the wrong continent rather than one that landed a mile over a
+#: border. The 30 June 2026 extract carries five such rows, two of them at
+#: street or better precision with no review flag -- a geocoder can be confident
+#: and wrong, which is why precision alone cannot decide eligibility.
+NATIONAL_BOUNDS: Mapping[str, tuple[Decimal, Decimal, Decimal, Decimal]] = {
+    "indonesia": (Decimal("-11.5"), Decimal("6.5"), Decimal("94.5"), Decimal("141.5")),
+    "nepal": (Decimal("26.0"), Decimal("30.7"), Decimal("79.9"), Decimal("88.4")),
+}
+
+
+def within_stated_country(location: Mapping[str, Any]) -> bool | None:
+    """Whether a coordinate is plausibly inside the country the row names.
+
+    ``None`` where the country is not one the screen knows, so an unrecognised
+    country is reported as unscreened rather than quietly passed or failed.
+    """
+    bounds = NATIONAL_BOUNDS.get(str(location.get("country") or "").strip().lower())
+    if bounds is None:
+        return None
+    latitude, longitude = location.get("latitude"), location.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+    minimum_latitude, maximum_latitude, minimum_longitude, maximum_longitude = bounds
+    return (
+        minimum_latitude <= Decimal(str(latitude)) <= maximum_latitude
+        and minimum_longitude <= Decimal(str(longitude)) <= maximum_longitude
+    )
 
 
 #: Precisions that place a no-review row in cohort A. These resolve to a
@@ -116,8 +158,28 @@ def assign(location: Mapping[str, Any]) -> Assignment:
             "The coordinate is (0, 0), which is a failed geocode rather than a place.",
         )
 
+    # Checked before precision, and before the review flag, because a geocode
+    # in the wrong country is wrong however confident the provider was and
+    # whatever nobody flagged. Two rows in the 30 June 2026 extract reach
+    # street or better precision, carry no review flag, and sit on another
+    # continent.
+    consistent = within_stated_country(location)
+    if consistent is False:
+        return made(
+            Cohort.UNCLASSIFIED,
+            f"The coordinate is outside {location.get('country')}, so it does not "
+            "describe the risk the row names.",
+        )
+
     if _is_yes(location.get("needs_review")):
         return made(Cohort.C, "A reviewer has flagged this location for review.")
+
+    if consistent is None:
+        return made(
+            Cohort.UNCLASSIFIED,
+            f"No country screen exists for {location.get('country') or 'an unnamed country'}, "
+            "so the coordinate could not be checked against it.",
+        )
 
     precision = str(location.get("precision") or "").strip().lower()
     if precision in PRECISE:

@@ -272,11 +272,13 @@ def _stage_locations(batch: ImportBatch, rows, assignments) -> None:
                 cohort=str(assignment.cohort),
                 cohort_reason=assignment.reason[:200],
                 cohort_rule_version=assignment.rule_version,
-                # Only the backlog cohort carries work someone owes. Marking
-                # every row "pending" would make the queue meaningless.
+                # The backlog cohort and anything the rules could not place.
+                # Marking every row "pending" would make the queue meaningless,
+                # but an unclassified row is precisely work someone owes.
                 review_state=(
                     ReviewState.PENDING
-                    if assignment.cohort is extract.Cohort.C
+                    if assignment.cohort
+                    in (extract.Cohort.C, extract.Cohort.UNCLASSIFIED)
                     else ReviewState.NOT_REQUIRED
                 ),
                 values=_jsonable(row.values),

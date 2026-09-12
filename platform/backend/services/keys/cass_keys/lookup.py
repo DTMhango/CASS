@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from collections.abc import Iterable, Mapping, Sequence
-from decimal import Decimal
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from decimal import ROUND_FLOOR, Decimal
 from typing import Any
 
 from cass_oed.schema import COVERAGE_TYPES, MODELLED_SUBPERILS, expand_perils
@@ -95,12 +95,37 @@ class AreaPerilGrid:
     #: Distance beyond which a near-miss is reported rather than snapped.
     tolerance_km: Decimal = Decimal("0")
 
+    #: Cells bucketed by whole degree, built once on first use. Section 6's
+    #: work package asks for a spatial index rather than a linear scan, and at
+    #: national scale the difference is real: Indonesia's prototype grid holds
+    #: 52,000 cells, so scanning it for every location turns a portfolio
+    #: mapping into millions of comparisons for no reason.
+    #:
+    #: A cell is registered in every bucket it touches rather than only the one
+    #: its corner sits in, so the index stays correct for a grid whose cells are
+    #: larger than a degree or do not align to one.
+    _index: dict[tuple[int, int], tuple[GridCell, ...]] | None = dataclasses.field(
+        default=None, init=False, repr=False, compare=False, hash=False
+    )
+
     @property
     def reference(self) -> str:
         return f"{self.country_code.lower()}-grid-{self.version}"
 
+    def _bucketed(self) -> dict[tuple[int, int], tuple[GridCell, ...]]:
+        if self._index is None:
+            buckets: dict[tuple[int, int], list[GridCell]] = {}
+            for cell in self.cells:
+                for key in _buckets_touched(cell):
+                    buckets.setdefault(key, []).append(cell)
+            object.__setattr__(
+                self, "_index", {key: tuple(value) for key, value in buckets.items()}
+            )
+        return self._index
+
     def find(self, latitude: Decimal, longitude: Decimal) -> GridCell | None:
-        for cell in self.cells:
+        """The cell a coordinate falls in, or None if the grid does not cover it."""
+        for cell in self._bucketed().get(_bucket(latitude, longitude), ()):
             if cell.contains(latitude, longitude):
                 return cell
         return None
@@ -297,6 +322,33 @@ class LookupResult:
             "failure_count": len(self.failures),
             "coverage_report": self.report.as_dict(),
         }
+
+
+def _floor(value: Decimal) -> int:
+    """Floor, not truncation.
+
+    ``Decimal // 1`` rounds toward zero, so -6.2 becomes -6 rather than -7.
+    Most of Indonesia is south of the equator, so getting this wrong would put
+    a location in a bucket its cell is not in and report the whole country as
+    outside the grid.
+    """
+    return int(value.to_integral_value(rounding=ROUND_FLOOR))
+
+
+def _bucket(latitude: Decimal, longitude: Decimal) -> tuple[int, int]:
+    """The whole-degree square a coordinate belongs to."""
+    return (_floor(latitude), _floor(longitude))
+
+
+def _buckets_touched(cell: GridCell) -> Iterator[tuple[int, int]]:
+    """Every whole-degree square a cell overlaps, however large the cell is."""
+    latitude = _floor(cell.min_latitude)
+    while latitude < cell.max_latitude:
+        longitude = _floor(cell.min_longitude)
+        while longitude < cell.max_longitude:
+            yield (latitude, longitude)
+            longitude += 1
+        latitude += 1
 
 
 def _decimal(value: Any) -> Decimal | None:
