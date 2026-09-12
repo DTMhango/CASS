@@ -363,3 +363,124 @@ def test_the_gate_never_silently_moves_value(extract_rows):
     assert without_gate.source_tiv - with_gate.source_tiv == Decimal("3000000.00")
     for key, amount in with_gate.by_location().items():
         assert without_gate.by_location()[key] == amount
+
+
+# -- when the schedule reports its own site values ------------------------------------
+
+def _sited(business: str, number: int, value: str | None, **extra):
+    row = {
+        "business_id": business,
+        "location_number": number,
+        "primary_location": "Yes" if number == 1 else "No",
+        "latitude": Decimal("-6.2"),
+        "longitude": Decimal("106.8"),
+    }
+    if value is not None:
+        row["location_tiv"] = Decimal(value)
+    row.update(extra)
+    return row
+
+
+def test_a_schedule_that_reports_its_values_needs_no_assumption():
+    """The case where the allocation question does not arise at all."""
+    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    schedule = [_sited("B-1", 1, "750.00"), _sited("B-1", 2, "250.00")]
+
+    result = allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
+
+    assert result.method is AllocationMethod.REPORTED
+    assert result.evidence is AllocationEvidence.REPORTED
+    assert [share.amount for share in result.shares] == [
+        Decimal("750.00"),
+        Decimal("250.00"),
+    ]
+    assert result.reconciles
+
+
+def test_reported_values_are_never_silently_read_as_an_equal_split():
+    """The defect this test exists for: the method used to fall through.
+
+    An option the interface offers and the engine quietly substitutes is worse
+    than one it refuses, because the lineage records the substitute as though
+    somebody chose it.
+    """
+    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    schedule = [_sited("B-1", 1, "900.00"), _sited("B-1", 2, "100.00")]
+
+    reported = allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
+    equal = allocate_policy(policy, schedule, method=AllocationMethod.EQUAL_LOCATION)
+
+    assert [share.amount for share in reported.shares] != [
+        share.amount for share in equal.shares
+    ]
+    assert equal.evidence is AllocationEvidence.ASSUMED
+
+
+def test_several_policies_over_one_schedule_divide_in_proportion():
+    """Site values cannot equal every policy's TIV at once, so they are weights."""
+    schedule = [_sited("B-1", 1, "750.00"), _sited("B-1", 2, "250.00")]
+    first = allocate_policy(
+        {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")},
+        schedule,
+        method=AllocationMethod.REPORTED,
+    )
+    second = allocate_policy(
+        {"policy_id": "P-2", "business_id": "B-1", "gross_limit": Decimal("400.00")},
+        schedule,
+        method=AllocationMethod.REPORTED,
+    )
+    assert [share.amount for share in second.shares] == [
+        Decimal("300.00"),
+        Decimal("100.00"),
+    ]
+    assert first.reconciles and second.reconciles
+
+
+def test_a_partly_reported_schedule_is_refused_and_names_the_gaps():
+    """Part of a division is not a division."""
+    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    schedule = [_sited("B-1", 1, "750.00"), _sited("B-1", 2, None)]
+
+    with pytest.raises(AllocationError) as excinfo:
+        allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
+    message = str(excinfo.value)
+    assert "1 of its 2 locations report no value" in message
+    assert "location 2" in message
+
+
+def test_a_schedule_of_zeroes_is_not_a_reported_allocation():
+    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    schedule = [_sited("B-1", 1, "0.00"), _sited("B-1", 2, "0.00")]
+
+    with pytest.raises(AllocationError, match="cannot divide anything"):
+        allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
+
+
+def test_a_negative_reported_value_is_refused():
+    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    schedule = [_sited("B-1", 1, "-10.00"), _sited("B-1", 2, "100.00")]
+
+    with pytest.raises(AllocationError, match="negative value"):
+        allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
+
+
+def test_reported_values_reconcile_exactly_when_they_do_not_divide_evenly():
+    """Thirds of a policy total still land on the cent."""
+    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("100.00")}
+    schedule = [
+        _sited("B-1", 1, "1.00"),
+        _sited("B-1", 2, "1.00"),
+        _sited("B-1", 3, "1.00"),
+    ]
+    result = allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
+    assert sum(share.amount for share in result.shares) == Decimal("100.00")
+    assert result.reconciles
+
+
+def test_one_reported_site_is_still_recorded_as_a_single_location():
+    """A whole allocation to the only site is a fact whatever method was asked for."""
+    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("500.00")}
+    result = allocate_policy(
+        policy, [_sited("B-1", 1, "500.00")], method=AllocationMethod.REPORTED
+    )
+    assert result.method is AllocationMethod.SINGLE_LOCATION

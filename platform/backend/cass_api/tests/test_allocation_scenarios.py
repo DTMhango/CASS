@@ -316,3 +316,103 @@ def test_an_unreadable_scenario_name_is_refused_with_a_reason(api, batch, pilot_
     )
     assert response.status_code == 409
     assert "whatever_v1" in response.data["detail"]
+
+
+# -- and when the schedule reports its own values, none of this applies ---------------------
+
+def completed_template(rows, share):
+    """A coverage template filled in with a real value for every location."""
+    import csv
+    import io
+
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        buffer, fieldnames=["AccNumber", "LocNumber", "BuildingTIV"], lineterminator="\n"
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                "AccNumber": row["AccNumber"],
+                "LocNumber": row["LocNumber"],
+                "BuildingTIV": share(row),
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+@pytest.fixture()
+def supplied(batch):
+    """B-MULTI's three sites valued 60/30/10 instead of a third each."""
+    prepared = prepare(batch, allocation_method=EQUAL)
+    weights = {"1": Decimal("0.6"), "2": Decimal("0.3"), "3": Decimal("0.1")}
+
+    def share(row):
+        total = Decimal(row["BuildingTIV"])
+        if row["AccNumber"] != "B-MULTI":
+            return total
+        # Three sites of one million each under the equal split; restated as a
+        # real schedule would state them, and adding to the same three million.
+        return (Decimal("3000000.00") * weights[row["LocNumber"]]).quantize(
+            Decimal("0.01")
+        )
+
+    return extract.read_reported_components(completed_template(prepared.rows, share))
+
+
+def test_reported_site_values_make_every_scenario_the_same_portfolio(
+    batch, pilot_model, supplied
+):
+    """The question answered directly: with real per-site values, there is no issue.
+
+    Every scenario prepares the same rows, so the cells hold the same value and
+    the movement between them is nothing. The allocation assumption has not
+    been resolved -- it never applied.
+    """
+    comparison = scenarios.compare(
+        batch, model_version=pilot_model, reported_components=supplied
+    )
+    assert comparison.total_holds is True
+    assert comparison.movement(comparison.scenarios[1]) == {}
+    assert comparison.scenarios[0].by_area_peril == comparison.scenarios[1].by_area_peril
+
+
+def test_a_business_that_reports_its_values_is_not_material(batch, pilot_model, supplied):
+    """Not "material and unchanged" -- not material, because nothing was assumed."""
+    comparison = scenarios.compare(
+        batch, model_version=pilot_model, reported_components=supplied
+    )
+    multi = next(
+        item for item in comparison.materiality if item.business_id == "B-MULTI"
+    )
+    assert multi.location_count == 3
+    assert multi.area_peril_count == 2
+    assert multi.values_reported is True
+    assert multi.material is False
+    assert "evidence rather than an assumption" in multi.reason
+
+
+def test_the_material_share_falls_to_nothing_when_values_are_reported(
+    batch, pilot_model, supplied
+):
+    comparison = scenarios.compare(
+        batch, model_version=pilot_model, reported_components=supplied
+    )
+    report = comparison.as_dict()["materiality"]
+    assert report["businesses_where_allocation_is_material"] == 0
+    assert Decimal(report["material_tiv"]) == 0
+    assert report["material_share"] == 0.0
+
+
+def test_reported_values_put_the_money_where_the_schedule_says(
+    batch, pilot_model, supplied, analyst
+):
+    """And it is the reported split, not a third each."""
+    version = promote(batch, name="Reported", reported_components=supplied, actor=analyst)
+    rows = {
+        (row["AccNumber"], row["LocNumber"]): Decimal(row["BuildingTIV"])
+        for row in oed_rows(version)
+    }
+    assert rows[("B-MULTI", "1")] == Decimal("1800000.00")
+    assert rows[("B-MULTI", "2")] == Decimal("900000.00")
+    assert rows[("B-MULTI", "3")] == Decimal("300000.00")

@@ -114,21 +114,36 @@ class BusinessMateriality:
     location_count: int
     area_peril_count: int
     total_tiv: Decimal
+    #: Whether this business's site values were stated rather than divided.
+    #: Where they were, there is no allocation assumption to be sensitive to --
+    #: the scenarios are all the same portfolio, and saying otherwise would
+    #: invite an analyst to worry about a choice nobody made.
+    values_reported: bool = False
 
     @property
     def material(self) -> bool:
         """Whether moving value between this business's sites changes anything.
 
-        Two conditions, and both are needed. One site means there is nothing to
-        allocate. Several sites in one cell means the allocation moves value
-        between places the model cannot tell apart.
+        Three conditions. One site means there is nothing to allocate. Reported
+        site values mean nothing was allocated. Several sites in one cell means
+        the allocation moves value between places the model cannot tell apart.
         """
-        return self.location_count > 1 and self.area_peril_count > 1
+        return (
+            self.location_count > 1
+            and not self.values_reported
+            and self.area_peril_count > 1
+        )
 
     @property
     def reason(self) -> str:
         if self.location_count <= 1:
             return "One scheduled site, so no allocation assumption applies."
+        if self.values_reported:
+            return (
+                f"{self.location_count} sites, each reporting its own value. The "
+                "division is evidence rather than an assumption, so no scenario "
+                "can change it."
+            )
         if self.area_peril_count <= 1:
             return (
                 f"{self.location_count} sites, all in one area-peril cell. The "
@@ -275,6 +290,7 @@ def compare(
     country: str | None = None,
     component_split: extract.ComponentSplit | None = None,
     occupancy: extract.OccupancyAssumption | None = None,
+    reported_components: extract.ReportedComponents | None = None,
 ) -> ScenarioComparison:
     """Prepare one selection under several allocations and map each to the model.
 
@@ -308,6 +324,7 @@ def compare(
     sites: dict[str, set[int]] = {}
     cells: dict[str, set[int]] = {}
     value: dict[str, Decimal] = {}
+    reported: set[str] = set()
 
     for position, method in enumerate(ordered):
         prepared = promotion.prepare(
@@ -318,6 +335,7 @@ def compare(
             allocation_method=method,
             component_split=component_split,
             occupancy=occupancy,
+            reported_components=reported_components,
         )
         result = lookup(prepared.rows, grid=grid, vulnerability=vulnerability)
 
@@ -333,6 +351,20 @@ def compare(
                 sites.setdefault(account, set()).add(int(record.location_number or 0))
                 cells.setdefault(account, set()).add(record.area_peril_id)
                 value[account] = value.get(account, Decimal("0.00")) + record.tiv
+
+        if position == 0:
+            # Coverage values supplied per row displace the division for the
+            # whole selection; a reported allocation displaces it per policy.
+            # Either way the business has stated where its value is.
+            if prepared.coverage_record["source"] == "reported_location_values":
+                reported.update(
+                    str(row["AccNumber"]) for row in prepared.rows
+                )
+            reported.update(
+                item.business_id
+                for item in prepared.allocation.allocations
+                if item.method is extract.AllocationMethod.REPORTED
+            )
 
         results.append(
             ScenarioResult(
@@ -368,6 +400,7 @@ def compare(
                 location_count=len(sites.get(business_id, set())),
                 area_peril_count=len(business_cells),
                 total_tiv=value.get(business_id, Decimal("0.00")),
+                values_reported=business_id in reported,
             )
             for business_id, business_cells in sorted(cells.items())
         ],

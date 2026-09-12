@@ -216,6 +216,13 @@ LOCATION_FIELDS: tuple[FieldSpec, ...] = (
     # in any case.
     _f("confidence", DataType.TEXT, "Geocode confidence"),
     _f("needs_review", DataType.YES_NO, "Needs review", required=True),
+    # Optional, and absent from the 30 June 2026 extract. Where a source does
+    # carry a value per site, there is no allocation question left to answer:
+    # the reported_location_tiv_v1 method uses these and assumes nothing. It is
+    # declared here so that a schedule which has them is read rather than
+    # ignored, and it is not required so that one without them still parses
+    # cleanly.
+    _f("location_tiv", DataType.MONEY, "Reported location TIV"),
     _f("class_of_business", DataType.TEXT, "Class of business"),
     _f("country", DataType.TEXT, "Country"),
     _f("provider", DataType.TEXT, "Geocode provider"),

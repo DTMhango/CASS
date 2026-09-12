@@ -247,6 +247,10 @@ def allocate_policy(
         chosen = method
         evidence = AllocationEvidence.ASSUMED
         weights = _primary_weights(ordered, policy_id)
+    elif method is AllocationMethod.REPORTED:
+        chosen = method
+        evidence = AllocationEvidence.REPORTED
+        weights = _reported_weights(ordered, policy_id)
     else:
         chosen = AllocationMethod.EQUAL_LOCATION
         evidence = AllocationEvidence.ASSUMED
@@ -277,6 +281,58 @@ def allocate_policy(
             concentrate_at if chosen is AllocationMethod.CONCENTRATION else None
         ),
     )
+
+
+def _reported_weights(
+    schedule: Sequence[Mapping[str, Any]], policy_id: str
+) -> list[Fraction]:
+    """Shares in proportion to the value each site reports.
+
+    Where a schedule states a value per site there is no allocation assumption
+    left to make, which is why this is the only method whose evidence is
+    ``REPORTED``. Two details decide whether it is honest.
+
+    **Proportions, not amounts.** A business can hold several policies over one
+    schedule, and site values cannot equal every policy's TIV at once. Dividing
+    each policy in proportion to the reported values is the only reading that
+    works for both cases, and it keeps every policy's total exact. Where a
+    single policy's site values do add to its TIV, the proportions give those
+    amounts back unchanged.
+
+    **Every site or none.** A schedule where three sites carry a value and the
+    fourth is blank has not reported its division; it has reported part of it.
+    Treating the blank as zero would put nothing at a real building, and
+    filling it with an average would be the assumption this method exists to
+    avoid. So a partial schedule is refused, and it names the sites that are
+    missing.
+    """
+    values = [_money(row.get("location_tiv")) for row in schedule]
+    missing = [
+        _location_number(row)
+        for row, value in zip(schedule, values, strict=True)
+        if not _text(row.get("location_tiv"))
+    ]
+    if missing:
+        raise AllocationError(
+            f"Policy {policy_id} was asked for a reported allocation, but "
+            f"{len(missing)} of its {len(schedule)} locations report no value "
+            f"(location {', '.join(str(item) for item in missing)}). A partly "
+            "reported schedule states part of a division, not a division. Supply "
+            "every site's value, or choose an assumption."
+        )
+    if any(value < 0 for value in values):
+        raise AllocationError(
+            f"Policy {policy_id} has a location reporting a negative value, which "
+            "is not something this platform can interpret."
+        )
+    total = sum(values, Decimal("0.00"))
+    if total <= 0:
+        raise AllocationError(
+            f"Policy {policy_id} has reported location values summing to {total}, "
+            "so they cannot divide anything. A schedule of zeroes is not a "
+            "reported allocation."
+        )
+    return [Fraction(_cents(value), _cents(total)) for value in values]
 
 
 def _primary_weights(schedule: Sequence[Mapping[str, Any]], policy_id: str) -> list[Fraction]:
