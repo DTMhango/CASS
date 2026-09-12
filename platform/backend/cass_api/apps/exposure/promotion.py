@@ -39,6 +39,7 @@ vulnerability attributes.
 from __future__ import annotations
 
 import csv
+import dataclasses
 import io
 from decimal import Decimal
 from typing import Any
@@ -81,6 +82,10 @@ LOCATION_COLUMNS = (
 )
 
 
+#: The coverage columns of a written row, in OED order.
+_COVERAGE_COLUMNS = tuple(str(item) for item in extract.COVERAGE_ORDER)
+
+
 class PromotionError(Exception):
     """Raised when a selection cannot be promoted."""
 
@@ -110,29 +115,22 @@ def promote(
     the fallback for when nobody knows the breakdown, and it defaults to the
     building-only smoke fixture rather than to something that spreads value.
     """
-    component_split = component_split or extract.DEFAULT_SPLIT
-    occupancy = occupancy or extract.DEFAULT_OCCUPANCY
-    selected_businesses, selected_locations, allocation = _selection(
+    prepared = prepare(
         batch,
         cohort=cohort,
         class_of_business=class_of_business,
         country=country,
         allocation_method=allocation_method,
-    )
-
-    totals = allocation.by_location()
-    components, coverage_record = _coverage_values(
-        totals,
         component_split=component_split,
+        occupancy=occupancy,
         reported_components=reported_components,
         accept_restated_total=accept_restated_total,
     )
-
-    stated_taxonomy = reported_components.taxonomy if reported_components else None
-    taxonomy = extract.assign_taxonomy(totals, occupancy, reported=stated_taxonomy)
-    taxonomy_record = extract.taxonomy_record(
-        occupancy, taxonomy, reported=stated_taxonomy
-    )
+    selected_businesses = prepared.businesses
+    selected_locations = prepared.locations
+    allocation = prepared.allocation
+    coverage_record = prepared.coverage_record
+    taxonomy_record = prepared.taxonomy_record
 
     version = _create_version(
         batch,
@@ -148,7 +146,7 @@ def promote(
         actor=actor,
     )
 
-    payload = _location_csv(batch, version, selected_locations, components, taxonomy)
+    payload = _location_csv(prepared.rows)
     services.attach_file(
         version,
         FileKind.LOCATION,
@@ -179,7 +177,7 @@ def promote(
             "cohort": str(cohort),
             "allocation_method": str(allocation.method),
             "coverage_source": coverage_record["source"],
-            "occupancy_assumption": occupancy.name,
+            "occupancy_assumption": taxonomy_record["assumption"]["name"],
             "locations": len(selected_locations),
         },
         detail="Promoted a source-extract cohort to an OED exposure version.",
@@ -187,6 +185,91 @@ def promote(
     )
     version.refresh_from_db()
     return version
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PreparedSelection:
+    """Everything a promotion would write, before anything is written.
+
+    Extracted so the allocation-scenario comparison runs the *same* rows a
+    promotion would produce rather than its own approximation of them. A
+    comparison that described a portfolio nobody could promote would be advice
+    about a thing that does not exist.
+    """
+
+    businesses: set[str]
+    locations: list[SourceRiskLocation]
+    allocation: Any
+    rows: list[dict[str, Any]]
+    coverage_record: dict[str, Any]
+    taxonomy_record: dict[str, Any]
+
+    @property
+    def total_tiv(self) -> Decimal:
+        return sum(
+            (
+                sum(
+                    (Decimal(row[coverage]) for coverage in _COVERAGE_COLUMNS),
+                    Decimal("0.00"),
+                )
+                for row in self.rows
+            ),
+            Decimal("0.00"),
+        )
+
+
+def prepare(
+    batch: ImportBatch,
+    *,
+    cohort: extract.Cohort = extract.Cohort.A,
+    class_of_business: str | None = extract.cohorts.PHYSICAL_DAMAGE_CLASS,
+    country: str | None = None,
+    allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
+    component_split: extract.ComponentSplit | None = None,
+    occupancy: extract.OccupancyAssumption | None = None,
+    reported_components: extract.ReportedComponents | None = None,
+    accept_restated_total: bool = False,
+) -> PreparedSelection:
+    """Resolve a selection into OED rows without creating anything.
+
+    Every assumption is applied here -- the cohort, the allocation, the
+    coverage values and the taxonomy -- so a caller can see the result of a
+    choice before committing to it. Nothing is stored and nothing is audited:
+    a promotion is the act that does both.
+    """
+    component_split = component_split or extract.DEFAULT_SPLIT
+    occupancy = occupancy or extract.DEFAULT_OCCUPANCY
+
+    businesses, locations, allocation = _selection(
+        batch,
+        cohort=cohort,
+        class_of_business=class_of_business,
+        country=country,
+        allocation_method=allocation_method,
+    )
+
+    totals = allocation.by_location()
+    components, coverage_record = _coverage_values(
+        totals,
+        component_split=component_split,
+        reported_components=reported_components,
+        accept_restated_total=accept_restated_total,
+    )
+
+    stated_taxonomy = reported_components.taxonomy if reported_components else None
+    taxonomy = extract.assign_taxonomy(totals, occupancy, reported=stated_taxonomy)
+    taxonomy_record = extract.taxonomy_record(
+        occupancy, taxonomy, reported=stated_taxonomy
+    )
+
+    return PreparedSelection(
+        businesses=businesses,
+        locations=locations,
+        allocation=allocation,
+        rows=_location_rows(batch, locations, components, taxonomy),
+        coverage_record=coverage_record,
+        taxonomy_record=taxonomy_record,
+    )
 
 
 def _selection(
@@ -429,24 +512,20 @@ def _create_version(
     )
 
 
-def _location_csv(
+def _location_rows(
     batch: ImportBatch,
-    version: ExposureVersion,
     locations: list[SourceRiskLocation],
     components: dict[tuple[str, int], dict[str, Decimal]],
     taxonomy: dict[tuple[str, int], dict[str, str]],
-) -> bytes:
-    """Write the OED location file for a selection.
+) -> list[dict[str, Any]]:
+    """The OED location rows a selection produces.
 
     The identity mapping of section 4.4: the extract reference is the portfolio,
     the business reference is the account, and the source location number is the
     location. Names are never identifiers -- an insured name is confidential and
     is not stable enough to key on even where it is permitted.
     """
-    buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=list(LOCATION_COLUMNS), lineterminator="\n")
-    writer.writeheader()
-
+    rows: list[dict[str, Any]] = []
     for row in sorted(locations, key=lambda item: (item.business_id, item.location_number)):
         amounts = components.get((row.business_id, row.location_number))
         if amounts is None:
@@ -459,7 +538,7 @@ def _location_csv(
                 "received no allocation, so the selection and the allocation disagree."
             )
         codes = taxonomy[(row.business_id, row.location_number)]
-        writer.writerow(
+        rows.append(
             {
                 "PortNumber": batch.project.reference,
                 "AccNumber": row.business_id,
@@ -473,10 +552,19 @@ def _location_csv(
                 "LocCurrency": CURRENCY,
                 **{
                     coverage: format(amounts[coverage], "f")
-                    for coverage in (str(item) for item in extract.COVERAGE_ORDER)
+                    for coverage in _COVERAGE_COLUMNS
                 },
             }
         )
+    return rows
+
+
+def _location_csv(rows: list[dict[str, Any]]) -> bytes:
+    """The OED location file for a set of prepared rows."""
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=list(LOCATION_COLUMNS), lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
     return buffer.getvalue().encode("utf-8")
 
 

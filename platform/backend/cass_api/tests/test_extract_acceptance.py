@@ -623,3 +623,155 @@ def test_the_real_benchmark_maps_across_the_grid_rather_than_into_one_cell(
     result = _keys_for(version, pilot_models["ID"])
     cells = {item.area_peril_id for item in result.successes}
     assert len(cells) > 10
+
+
+# -- step 6: the multi-location allocation scenarios, on the real extract -----------------
+
+@needs_extract
+def test_no_multi_location_business_reaches_the_benchmark(batch, analyst, pilot_models):
+    """Which is why the benchmark needed no allocation assumption at all.
+
+    Stated as a scenario comparison rather than inferred: the comparison over
+    cohort A Fire finds nothing the allocation choice can move, so the two
+    scenarios are the same portfolio.
+    """
+    from apps.exposure import scenarios
+
+    comparison = scenarios.compare(
+        batch, model_version=pilot_models["ID"], country="Indonesia"
+    )
+    assert comparison.total_holds is True
+    assert [item.business_id for item in comparison.materiality if item.material] == []
+    assert comparison.envelope == {}
+    assert comparison.movement(comparison.scenarios[1]) == {}
+
+
+@needs_extract
+def test_the_allocation_scenarios_move_value_between_cells_in_the_review_cohort(
+    batch, analyst, pilot_models
+):
+    """Cohort C Fire is where the assumption actually bites: six of the ten.
+
+    Worth stating plainly -- every business the allocation choice can reach is
+    in the analyst-review backlog, so the assumption and the review queue are
+    the same work, not two.
+    """
+    from decimal import Decimal
+
+    from apps.exposure import scenarios
+
+    comparison = scenarios.compare(
+        batch,
+        model_version=pilot_models["ID"],
+        cohort=extract.Cohort.C,
+        country="Indonesia",
+    )
+    material = [item for item in comparison.materiality if item.material]
+
+    assert comparison.total_holds is True
+    assert material, "cohort C Fire holds six multi-location businesses"
+    movement = comparison.movement(comparison.scenarios[1])
+    assert movement
+    assert sum(movement.values(), Decimal("0.00")) == 0
+
+
+@needs_extract
+def test_every_real_scenario_still_maps_completely(batch, analyst, pilot_models):
+    """Moving value between sites must not move any of it outside the grid."""
+    from apps.exposure import scenarios
+
+    comparison = scenarios.compare(
+        batch,
+        model_version=pilot_models["ID"],
+        cohort=extract.Cohort.C,
+        country="Indonesia",
+    )
+    for scenario in comparison.scenarios:
+        assert scenario.reconciles is True
+        assert scenario.mapped_tiv == scenario.total_tiv
+        assert scenario.failed_tiv == 0
+
+
+@needs_extract
+def test_the_envelope_bounds_each_multi_location_business_in_cell_terms(
+    batch, analyst, pilot_models
+):
+    """One candidate cell per site, which is what the brief's envelope means here."""
+    from apps.exposure import scenarios
+
+    comparison = scenarios.compare(
+        batch,
+        model_version=pilot_models["ID"],
+        cohort=extract.Cohort.C,
+        country="Indonesia",
+    )
+    assert comparison.envelope
+    for business_id, cells in comparison.envelope.items():
+        entry = next(
+            item for item in comparison.materiality if item.business_id == business_id
+        )
+        assert len(cells) == entry.area_peril_count
+        assert len(cells) <= entry.location_count
+
+
+@needs_extract
+def test_a_business_whose_schedule_straddles_cohorts_enters_neither(batch):
+    """PFAC9832 has sites in cohort A and cohort B, so it is complete in neither.
+
+    The whole-schedule rule doing its job on the real book: taking the cohort A
+    site alone would leave the policy's value with nowhere honest to go.
+    """
+    rows = [row.values for row in batch.location_rows.all()]
+    assignments = extract.assign_all(rows)
+    for cohort in (extract.Cohort.A, extract.Cohort.B):
+        selected = extract.business_complete(
+            rows, assignments, cohort=cohort, class_of_business=None
+        )
+        assert "PFAC9832" not in selected
+
+
+@needs_extract
+def test_the_real_comparison_is_reproducible(batch, analyst, pilot_models):
+    from apps.exposure import scenarios
+
+    def run():
+        return scenarios.compare(
+            batch,
+            model_version=pilot_models["ID"],
+            cohort=extract.Cohort.C,
+            country="Indonesia",
+        ).as_dict()
+
+    assert run() == run()
+
+
+@needs_extract
+def test_the_sensitivity_moves_the_amount_it_claims_to(batch, analyst, pilot_models):
+    """A stated 70/30 has to actually be a 70/30 at the model.
+
+    Every material business here schedules two sites, so equal-location puts
+    half at each and primary-concentrated puts 70% at one: exactly a fifth of
+    each business's value crosses between cells. Checking the magnitude rather
+    than only the direction is what catches a weighting that was applied to the
+    wrong denominator -- an error that nets to zero and looks correct.
+    """
+    from decimal import Decimal
+
+    from apps.exposure import scenarios
+
+    comparison = scenarios.compare(
+        batch,
+        model_version=pilot_models["ID"],
+        cohort=extract.Cohort.C,
+        country="Indonesia",
+    )
+    material = [item for item in comparison.materiality if item.material]
+    assert {item.location_count for item in material} == {2}
+
+    movement = comparison.movement(comparison.scenarios[1])
+    gross = sum((abs(amount) for amount in movement.values()), Decimal("0.00")) / 2
+    expected = comparison.material_tiv / 5
+
+    # Within a cent per business: the shares are exact rationals but the
+    # amounts are whole cents, so a residual can land either way.
+    assert abs(gross - expected) <= Decimal("0.01") * len(material)

@@ -26,11 +26,13 @@ from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from apps.common.permissions import IsProjectMember
 from apps.common.queries import visible_projects
+from apps.modelregistry.assets import ModelAssetError
+from apps.modelregistry.models import ModelVersion
 from apps.projects.models import Project
 from cass_oed.schema import FileKind
 
 from . import extract as extract_service
-from . import promotion, services
+from . import promotion, scenarios, services
 from .models import (
     AttributeOverride,
     EnrichmentRun,
@@ -501,6 +503,69 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
+
+    @action(detail=True, methods=["get"], url_path="allocation-scenarios")
+    def allocation_scenarios(self, request, pk=None, version=None):
+        """Compare multi-location allocation scenarios against a model version.
+
+        The question this answers is not "how does the value divide" -- the
+        allocation engine answers that exactly -- but "does the division
+        matter". It matters only where a business's sites fall in different
+        area-peril cells, so the comparison is run against a real grid and
+        reports the share of value for which the assumption is economically
+        live.
+
+        Nothing is promoted. An analyst can try scenarios freely and promote
+        the one they choose, which is the separate audited act.
+        """
+        batch = self.get_object()
+        model_reference = str(request.query_params.get("model_version") or "").strip()
+        if not model_reference:
+            return Response(
+                {
+                    "detail": (
+                        "Name the model version to compare against. A scenario "
+                        "comparison needs a grid: without one there is no way to say "
+                        "whether moving value between two sites changes anything."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        model_version = ModelVersion.objects.filter(id=model_reference).first()
+        if model_version is None:
+            return Response(
+                {"detail": f"No model version {model_reference}."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        requested = request.query_params.getlist("method") or None
+        try:
+            methods = (
+                tuple(cass_extract.AllocationMethod(item) for item in requested)
+                if requested
+                else scenarios.DEFAULT_METHODS
+            )
+            comparison = scenarios.compare(
+                batch,
+                model_version=model_version,
+                methods=methods,
+                cohort=cass_extract.Cohort(
+                    str(request.query_params.get("cohort") or "A")
+                ),
+                class_of_business=_requested_class(request.query_params),
+                country=str(request.query_params.get("country") or "").strip() or None,
+                occupancy=_requested_occupancy(request.query_params),
+            )
+        except (
+            promotion.PromotionError,
+            scenarios.ScenarioError,
+            cass_extract.AllocationError,
+            ModelAssetError,
+            ValueError,
+        ) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        return Response(comparison.as_dict())
 
     @action(detail=True, methods=["get"], url_path="coverage-template")
     def coverage_template(self, request, pk=None, version=None):
