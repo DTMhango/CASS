@@ -73,20 +73,3 @@ class User(UUIDModel, AbstractUser):
         """
         return self.is_platform_admin or self.platform_role == PlatformRole.REVIEWER
 
-    @property
-    def may_see_counterparty_names(self) -> bool:
-        """Whether insured, cedent and broker names may be shown to this person.
-
-        Section 10 restricts them to the roles whose work needs them: an
-        underwriter placing the business, an analyst working the portfolio, and
-        an administrator. A modeller builds a model from coordinates,
-        occupancy and value and never needs to know whose building it is, so
-        the default answer for everyone else is no.
-
-        This gates display and download, not storage. The names are part of the
-        source and are kept; what is controlled is who they reach.
-        """
-        return self.is_platform_admin or self.platform_role in (
-            PlatformRole.ANALYST,
-            PlatformRole.UNDERWRITER,
-        )

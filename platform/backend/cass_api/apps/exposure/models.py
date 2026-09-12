@@ -302,21 +302,26 @@ class ImportBatch(BaseModel):
     schema_version = models.CharField(max_length=80, blank=True)
     parser_version = models.CharField(max_length=32, blank=True)
     cohort_rule_version = models.CharField(max_length=32, blank=True)
-    join_rule_version = models.CharField(max_length=32, blank=True)
 
     state = models.CharField(
         max_length=16, choices=ImportState.choices, default=ImportState.PARSED
     )
 
     policy_row_count = models.IntegerField(default=0)
-    location_row_count = models.IntegerField(default=0)
+    risk_row_count = models.IntegerField(default=0)
 
     findings = models.JSONField(
         default=list,
         blank=True,
-        help_text="Type and required-value findings raised while parsing.",
+        help_text="Type, required-value and cross-sheet findings raised while parsing.",
     )
-    join_report = models.JSONField(default=dict, blank=True)
+    #: What the read found across the two sheets: the evidence tier every risk
+    #: sits in, accounts named on one sheet and not the other, and whether
+    #: anything blocks a promotion. It replaces the join report the retired
+    #: two-sheet format needed, and it is much shorter -- the account reference
+    #: is supplied on both sheets, so a mismatch is a contradiction between two
+    #: stated facts rather than a reconstruction that did not converge.
+    intake_report = models.JSONField(default=dict, blank=True)
     cohort_profile = models.JSONField(default=dict, blank=True)
 
     #: The exposure versions promoted out of this batch. A batch can produce
@@ -351,7 +356,7 @@ class ImportBatch(BaseModel):
     @property
     def blocking(self) -> bool:
         """Whether a finding stands that stops the batch being promoted."""
-        return bool((self.join_report or {}).get("blocking"))
+        return bool((self.intake_report or {}).get("blocking"))
 
     @property
     def may_accept(self) -> bool:
@@ -359,12 +364,12 @@ class ImportBatch(BaseModel):
 
 
 class SourcePolicyRow(BaseModel):
-    """One row of the Premium Policies sheet, as supplied.
+    """One row of the Policies sheet of a CASS intake template.
 
     The whole row is kept in ``values`` and ``raw``; the columns promoted to
-    fields are the ones the importer filters, joins and totals on. Section 5
-    keeps the reported text beside the typed value so no transformation
-    silently replaces what was supplied.
+    fields are the ones the importer filters and totals on. Section 5 keeps the
+    reported text beside the typed value so no transformation silently replaces
+    what was supplied.
     """
 
     batch = models.ForeignKey(
@@ -375,14 +380,15 @@ class SourcePolicyRow(BaseModel):
     policy_id = models.CharField(max_length=64, db_index=True)
     business_id = models.CharField(max_length=64, db_index=True)
 
-    #: Reported TIV at KRE's share, in USD. Section 5.1 of the brief: preserve
-    #: gross_limit as reported and never apply the share a second time.
-    gross_limit = models.DecimalField(
+    #: The policy's total insured value, at the share CASS writes. Optional:
+    #: it is supplied only where the risks do not state their own values, and
+    #: it is what the allocation scenarios divide. Never applied a second time
+    #: as a share -- the values are already at the share CASS writes.
+    policy_tiv = models.DecimalField(
         max_digits=22, decimal_places=2, null=True, blank=True
     )
-    risk_location_count = models.IntegerField(null=True, blank=True)
-    class_of_business = models.CharField(max_length=120, blank=True)
-    insured_country = models.CharField(max_length=120, blank=True)
+    currency = models.CharField(max_length=8, blank=True)
+    layer_number = models.IntegerField(null=True, blank=True)
 
     values = models.JSONField(default=dict, blank=True)
     raw = models.JSONField(default=dict, blank=True)
@@ -391,7 +397,8 @@ class SourcePolicyRow(BaseModel):
         ordering = ["row_number"]
         constraints = [
             models.UniqueConstraint(
-                fields=["batch", "policy_id"], name="unique_policy_per_batch"
+                fields=["batch", "business_id", "policy_id", "layer_number"],
+                name="unique_policy_layer_per_batch",
             )
         ]
         indexes = [models.Index(fields=["batch", "business_id"])]
@@ -401,11 +408,13 @@ class SourcePolicyRow(BaseModel):
 
 
 class SourceRiskLocation(BaseModel):
-    """One row of the Risk Locations sheet, with its cohort assignment.
+    """One row of the Risks sheet, with its cohort assignment.
 
-    ``(business_id, location_number)`` is the natural key the brief names, and
-    it is enforced here: a duplicate is a source defect, not something to
-    absorb quietly.
+    ``(business_id, location_number)`` is the natural key, and it is enforced
+    here: a duplicate is a source defect, not something to absorb quietly. The
+    reference is text because OED makes ``LocNumber`` text -- a schedule that
+    numbers its sites "SITE-A" is ordinary, and an integer column would have
+    read every one of them as zero.
     """
 
     batch = models.ForeignKey(
@@ -414,8 +423,17 @@ class SourceRiskLocation(BaseModel):
     row_number = models.IntegerField()
 
     business_id = models.CharField(max_length=64, db_index=True)
-    location_number = models.IntegerField()
+    location_number = models.CharField(max_length=64)
     primary_location = models.BooleanField(default=False)
+
+    #: Stated where the risk knows what it is worth but not how that splits
+    #: between coverages. Null where the risk states its coverages outright, and
+    #: null where it states nothing and awaits an allocation -- ``values`` says
+    #: which of the two, and they are different situations.
+    total_insured_value = models.DecimalField(
+        max_digits=22, decimal_places=2, null=True, blank=True
+    )
+    currency = models.CharField(max_length=8, blank=True)
 
     latitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True)
     longitude = models.DecimalField(max_digits=12, decimal_places=8, null=True, blank=True)
@@ -423,9 +441,8 @@ class SourceRiskLocation(BaseModel):
     precision = models.CharField(max_length=32, blank=True)
     needs_review = models.BooleanField(default=False)
     class_of_business = models.CharField(max_length=120, blank=True)
-    country = models.CharField(max_length=120, blank=True)
-    #: Validated ISO code, empty where the source country was not recognised.
-    #: A guess here would route a location to the wrong national grid.
+    #: ISO code, as the template asks for it. A name has spellings and a code
+    #: does not, and a wrong one routes a risk to the wrong national grid.
     country_code = models.CharField(max_length=2, blank=True)
 
     #: Section 4.4 asks for a deterministic location identifier. Derived from

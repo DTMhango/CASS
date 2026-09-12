@@ -68,7 +68,7 @@ TEMPLATE_COLUMNS = (
     *TAXONOMY_COLUMNS,
 )
 
-LocationKey = tuple[str, int]
+LocationKey = tuple[str, str]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -187,17 +187,9 @@ def read(payload: bytes | str, *, name: str = "supplied_location_values") -> Rep
 
     for line, row in enumerate(reader, start=2):
         business = str(row.get("AccNumber") or "").strip()
-        raw_number = str(row.get("LocNumber") or "").strip()
-        if not business and not raw_number:
+        number = str(row.get("LocNumber") or "").strip()
+        if not business and not number:
             continue
-        try:
-            number = int(raw_number)
-        except ValueError:
-            raise AllocationError(
-                f"Line {line} of the coverage file has an unreadable location number: "
-                f"{raw_number!r}."
-            ) from None
-
         key = (business, number)
         if key in values:
             raise AllocationError(

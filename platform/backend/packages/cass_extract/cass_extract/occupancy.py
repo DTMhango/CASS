@@ -52,7 +52,7 @@ OCCUPANCY_RULE_VERSION = "1.0.0"
 UNKNOWN_OCCUPANCY = "1000"
 UNKNOWN_CONSTRUCTION = "5000"
 
-LocationKey = tuple[str, int]
+LocationKey = tuple[str, str]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

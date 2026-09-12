@@ -232,15 +232,15 @@ def _coverage(key: str) -> Coverage:
 
 
 def split_locations(
-    totals: Mapping[tuple[str, int], Decimal], component_split: ComponentSplit
-) -> dict[tuple[str, int], dict[str, Decimal]]:
+    totals: Mapping[tuple[str, str], Decimal], component_split: ComponentSplit
+) -> dict[tuple[str, str], dict[str, Decimal]]:
     """Apply one split to every location total."""
     return {key: component_split.apply(amount) for key, amount in totals.items()}
 
 
 def reconciliation(
-    totals: Mapping[tuple[str, int], Decimal],
-    components: Mapping[tuple[str, int], Mapping[str, Decimal]],
+    totals: Mapping[tuple[str, str], Decimal],
+    components: Mapping[tuple[str, str], Mapping[str, Decimal]],
 ) -> dict[str, Any]:
     """Prove the components add back to the location totals.
 

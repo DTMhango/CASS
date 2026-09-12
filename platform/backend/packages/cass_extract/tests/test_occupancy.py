@@ -12,7 +12,7 @@ import pytest
 import cass_extract as extract
 from cass_extract.allocation import AllocationError, AllocationEvidence
 
-KEYS = [("B-1", 1), ("B-1", 2), ("B-2", 1), ("B-3", 1), ("B-3", 2), ("B-4", 1)]
+KEYS = [("B-1", "1"), ("B-1", "2"), ("B-2", "1"), ("B-3", "1"), ("B-3", "2"), ("B-4", "1")]
 
 
 # -- the assumption itself -----------------------------------------------------------
@@ -64,7 +64,7 @@ def test_two_assumptions_do_not_assign_alike():
 
 
 def test_weights_are_respected_across_a_portfolio():
-    keys = [("B", number) for number in range(2000)]
+    keys = [("B", str(number)) for number in range(2000)]
     counts = extract.MIXED_COMMERCIAL.distribution(keys)
     # 5:3:2 of 2000 is 1000/600/400, and a digest lands near it rather than on
     # it. Six keys can skew badly; two thousand cannot.
@@ -75,7 +75,7 @@ def test_weights_are_respected_across_a_portfolio():
 
 
 def test_the_distribution_names_every_class_even_an_unassigned_one():
-    counts = extract.MIXED_COMMERCIAL.distribution([("B-1", 1)])
+    counts = extract.MIXED_COMMERCIAL.distribution([("B-1", "1")])
     assert set(counts) == {item.label for item in extract.MIXED_COMMERCIAL.classes}
     assert sum(counts.values()) == 1
 
@@ -131,7 +131,7 @@ def test_only_the_assumption_that_asserts_nothing_is_approved():
 
 
 def test_the_unknown_assumption_writes_oed_unknown():
-    codes = extract.NOT_REPORTED.apply(("B-1", 1))
+    codes = extract.NOT_REPORTED.apply(("B-1", "1"))
     assert codes["OccupancyCode"] == extract.UNKNOWN_OCCUPANCY
     assert codes["ConstructionCode"] == extract.UNKNOWN_CONSTRUCTION
     assert extract.NOT_REPORTED.evidence is AllocationEvidence.REPORTED
@@ -139,7 +139,7 @@ def test_the_unknown_assumption_writes_oed_unknown():
 
 def test_an_analyst_supplied_assumption_needs_no_release():
     supplied = extract.uniform("warehouse_test_v1", "1150", "5200")
-    assert supplied.apply(("B-1", 1)) == {
+    assert supplied.apply(("B-1", "1")) == {
         "OccupancyCode": "1150",
         "ConstructionCode": "5200",
     }
@@ -152,22 +152,22 @@ def test_a_stated_occupancy_displaces_the_assumption():
     resolved = extract.assign_taxonomy(
         KEYS,
         extract.COMMERCIAL_GENERAL,
-        reported={("B-2", 1): {"OccupancyCode": "1050", "ConstructionCode": "5100"}},
+        reported={("B-2", "1"): {"OccupancyCode": "1050", "ConstructionCode": "5100"}},
     )
-    assert resolved[("B-2", 1)]["OccupancyCode"] == "1050"
-    assert resolved[("B-1", 1)]["OccupancyCode"] == "1100"
+    assert resolved[("B-2", "1")]["OccupancyCode"] == "1050"
+    assert resolved[("B-1", "1")]["OccupancyCode"] == "1100"
 
 
 def test_a_partly_completed_schedule_is_not_an_all_or_nothing_choice():
     resolved = extract.assign_taxonomy(
         KEYS,
         extract.COMMERCIAL_GENERAL,
-        reported={("B-2", 1): {"OccupancyCode": "1050"}},
+        reported={("B-2", "1"): {"OccupancyCode": "1050"}},
     )
     record = extract.taxonomy_record(
         extract.COMMERCIAL_GENERAL,
         resolved,
-        reported={("B-2", 1): {"OccupancyCode": "1050"}},
+        reported={("B-2", "1"): {"OccupancyCode": "1050"}},
     )
     assert record["source"] == "mixed_reported_and_assumed"
     assert record["reported_locations"] == 1
@@ -188,11 +188,11 @@ def test_a_fully_stated_schedule_is_recorded_as_reported():
 def test_a_blank_stated_code_falls_through_rather_than_blanking_the_row():
     """An empty cell is not an assertion that the occupancy is empty."""
     resolved = extract.assign_taxonomy(
-        [("B-1", 1)],
+        [("B-1", "1")],
         extract.COMMERCIAL_GENERAL,
-        reported={("B-1", 1): {"OccupancyCode": "", "ConstructionCode": ""}},
+        reported={("B-1", "1"): {"OccupancyCode": "", "ConstructionCode": ""}},
     )
-    assert resolved[("B-1", 1)]["OccupancyCode"] == "1100"
+    assert resolved[("B-1", "1")]["OccupancyCode"] == "1100"
 
 
 def test_the_record_says_the_assumption_is_unapproved():
@@ -217,7 +217,7 @@ def test_a_stated_taxonomy_is_read_back_from_a_completed_template():
         b"B-1,2,200.00,,\n"
     )
     assert dict(supplied.taxonomy) == {
-        ("B-1", 1): {"OccupancyCode": "1150", "ConstructionCode": "5200"}
+        ("B-1", "1"): {"OccupancyCode": "1150", "ConstructionCode": "5200"}
     }
 
 

@@ -28,8 +28,9 @@ import pytest
 
 import cass_extract as extract
 from apps.audit.models import AuditAction, AuditEvent
-from apps.exposure.extract import import_extract, transformation_manifest
+from apps.exposure.extract import import_portfolio, transformation_manifest
 from apps.exposure.models import SourcePolicyRow, SourceRiskLocation
+from cass_extract import intake
 
 pytestmark = [pytest.mark.integration, pytest.mark.django_db]
 
@@ -42,12 +43,25 @@ needs_extract = pytest.mark.skipif(
 
 
 @pytest.fixture()
-def batch(project, analyst):
-    payload = Path(EXTRACT_PATH).read_bytes()
-    return import_extract(
+def template_bytes():
+    """The confidential workbook, migrated once into a CASS intake template.
+
+    Migrated rather than read directly: CASS no longer ingests the two-sheet
+    shape, so the acceptance figures have to survive the conversion to mean
+    anything. That they do is itself the test that the retirement was safe.
+    """
+    from cass_extract import legacy
+
+    payload, _ = legacy.migrate(EXTRACT_PATH, project_reference="idn-fac-2026")
+    return payload
+
+
+@pytest.fixture()
+def batch(project, analyst, template_bytes):
+    return import_portfolio(
         project,
-        payload,
-        filename=Path(EXTRACT_PATH).name,
+        template_bytes,
+        filename="klapton-re-portfolio.xlsx",
         snapshot_date=dt.date(2026, 6, 30),
         actor=analyst,
     )
@@ -58,35 +72,64 @@ def batch(project, analyst):
 @needs_extract
 def test_the_declared_row_counts_are_read(batch):
     assert batch.policy_row_count == 1353
-    assert batch.location_row_count == 224
+    assert batch.risk_row_count == 224
     assert SourcePolicyRow.objects.filter(batch=batch).count() == 1353
     assert SourceRiskLocation.objects.filter(batch=batch).count() == 224
 
 
 @needs_extract
-def test_every_business_and_location_number_combination_is_unique(batch):
-    assert batch.join_report["unique_location_keys"] == 224
+def test_every_account_and_risk_reference_combination_is_unique(batch):
+    """224 risks, no duplicates. A duplicate would put a building in twice."""
+    assert SourceRiskLocation.objects.filter(batch=batch).count() == 224
+    assert "duplicate_risk" not in batch.intake_report["findings_by_code"]
 
 
 @needs_extract
 def test_the_primary_and_secondary_split_is_retained(batch):
-    assert batch.join_report["primary_locations"] == 213
-    assert batch.join_report["secondary_locations"] == 11
+    """213 primary sites and 11 secondary, as the brief states.
+
+    The flag survives the format change because the primary-concentrated
+    sensitivity needs it, and it needs it precisely on the multi-site accounts
+    whose values the migration leaves blank.
+    """
+    risks = SourceRiskLocation.objects.filter(batch=batch)
+    assert risks.filter(primary_location=True).count() == 213
+    assert risks.filter(primary_location=False).count() == 11
 
 
 @needs_extract
-def test_every_primary_coordinate_agrees_between_the_two_sheets(batch):
-    assert batch.join_report["primary_coordinate_mismatches"] == []
+def test_the_coordinate_disagreement_the_old_format_could_have_had_is_gone(batch):
+    """The retired workbook carried a coordinate on both sheets, so the two
+    could disagree and the join report had to check that they did not.
+
+    A risk is a row now and holds one coordinate, so there is nothing to
+    reconcile. The check is retired with the failure mode, rather than kept as
+    an assertion that can no longer fail.
+    """
+    risks = SourceRiskLocation.objects.filter(batch=batch)
+    assert risks.exclude(latitude=None).count() == 224
 
 
 @needs_extract
-def test_the_repeated_business_identifiers_are_reported_without_duplicating_a_location(
-    batch,
-):
-    """The fan-out the brief warns about, and the reason the join is reported."""
-    assert len(batch.join_report["businesses_with_many_policies"]) == 2
+def test_two_policies_on_one_account_no_longer_need_reporting(batch):
+    """The fan-out the brief warned about was a property of the inferred join.
+
+    Two accounts here carry two policies each. Under the old shape that was a
+    finding, because joining on the business reference alone would have
+    repeated their locations. The account reference is stated on both sheets
+    now, so two policies are two policies.
+    """
+    from django.db.models import Count
+
+    repeated = (
+        SourcePolicyRow.objects.filter(batch=batch)
+        .values("business_id")
+        .annotate(rows=Count("id"))
+        .filter(rows__gt=1)
+    )
+    assert repeated.count() == 2
     assert SourceRiskLocation.objects.filter(batch=batch).count() == 224
-    assert batch.join_report["duplicate_location_keys"] == []
+    assert batch.blocking is False
 
 
 @needs_extract
@@ -95,17 +138,27 @@ def test_the_source_checksum_and_parser_version_are_in_the_audit_trail(batch):
         subject_type="import_batch", subject_id=batch.id, action=AuditAction.CREATE
     ).first()
     assert event.after_reference["checksum"] == batch.source_checksum
-    assert event.after_reference["parser_version"] == extract.PARSER_VERSION
+    assert event.after_reference["parser_version"] == intake.PARSER_VERSION
     assert batch.source_checksum.startswith("sha256:")
 
 
 # -- the profile the brief describes ---------------------------------------------
 
 @needs_extract
-def test_the_reported_totals_match_the_brief(batch):
-    """USD 3.328bn total, USD 822.817m across geocoded businesses."""
-    assert batch.join_report["total_tiv"] == "3327746598.60"
-    assert batch.join_report["located_tiv"] == "822816504.04"
+def test_the_reported_totals_match_the_brief(batch, template_bytes):
+    """USD 3.328bn total, USD 822.817m across geocoded businesses.
+
+    Read off the migration rather than the batch: the batch holds what CASS
+    now models, and the ungeocoded remainder is precisely what it does not.
+    """
+    from decimal import Decimal
+
+    from cass_extract import legacy
+
+    _, migration = legacy.migrate(EXTRACT_PATH)
+    report = migration.as_dict()
+    assert Decimal(report["source_tiv"]) == Decimal("3327746598.60")
+    assert Decimal(report["geocoded_tiv"]) == Decimal("822816504.04")
 
 
 @needs_extract
@@ -128,9 +181,9 @@ def test_the_cohorts_are_the_sizes_the_country_screen_leaves(batch):
 @needs_extract
 def test_the_cohorts_split_by_country(batch):
     by_country = batch.cohort_profile["by_country"]
-    assert by_country["A"] == {"Indonesia": 51, "Nepal": 10}
-    assert by_country["B"] == {"Indonesia": 29, "Nepal": 15}
-    assert by_country["C"] == {"Indonesia": 110, "Nepal": 4}
+    assert by_country["A"] == {"ID": 51, "NP": 10}
+    assert by_country["B"] == {"ID": 29, "NP": 15}
+    assert by_country["C"] == {"ID": 110, "NP": 4}
 
 
 @needs_extract
@@ -157,17 +210,18 @@ def test_the_business_complete_benchmark_is_forty_two_risks(batch):
     """39 Indonesia and 3 Nepal, at USD 147,044,599.14 of KRE-share TIV."""
     from decimal import Decimal
 
-    locations = [row.values for row in SourceRiskLocation.objects.filter(batch=batch)]
-    assignments = extract.assign_all(locations)
-    complete = extract.business_complete(locations, assignments)
+    risks = list(SourceRiskLocation.objects.filter(batch=batch))
+    assignments = extract.assign_all([row.values for row in risks])
+    complete = extract.business_complete([row.values for row in risks], assignments)
 
     assert len(complete) == 42
+    # Every benchmark business holds one site, so each states its own value and
+    # no allocation applies. That is why the total can be read off the risks.
     total = sum(
         (
-            row.gross_limit or Decimal(0)
-            for row in SourcePolicyRow.objects.filter(
-                batch=batch, business_id__in=complete
-            )
+            row.total_insured_value or Decimal(0)
+            for row in risks
+            if row.business_id in complete
         ),
         Decimal(0),
     )
@@ -176,26 +230,33 @@ def test_the_business_complete_benchmark_is_forty_two_risks(batch):
 
 @needs_extract
 def test_the_real_extract_parses_without_a_single_finding(batch):
-    """Geocode confidence is categorical and the em dash means not applicable.
+    """One finding, and it is the state of the book rather than a defect.
 
-    Both were learned from this file. Reading confidence as a number, or the
-    em dash as a broken one, raised 4,457 findings and buried anything real.
+    1,138 accounts carry policy terms and no risks, because most of a
+    facultative book is not geocoded. Reporting that once with a count is
+    something a person can act on; reporting it 1,138 times is noise.
     """
-    assert batch.findings == []
+    assert [item["code"] for item in batch.findings] == ["policy_without_risks"]
+    assert batch.blocking is False
 
 
 @needs_extract
 def test_shared_coordinates_are_reported_rather_than_deduplicated(batch):
-    """167 distinct pairs across 224 locations; every row keeps its identity."""
-    assert batch.join_report["distinct_coordinates"] == 167
-    assert SourceRiskLocation.objects.filter(batch=batch).count() == 224
+    """167 distinct pairs across 224 risks; every row keeps its identity.
+
+    Two businesses can occupy one building, and collapsing them would lose a
+    risk. The pair count is a property of the portfolio rather than of a join,
+    so it is read off the staged rows.
+    """
+    risks = SourceRiskLocation.objects.filter(batch=batch)
+    assert risks.count() == 224
+    assert len({(row.latitude, row.longitude) for row in risks}) == 167
 
 
 @needs_extract
-def test_reimporting_the_real_extract_is_idempotent(batch, project, analyst):
-    payload = Path(EXTRACT_PATH).read_bytes()
-    again = import_extract(
-        project, payload, filename=Path(EXTRACT_PATH).name, actor=analyst
+def test_reimporting_the_real_extract_is_idempotent(batch, project, analyst, template_bytes):
+    again = import_portfolio(
+        project, template_bytes, filename="klapton-re-portfolio.xlsx", actor=analyst
     )
     assert again.id == batch.id
     assert SourceRiskLocation.objects.filter(batch=batch).count() == 224
@@ -506,7 +567,7 @@ def _keys_for(version, model):
 
 @needs_extract
 @pytest.mark.parametrize(
-    ("country", "code"), [("Indonesia", "ID"), ("Nepal", "NP")]
+    ("country", "code"), [("ID", "ID"), ("NP", "NP")]
 )
 def test_every_benchmark_location_maps_against_its_country_model(
     batch, analyst, pilot_models, country, code
@@ -525,7 +586,7 @@ def test_every_benchmark_location_maps_against_its_country_model(
 
 @needs_extract
 @pytest.mark.parametrize(
-    ("country", "code"), [("Indonesia", "ID"), ("Nepal", "NP")]
+    ("country", "code"), [("ID", "ID"), ("NP", "NP")]
 )
 def test_the_whole_kre_share_tiv_maps_and_reconciles(
     batch, analyst, pilot_models, country, code
@@ -556,8 +617,8 @@ def test_the_two_country_benchmark_splits_into_two_runnable_selections(batch, an
     from apps.exposure.promotion import promote
 
     whole = promote(batch, name="Whole benchmark", actor=analyst)
-    indonesia = promote(batch, name="Indonesia benchmark", country="Indonesia", actor=analyst)
-    nepal = promote(batch, name="Nepal benchmark", country="Nepal", actor=analyst)
+    indonesia = promote(batch, name="Indonesia benchmark", country="ID", actor=analyst)
+    nepal = promote(batch, name="Nepal benchmark", country="NP", actor=analyst)
 
     assert indonesia.location_count + nepal.location_count == whole.location_count == 42
     assert indonesia.total_tiv + nepal.total_tiv == whole.total_tiv == Decimal("147044599.14")
@@ -583,8 +644,8 @@ def test_the_benchmark_is_reproducible_key_for_key(batch, analyst, pilot_models)
     """A golden test that is not byte-identical between runs pins nothing."""
     from apps.exposure.promotion import promote
 
-    first = promote(batch, name="Benchmark one", country="Indonesia", actor=analyst)
-    second = promote(batch, name="Benchmark two", country="Indonesia", actor=analyst)
+    first = promote(batch, name="Benchmark one", country="ID", actor=analyst)
+    second = promote(batch, name="Benchmark two", country="ID", actor=analyst)
 
     rows_one = [item.as_row() for item in _keys_for(first, pilot_models["ID"]).records]
     rows_two = [item.as_row() for item in _keys_for(second, pilot_models["ID"]).records]
@@ -601,7 +662,7 @@ def test_the_real_benchmark_still_holds_at_the_gate_without_an_occupancy(
     version = promote(
         batch,
         name="Occupancy not reported",
-        country="Indonesia",
+        country="ID",
         occupancy=extract.NOT_REPORTED,
         actor=analyst,
     )
@@ -619,7 +680,7 @@ def test_the_real_benchmark_maps_across_the_grid_rather_than_into_one_cell(
     """42 risks in one cell would mean the grid, not the book, chose the answer."""
     from apps.exposure.promotion import promote
 
-    version = promote(batch, name="Benchmark", country="Indonesia", actor=analyst)
+    version = promote(batch, name="Benchmark", country="ID", actor=analyst)
     result = _keys_for(version, pilot_models["ID"])
     cells = {item.area_peril_id for item in result.successes}
     assert len(cells) > 10
@@ -638,7 +699,7 @@ def test_no_multi_location_business_reaches_the_benchmark(batch, analyst, pilot_
     from apps.exposure import scenarios
 
     comparison = scenarios.compare(
-        batch, model_version=pilot_models["ID"], country="Indonesia"
+        batch, model_version=pilot_models["ID"], country="ID"
     )
     assert comparison.total_holds is True
     assert [item.business_id for item in comparison.materiality if item.material] == []
@@ -664,7 +725,7 @@ def test_the_allocation_scenarios_move_value_between_cells_in_the_review_cohort(
         batch,
         model_version=pilot_models["ID"],
         cohort=extract.Cohort.C,
-        country="Indonesia",
+        country="ID",
     )
     material = [item for item in comparison.materiality if item.material]
 
@@ -684,7 +745,7 @@ def test_every_real_scenario_still_maps_completely(batch, analyst, pilot_models)
         batch,
         model_version=pilot_models["ID"],
         cohort=extract.Cohort.C,
-        country="Indonesia",
+        country="ID",
     )
     for scenario in comparison.scenarios:
         assert scenario.reconciles is True
@@ -703,7 +764,7 @@ def test_the_envelope_bounds_each_multi_location_business_in_cell_terms(
         batch,
         model_version=pilot_models["ID"],
         cohort=extract.Cohort.C,
-        country="Indonesia",
+        country="ID",
     )
     assert comparison.envelope
     for business_id, cells in comparison.envelope.items():
@@ -739,7 +800,7 @@ def test_the_real_comparison_is_reproducible(batch, analyst, pilot_models):
             batch,
             model_version=pilot_models["ID"],
             cohort=extract.Cohort.C,
-            country="Indonesia",
+            country="ID",
         ).as_dict()
 
     assert run() == run()
@@ -763,7 +824,7 @@ def test_the_sensitivity_moves_the_amount_it_claims_to(batch, analyst, pilot_mod
         batch,
         model_version=pilot_models["ID"],
         cohort=extract.Cohort.C,
-        country="Indonesia",
+        country="ID",
     )
     material = [item for item in comparison.materiality if item.material]
     assert {item.location_count for item in material} == {2}

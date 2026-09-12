@@ -1,18 +1,24 @@
-"""Importing the Klapton Re geocoded policy extract.
+"""Importing a completed CASS intake template.
 
-Work package 1 of the integration brief. The order matters and is the order
-below: register the source before reading it, parse both sheets independently,
-then join-report and assign cohorts over what was parsed.
+The order matters and is the order below: register the source before reading
+it, read both sheets, cross-check the join the file states, then assign cohorts
+over what was read.
 
 Registering first is the part that is easy to get backwards. A workbook that
 cannot be read is still evidence of what was supplied, and a source registered
 only on success means the one import anybody needs to investigate is the one
 nothing was kept for.
 
-Nothing here parses. ``cass_extract`` owns the contract, the coercion, the
-cohort rules and the join; this module supplies bytes, writes rows and records
-versions. That split is what lets the parsing rules be tested without a
-database and the storage rules without a workbook.
+Nothing here parses. ``cass_extract`` owns the profile, the coercion and the
+cohort rules; this module supplies bytes, writes rows and records versions.
+That split is what lets the reading rules be tested without a database and the
+storage rules without a workbook.
+
+Rows are staged under canonical names rather than the template's own column
+headings. A staged row is what the cohorts, the allocation and the promotion
+read, and none of them should have to know what a spreadsheet column was
+called -- which is also what lets a loading API populate these same tables
+without a file existing at all.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from apps.common.storage import bucket, get_store
 from cass_core.artifacts import AccessPolicy, RetentionClass
+from cass_extract import intake, profile
 
 from .models import (
     ImportBatch,
@@ -50,7 +57,7 @@ SOURCE_ROLE = "portfolio_extract_source"
 LOCATION_NAMESPACE = uuid.UUID("6f5b3f2c-1a44-4f0e-9a1d-0c9a4d6e5b71")
 
 
-def location_identity(checksum: str, business_id: str, location_number: int) -> uuid.UUID:
+def location_identity(checksum: str, business_id: str, location_number: str) -> uuid.UUID:
     """The deterministic internal identifier section 4.4 asks for."""
     return uuid.uuid5(LOCATION_NAMESPACE, f"{checksum}:{business_id}:{location_number}")
 
@@ -117,7 +124,7 @@ def register_source(
     return artifact
 
 
-def import_extract(
+def import_portfolio(
     project,
     payload: bytes,
     *,
@@ -126,13 +133,13 @@ def import_extract(
     actor=None,
     request=None,
 ) -> ImportBatch:
-    """Register, parse and profile one extract workbook.
+    """Register, read and profile one completed intake template.
 
     Re-importing the same bytes into the same project returns the batch that
-    already exists. The brief requires a rerun of the same checksum to be
-    idempotent, and a second batch with identical counts would be worse than
-    useless: a reader would have to work out which of two identical reads the
-    downstream work was based on.
+    already exists. A rerun of the same checksum has to be idempotent, and a
+    second batch with identical counts would be worse than useless: a reader
+    would have to work out which of two identical reads the downstream work was
+    based on.
     """
     artifact = register_source(
         project, payload, filename=filename, actor=actor, request=request
@@ -145,35 +152,31 @@ def import_extract(
         return existing
 
     try:
-        read = extract.read_workbook(_as_stream(payload))
+        read = intake.read_workbook(_as_stream(payload))
     except extract.ExtractReadError as exc:
         # The source is registered; the batch records that it could not be read.
         return _rejected(project, artifact, filename, snapshot_date, str(exc), actor)
 
-    policies = [row.values for row in read.policies]
-    locations = [row.values for row in read.locations]
-
-    report = extract.build_join_report(policies, locations)
-    assignments = extract.assign_all(locations)
-    cohort_profile = extract.cohort_profile(locations, assignments)
+    risks, policies = intake.records(read)
+    assignments = extract.assign_all(risks)
+    cohort_profile = extract.cohort_profile(risks, assignments)
 
     with transaction.atomic():
         batch = ImportBatch.objects.create(
             project=project,
-            profile=extract.PROFILE_NAME,
+            profile=profile.PROFILE_NAME,
             source_artifact=artifact,
             source_filename=filename[:255],
             source_checksum=artifact.checksum,
             snapshot_date=snapshot_date,
-            schema_version=extract.SCHEMA_VERSION,
-            parser_version=extract.PARSER_VERSION,
+            schema_version=intake.PROFILE_VERSION,
+            parser_version=intake.PARSER_VERSION,
             cohort_rule_version=extract.COHORT_RULE_VERSION,
-            join_rule_version=extract.JOIN_RULE_VERSION,
             state=ImportState.PARSED,
-            policy_row_count=len(read.policies),
-            location_row_count=len(read.locations),
+            policy_row_count=len(read.policies.rows),
+            risk_row_count=len(read.risks.rows),
             findings=[finding.as_dict() for finding in read.findings],
-            join_report=report.as_dict(),
+            intake_report=_intake_report(read),
             cohort_profile=cohort_profile.as_dict(),
             created_by=actor,
             updated_by=actor,
@@ -186,8 +189,8 @@ def import_extract(
             direction="input",
             defaults={"created_by": actor},
         )
-        _stage_policies(batch, read.policies)
-        _stage_locations(batch, read.locations, assignments)
+        _stage_policies(batch, policies)
+        _stage_risks(batch, risks, assignments)
 
     audit.record(
         action=AuditAction.CREATE,
@@ -201,7 +204,7 @@ def import_extract(
             "schema_version": batch.schema_version,
             "parser_version": batch.parser_version,
             "policy_rows": batch.policy_row_count,
-            "location_rows": batch.location_row_count,
+            "risk_rows": batch.risk_row_count,
             "blocking": batch.blocking,
         },
         request=request,
@@ -209,16 +212,45 @@ def import_extract(
     return batch
 
 
+def _intake_report(read) -> dict[str, Any]:
+    """What the read found across both sheets.
+
+    ``blocking`` is deliberately narrow. A file CASS cannot interpret at all
+    stops the import; a file describing a book that is only partly geocoded
+    does not, because that is the ordinary state of a facultative portfolio and
+    refusing it would leave an analyst nothing to work with.
+    """
+    counts: dict[str, int] = {}
+    for finding in read.findings:
+        counts[finding.code] = counts.get(finding.code, 0) + 1
+    return {
+        "profile_version": read.profile_version,
+        "parser_version": read.parser_version,
+        "readable": read.is_readable,
+        "has_policy_terms": read.has_policy_terms,
+        "risks": len(read.risks.rows),
+        "policies": len(read.policies.rows),
+        "accounts": len(read.accounts()),
+        "coverage_evidence": dict(intake.coverage_evidence(read)),
+        "findings_by_code": dict(sorted(counts.items())),
+        "unrecognised_columns": {
+            "risks": list(read.risks.unrecognised_columns),
+            "policies": list(read.policies.unrecognised_columns),
+        },
+        "blocking": not read.is_readable,
+    }
+
+
 def _rejected(project, artifact, filename, snapshot_date, reason, actor) -> ImportBatch:
     return ImportBatch.objects.create(
         project=project,
-        profile=extract.PROFILE_NAME,
+        profile=profile.PROFILE_NAME,
         source_artifact=artifact,
         source_filename=filename[:255],
         source_checksum=artifact.checksum,
         snapshot_date=snapshot_date,
-        schema_version=extract.SCHEMA_VERSION,
-        parser_version=extract.PARSER_VERSION,
+        schema_version=intake.PROFILE_VERSION,
+        parser_version=intake.PARSER_VERSION,
         state=ImportState.REJECTED,
         rejection_reason=reason,
         created_by=actor,
@@ -226,49 +258,49 @@ def _rejected(project, artifact, filename, snapshot_date, reason, actor) -> Impo
     )
 
 
-def _stage_policies(batch: ImportBatch, rows) -> None:
+def _stage_policies(batch: ImportBatch, records) -> None:
     SourcePolicyRow.objects.bulk_create(
         [
             SourcePolicyRow(
                 batch=batch,
-                row_number=row.row_number,
-                policy_id=str(row.get("policy_id") or "")[:64],
-                business_id=str(row.get("business_id") or "")[:64],
-                gross_limit=row.get("gross_limit"),
-                risk_location_count=row.get("risk_location_count"),
-                class_of_business=str(row.get("main_class_of_business") or "")[:120],
-                insured_country=str(row.get("insured_country") or "")[:120],
-                values=_jsonable(row.values),
-                raw=dict(row.raw),
+                row_number=record["row_number"],
+                policy_id=str(record.get("policy_id") or "")[:64],
+                business_id=str(record.get("business_id") or "")[:64],
+                policy_tiv=record.get("policy_tiv"),
+                currency=str(record.get("currency") or "")[:8],
+                layer_number=record.get("layer_number"),
+                values=_jsonable(record),
+                raw={},
                 created_by=batch.created_by,
             )
-            for row in rows
+            for record in records
         ],
         batch_size=500,
     )
 
 
-def _stage_locations(batch: ImportBatch, rows, assignments) -> None:
+def _stage_risks(batch: ImportBatch, records, assignments) -> None:
     SourceRiskLocation.objects.bulk_create(
         [
             SourceRiskLocation(
                 batch=batch,
-                row_number=row.row_number,
-                business_id=str(row.get("business_id") or "")[:64],
-                location_number=int(row.get("location_number") or 0),
+                row_number=record["row_number"],
+                business_id=str(record.get("business_id") or "")[:64],
+                location_number=str(record.get("location_number") or "")[:64],
                 cass_location_id=location_identity(
                     batch.source_checksum,
-                    str(row.get("business_id") or ""),
-                    int(row.get("location_number") or 0),
+                    str(record.get("business_id") or ""),
+                    str(record.get("location_number") or ""),
                 ),
-                primary_location=bool(row.get("primary_location")),
-                latitude=row.get("latitude"),
-                longitude=row.get("longitude"),
-                precision=str(row.get("precision") or "")[:32],
-                needs_review=bool(row.get("needs_review")),
-                class_of_business=str(row.get("class_of_business") or "")[:120],
-                country=str(row.get("country") or "")[:120],
-                country_code=extract.country_code(str(row.get("country") or "")),
+                primary_location=bool(record.get("primary_location")),
+                latitude=record.get("latitude"),
+                longitude=record.get("longitude"),
+                total_insured_value=record.get("location_tiv"),
+                currency=str(record.get("currency") or "")[:8],
+                precision=str(record.get("precision") or "")[:32],
+                needs_review=bool(record.get("needs_review")),
+                class_of_business=str(record.get("class_of_business") or "")[:120],
+                country_code=str(record.get("country_code") or "")[:2],
                 cohort=str(assignment.cohort),
                 cohort_reason=assignment.reason[:200],
                 cohort_rule_version=assignment.rule_version,
@@ -281,11 +313,11 @@ def _stage_locations(batch: ImportBatch, rows, assignments) -> None:
                     in (extract.Cohort.C, extract.Cohort.UNCLASSIFIED)
                     else ReviewState.NOT_REQUIRED
                 ),
-                values=_jsonable(row.values),
-                raw=dict(row.raw),
+                values=_jsonable(record),
+                raw={},
                 created_by=batch.created_by,
             )
-            for row, assignment in zip(rows, assignments, strict=True)
+            for record, assignment in zip(records, assignments, strict=True)
         ],
         batch_size=500,
     )
@@ -329,28 +361,35 @@ def accept(batch: ImportBatch, *, actor=None, request=None) -> ImportBatch:
 
 # -- the transformation manifest ----------------------------------------------
 
-def transformation_manifest(
-    batch: ImportBatch, *, include_confidential: bool = False
-) -> dict[str, Any]:
+def transformation_manifest(batch: ImportBatch) -> dict[str, Any]:
     """What was read, under which rules, and what it produced.
 
-    Downloadable, and without insured names by default. The default is the
-    important half: a manifest is the artefact most likely to be attached to a
-    ticket or an email, and section 10 restricts counterparty names to the
-    roles that need them. Asking for them is a decision someone makes; getting
-    them is not something that should happen by omission.
+    It carries counts, versions and cohort totals rather than the portfolio
+    itself -- not because the rows are withheld from anybody, but because a
+    manifest is a summary and one that reproduced the whole book would be a
+    copy of it. The rows are on the batch, for anyone who wants them.
     """
-    locations = list(batch.location_rows.all())
+    risks = list(batch.location_rows.all())
     policies_by_business: dict[str, list[SourcePolicyRow]] = {}
     for policy in batch.policy_rows.all():
         policies_by_business.setdefault(policy.business_id, []).append(policy)
 
     cohort_tiv: dict[str, str] = {}
-    for cohort, businesses in _businesses_by_cohort(locations).items():
+    for cohort, businesses in _businesses_by_cohort(risks).items():
         total = Decimal(0)
         for business_id in businesses:
-            for policy in policies_by_business.get(business_id, ()):
-                total += policy.gross_limit or Decimal(0)
+            # A risk that states its own value is the better number; the policy
+            # total is the fallback, and adding both would count it twice.
+            stated = sum(
+                (row.total_insured_value or Decimal(0))
+                for row in risks
+                if row.business_id == business_id
+            )
+            if stated:
+                total += stated
+            else:
+                for policy in policies_by_business.get(business_id, ()):
+                    total += policy.policy_tiv or Decimal(0)
         cohort_tiv[cohort] = str(total)
 
     manifest: dict[str, Any] = {
@@ -368,29 +407,22 @@ def transformation_manifest(
             "schema": batch.schema_version,
             "parser": batch.parser_version,
             "cohort_rules": batch.cohort_rule_version,
-            "join_rules": batch.join_rule_version,
         },
         "counts": {
             "policy_rows": batch.policy_row_count,
-            "location_rows": batch.location_row_count,
+            "risk_rows": batch.risk_row_count,
             "parse_findings": len(batch.findings or []),
         },
-        "join_report": batch.join_report,
+        "intake_report": batch.intake_report,
         "cohorts": batch.cohort_profile,
         "cohort_tiv_at_kre_share_usd": cohort_tiv,
-        "review_queue": _review_queue(locations),
+        "review_queue": _review_queue(risks),
         "value_basis": (
-            "gross_limit is reported TIV at KRE's share, in USD. The share is not "
+            "Insured values are stated at the share CASS writes. The share is not "
             "applied again during loss calculation, so a physical-damage result is "
-            "KRE-share gross damage rather than 100%-of-risk ground-up loss."
+            "gross damage at that share rather than 100%-of-risk ground-up loss."
         ),
-        "confidential_columns_included": include_confidential,
     }
-
-    if not include_confidential:
-        manifest["confidential_columns_withheld"] = sorted(
-            extract.RESTRICTED_COLUMNS
-        )
     return manifest
 
 
@@ -417,7 +449,8 @@ def _review_queue(locations) -> dict[str, Any]:
     pending = [item for item in locations if item.review_state == ReviewState.PENDING]
     by_country: dict[str, int] = {}
     for item in pending:
-        by_country[item.country or "unknown"] = by_country.get(item.country or "unknown", 0) + 1
+        code = item.country_code or "unknown"
+        by_country[code] = by_country.get(code, 0) + 1
     return {
         "pending": len(pending),
         "by_country": by_country,

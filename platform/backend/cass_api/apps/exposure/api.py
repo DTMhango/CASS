@@ -29,6 +29,8 @@ from apps.common.queries import visible_projects
 from apps.modelregistry.assets import ModelAssetError
 from apps.modelregistry.models import ModelVersion
 from apps.projects.models import Project
+from cass_extract import profile as intake_profile
+from cass_extract import template as intake_template
 from cass_oed.schema import FileKind
 
 from . import extract as extract_service
@@ -344,8 +346,8 @@ class ImportBatchSerializer(serializers.ModelSerializer):
         fields = [
             "id", "project", "profile", "state", "source_filename",
             "source_checksum", "snapshot_date", "schema_version", "parser_version",
-            "cohort_rule_version", "join_rule_version", "policy_row_count",
-            "location_row_count", "findings", "join_report", "cohort_profile",
+            "cohort_rule_version", "policy_row_count",
+            "risk_row_count", "findings", "intake_report", "cohort_profile",
             "blocking", "may_accept", "rejection_reason", "accepted_at",
             "created_at",
         ]
@@ -367,17 +369,21 @@ class SourceRiskLocationSerializer(serializers.ModelSerializer):
         fields = [
             "id", "row_number", "business_id", "location_number",
             "primary_location", "latitude", "longitude", "precision",
-            "needs_review", "class_of_business", "country", "country_code",
-            "cohort", "cohort_reason", "cohort_rule_version", "review_state",
-            "review_note", "reviewed_at", "address",
+            "needs_review", "class_of_business", "country_code",
+            "total_insured_value", "cohort", "cohort_reason",
+            "cohort_rule_version", "review_state", "review_note", "reviewed_at",
+            "address",
         ]
         read_only_fields = fields
 
-    def get_address(self, obj) -> str | None:
-        user = self.context["request"].user
-        if not getattr(user, "may_see_counterparty_names", False):
-            return None
-        return obj.values.get("risk_location_address") or ""
+    def get_address(self, obj) -> str:
+        """The risk address, to every project member.
+
+        Checking a coordinate against the address it came from is the whole of
+        the geocoding review, so withholding it from a modeller would withhold
+        the evidence from the person doing the work.
+        """
+        return (obj.values or {}).get("address") or ""
 
 
 class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
@@ -401,15 +407,52 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
             project__in=visible_projects(self.request.user)
         ).select_related("project", "source_artifact")
 
+    @action(detail=False, methods=["get"], url_path="template")
+    def template(self, request, version=None):
+        """Download a blank CASS intake template.
+
+        Generated from the profile rather than kept as a file beside it, so the
+        workbook a person fills in can never describe a mapping the platform
+        does not implement.
+        """
+        project = Project.objects.filter(
+            id=request.query_params.get("project"),
+            id__in=[item.id for item in visible_projects(request.user)],
+        ).first()
+        payload = intake_template.workbook(
+            project_reference=project.reference if project else ""
+        )
+        response = HttpResponse(
+            payload,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+        response["Content-Disposition"] = (
+            'attachment; filename="cass-portfolio-intake.xlsx"'
+        )
+        return response
+
+    @action(detail=False, methods=["get"], url_path="profile")
+    def profile(self, request, version=None):
+        """The intake profile: every column, and the OED field it lands in.
+
+        Published as data because three things read it -- the template a person
+        downloads, the reader that interprets a completed one, and any loading
+        API that populates CASS from a source system. A mapping reimplemented
+        by a caller is a mapping that drifts.
+        """
+        return Response(intake_profile.as_dict())
+
     @action(detail=False, methods=["post"], url_path="upload")
     def upload(self, request, version=None):
-        """Register, parse and profile one extract workbook."""
+        """Register, read and profile one completed intake template."""
         project_id = request.data.get("project")
         upload = request.FILES.get("file")
 
         if not upload:
             return Response(
-                {"detail": "Attach the extract workbook as 'file'."},
+                {"detail": "Attach the completed intake template as 'file'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         project = Project.objects.filter(
@@ -432,7 +475,7 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         snapshot_date = parse_date(str(request.data.get("snapshot_date") or "")) or None
-        batch = extract_service.import_extract(
+        batch = extract_service.import_portfolio(
             project,
             upload.read(),
             filename=upload.name,
@@ -472,20 +515,14 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["get"])
     def manifest(self, request, pk=None, version=None):
-        """The transformation manifest, without insured names by default."""
-        batch = self.get_object()
-        include = str(request.query_params.get("include_confidential", "")).lower() in (
-            "1", "true", "yes"
-        )
-        if include and not getattr(request.user, "may_see_counterparty_names", False):
-            return Response(
-                {
-                    "detail": "You may not download a manifest containing counterparty names.",
-                    "hint": "Request it without include_confidential.",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        """What was read, under which rules, and what it produced.
 
+        Downloaded rather than displayed, so the download is audited: a
+        manifest is the artefact most likely to be attached to a ticket or an
+        email, and knowing which of them left the platform is worth more than
+        deciding who may ask for one.
+        """
+        batch = self.get_object()
         audit.record(
             action=AuditAction.DOWNLOAD,
             subject_type="import_batch",
@@ -493,14 +530,9 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
             actor=request.user,
             project=batch.project,
             subject_label=str(batch),
-            after={"include_confidential": include},
             request=request,
         )
-        return Response(
-            extract_service.transformation_manifest(
-                batch, include_confidential=include
-            )
-        )
+        return Response(extract_service.transformation_manifest(batch))
 
 
 
@@ -567,41 +599,6 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response(comparison.as_dict())
 
-    @action(detail=True, methods=["get"], url_path="coverage-template")
-    def coverage_template(self, request, pk=None, version=None):
-        """A CSV of the selected locations, ready for real coverage values.
-
-        The other half of the coverage story. A percentage split is fine when
-        nobody knows the breakdown, but OED lets a schedule carry whatever
-        numbers each row actually has, and this is how someone supplies them:
-        download, fill in, post back with the promotion.
-
-        The allocated total travels with each row so a person can see what they
-        are overriding, and it is not one of the coverage columns.
-        """
-        batch = self.get_object()
-        try:
-            rows = promotion.template_rows(
-                batch,
-                cohort=cass_extract.Cohort(str(request.query_params.get("cohort") or "A")),
-                class_of_business=_requested_class(request.query_params),
-                allocation_method=cass_extract.AllocationMethod(
-                    str(
-                        request.query_params.get("allocation_method")
-                        or cass_extract.AllocationMethod.EQUAL_LOCATION
-                    )
-                ),
-            )
-        except (promotion.PromotionError, cass_extract.AllocationError, ValueError) as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-
-        payload = cass_extract.component_template(rows)
-        response = HttpResponse(payload, content_type="text/csv")
-        response["Content-Disposition"] = (
-            f'attachment; filename="coverage-template-{batch.id}.csv"'
-        )
-        return response
-
     @action(detail=True, methods=["post"])
     def promote(self, request, pk=None, version=None):
         """Turn a cohort selection into a published OED exposure version.
@@ -611,15 +608,12 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         Every one of them is recorded on the version that results, so a later
         reader can see what produced it and run it again differently.
 
-        Coverage values may be supplied outright. Post a completed coverage
-        template as ``coverage_file`` and those numbers are used as given, in
-        whatever proportions each row carries -- which is how OED works, and
-        what the brief's evidence hierarchy ranks above any split. Without one,
-        a named or custom percentage split applies.
-
-        Occupancy works the same way. The template's ``OccupancyCode`` and
-        ``ConstructionCode`` columns are used where a row states them, and
-        ``occupancy`` names the assumption that fills the rest.
+        Coverage values, occupancy and construction come from the intake
+        template itself, row by row, and are used exactly as stated. The
+        assumptions named here fill only what a schedule left blank: a
+        component split where a risk states a total but no breakdown, an
+        allocation where it states neither, and an occupancy where it names
+        none.
 
         ``country`` narrows the selection to one country, because a model
         version covers one. A business with sites in two is excluded from both
@@ -652,21 +646,7 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
 
         class_of_business = _requested_class(request.data)
 
-        upload = request.FILES.get("coverage_file")
-        accept_restated = str(
-            request.data.get("accept_restated_total", "")
-        ).lower() in ("1", "true", "yes")
-
         try:
-            reported = (
-                cass_extract.read_reported_components(
-                    upload.read(), name=upload.name
-                )
-                if upload
-                else None
-            )
-            split = _requested_split(request.data)
-            occupancy = _requested_occupancy(request.data)
             exposure = promotion.promote(
                 batch,
                 name=name,
@@ -674,10 +654,8 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
                 class_of_business=class_of_business,
                 country=str(request.data.get("country") or "").strip() or None,
                 allocation_method=method,
-                component_split=split,
-                occupancy=occupancy,
-                reported_components=reported,
-                accept_restated_total=accept_restated,
+                component_split=_requested_split(request.data),
+                occupancy=_requested_occupancy(request.data),
                 actor=request.user,
                 request=request,
             )

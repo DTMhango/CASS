@@ -290,7 +290,6 @@ def compare(
     country: str | None = None,
     component_split: extract.ComponentSplit | None = None,
     occupancy: extract.OccupancyAssumption | None = None,
-    reported_components: extract.ReportedComponents | None = None,
 ) -> ScenarioComparison:
     """Prepare one selection under several allocations and map each to the model.
 
@@ -335,7 +334,6 @@ def compare(
             allocation_method=method,
             component_split=component_split,
             occupancy=occupancy,
-            reported_components=reported_components,
         )
         result = lookup(prepared.rows, grid=grid, vulnerability=vulnerability)
 
@@ -353,13 +351,18 @@ def compare(
                 value[account] = value.get(account, Decimal("0.00")) + record.tiv
 
         if position == 0:
-            # Coverage values supplied per row displace the division for the
-            # whole selection; a reported allocation displaces it per policy.
-            # Either way the business has stated where its value is.
-            if prepared.coverage_record["source"] == "reported_location_values":
-                reported.update(
-                    str(row["AccNumber"]) for row in prepared.rows
+            # A risk that states its own value -- as coverages or as a total
+            # -- was never allocated, so no scenario can move it. A reported
+            # allocation says the same thing at the policy level.
+            reported.update(
+                row.business_id
+                for row in prepared.locations
+                if (row.values or {}).get("location_tiv") is not None
+                or any(
+                    (row.values or {}).get(column) is not None
+                    for column in promotion._COVERAGE_COLUMNS
                 )
+            )
             reported.update(
                 item.business_id
                 for item in prepared.allocation.allocations

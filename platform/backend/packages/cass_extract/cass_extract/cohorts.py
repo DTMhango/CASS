@@ -70,9 +70,12 @@ class Cohort(enum.StrEnum):
 #: border. The 30 June 2026 extract carries five such rows, two of them at
 #: street or better precision with no review flag -- a geocoder can be confident
 #: and wrong, which is why precision alone cannot decide eligibility.
+#: Keyed by ISO code rather than country name. The intake template asks for the
+#: code, because a name has spellings and a code does not, and a screen that
+#: matched on "Indonesia" would silently pass "indonesia " or "INDONESIA".
 NATIONAL_BOUNDS: Mapping[str, tuple[Decimal, Decimal, Decimal, Decimal]] = {
-    "indonesia": (Decimal("-11.5"), Decimal("6.5"), Decimal("94.5"), Decimal("141.5")),
-    "nepal": (Decimal("26.0"), Decimal("30.7"), Decimal("79.9"), Decimal("88.4")),
+    "ID": (Decimal("-11.5"), Decimal("6.5"), Decimal("94.5"), Decimal("141.5")),
+    "NP": (Decimal("26.0"), Decimal("30.7"), Decimal("79.9"), Decimal("88.4")),
 }
 
 
@@ -82,7 +85,7 @@ def within_stated_country(location: Mapping[str, Any]) -> bool | None:
     ``None`` where the country is not one the screen knows, so an unrecognised
     country is reported as unscreened rather than quietly passed or failed.
     """
-    bounds = NATIONAL_BOUNDS.get(str(location.get("country") or "").strip().lower())
+    bounds = NATIONAL_BOUNDS.get(str(location.get("country_code") or "").strip().upper())
     if bounds is None:
         return None
     latitude, longitude = location.get("latitude"), location.get("longitude")
@@ -167,8 +170,8 @@ def assign(location: Mapping[str, Any]) -> Assignment:
     if consistent is False:
         return made(
             Cohort.UNCLASSIFIED,
-            f"The coordinate is outside {location.get('country')}, so it does not "
-            "describe the risk the row names.",
+            f"The coordinate is outside {location.get('country_code')}, so it does "
+            "not describe the risk the row names.",
         )
 
     if _is_yes(location.get("needs_review")):
@@ -177,8 +180,9 @@ def assign(location: Mapping[str, Any]) -> Assignment:
     if consistent is None:
         return made(
             Cohort.UNCLASSIFIED,
-            f"No country screen exists for {location.get('country') or 'an unnamed country'}, "
-            "so the coordinate could not be checked against it.",
+            "No country screen exists for "
+            f"{location.get('country_code') or 'an unnamed country'}, so the "
+            "coordinate could not be checked against it.",
         )
 
     precision = str(location.get("precision") or "").strip().lower()
@@ -232,7 +236,7 @@ def cohort_profile(
         cohort = str(assignment.cohort)
         counts[cohort] = counts.get(cohort, 0) + 1
 
-        country = str(location.get("country") or "unknown").strip()
+        country = str(location.get("country_code") or "unknown").strip()
         by_country.setdefault(cohort, {})
         by_country[cohort][country] = by_country[cohort].get(country, 0) + 1
 
@@ -266,7 +270,8 @@ def business_complete(
     version covers one country, so a portfolio spanning two cannot be run
     against either. Selecting by country is how a two-country book becomes two
     runs, and the whole-schedule rule means a business with sites in both is
-    excluded from both rather than split across them.
+    excluded from both rather than split across them. It takes the ISO code the
+    intake template asks for, matched without regard to case.
     """
     schedules: dict[str, list[bool]] = {}
     for location, assignment in zip(locations, assignments, strict=True):
@@ -278,7 +283,8 @@ def business_complete(
             )
         if country is not None:
             qualifies = qualifies and (
-                str(location.get("country") or "").strip().lower() == country.strip().lower()
+                str(location.get("country_code") or "").strip().upper()
+                == country.strip().upper()
             )
         schedules.setdefault(business_id, []).append(qualifies)
 

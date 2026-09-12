@@ -63,6 +63,7 @@ from cass_oed.schema import (
 #: Bumped when a column is added, removed or rebound to a different OED field.
 #: A completed template records it, so a file filled in under an earlier profile
 #: stays interpretable.
+PROFILE_NAME = "CASS portfolio intake"
 PROFILE_VERSION = "cass-portfolio-intake/1.0.0"
 
 #: The sheet names a workbook carries.

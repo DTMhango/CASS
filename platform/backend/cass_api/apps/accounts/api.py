@@ -39,7 +39,6 @@ class UserSerializer(serializers.ModelSerializer):
             "publish_models": obj.may_publish_models,
             "approve_gates": obj.may_approve_gates,
             "administer_platform": obj.is_platform_admin,
-            "see_counterparty_names": obj.may_see_counterparty_names,
         }
 
 

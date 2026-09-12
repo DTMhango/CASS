@@ -14,6 +14,7 @@ package, which carries every awkward shape the real one has.
 
 from __future__ import annotations
 
+import io
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -27,7 +28,7 @@ from apps.audit.models import AuditAction, AuditEvent
 from apps.exposure.extract import (
     ExtractImportError,
     accept,
-    import_extract,
+    import_portfolio,
     transformation_manifest,
 )
 from apps.exposure.models import (
@@ -37,8 +38,10 @@ from apps.exposure.models import (
     SourcePolicyRow,
     SourceRiskLocation,
 )
+from cass_extract import intake
+from cass_extract import profile as intake_profile
 
-from .conftest import API, make_user
+from .conftest import API
 
 # The synthetic extract lives with the package whose rules it exercises.
 _FIXTURES = (
@@ -47,20 +50,19 @@ _FIXTURES = (
 if str(_FIXTURES) not in sys.path:
     sys.path.insert(0, str(_FIXTURES))
 
-from fixtures import as_workbook, structural_extract  # noqa: E402
+from fixtures import as_template, structural_template  # noqa: E402
 
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture()
 def workbook() -> bytes:
-    policies, locations = structural_extract()
-    return as_workbook(policies, locations).getvalue()
+    return as_template()
 
 
 @pytest.fixture()
 def batch(project, analyst, workbook) -> ImportBatch:
-    return import_extract(
+    return import_portfolio(
         project, workbook, filename="extract.xlsx", actor=analyst
     )
 
@@ -69,7 +71,7 @@ def batch(project, analyst, workbook) -> ImportBatch:
 
 def test_the_source_is_registered_before_it_is_parsed(project, analyst):
     """A workbook that cannot be read is still evidence of what was supplied."""
-    result = import_extract(
+    result = import_portfolio(
         project, b"not a workbook", filename="broken.xlsx", actor=analyst
     )
 
@@ -104,21 +106,34 @@ def test_the_source_is_linked_to_the_batch_that_read_it(batch):
 
 def test_both_sheets_are_staged(batch):
     assert batch.policy_row_count == 10
-    assert batch.location_row_count == 11
+    assert batch.risk_row_count == 11
     assert SourcePolicyRow.objects.filter(batch=batch).count() == 10
     assert SourceRiskLocation.objects.filter(batch=batch).count() == 11
 
 
-def test_reported_value_is_staged_as_decimal_at_kre_share(batch):
+def test_a_policy_total_is_staged_as_a_decimal(batch):
+    """A float would lose the reconciliation everything downstream rests on."""
     row = SourcePolicyRow.objects.get(batch=batch, policy_id="P-1")
-    assert row.gross_limit == Decimal("1000000.00")
-    assert row.values["gross_limit"] == "1000000.00"
+    assert row.policy_tiv == Decimal("1000000.00")
+    assert row.values["policy_tiv"] == "1000000.00"
 
 
-def test_the_source_text_survives_staging(batch):
-    """Section 5: no transformation silently replaces a reported field."""
-    row = SourcePolicyRow.objects.get(batch=batch, policy_id="P-1")
-    assert row.raw["gross_limit"] == "1000000.00"
+def test_a_risk_that_states_its_value_is_staged_with_it(batch):
+    row = SourceRiskLocation.objects.get(batch=batch, business_id="B-SINGLE")
+    assert row.total_insured_value == Decimal("1000000.00")
+
+
+def test_a_risk_that_states_no_value_is_staged_as_stating_none(batch):
+    """Null, not zero. The two mean different things and only one is a value."""
+    rows = SourceRiskLocation.objects.filter(batch=batch, business_id="B-MULTI")
+    assert rows.count() == 3
+    assert all(row.total_insured_value is None for row in rows)
+
+
+def test_a_risk_reference_is_kept_as_text(batch):
+    """OED makes it text, and a schedule numbering its sites SITE-A is ordinary."""
+    row = SourceRiskLocation.objects.get(batch=batch, business_id="B-SINGLE")
+    assert row.location_number == "1"
 
 
 def test_secondary_locations_are_staged_not_filtered_away(batch):
@@ -128,32 +143,36 @@ def test_secondary_locations_are_staged_not_filtered_away(batch):
     assert multi.filter(primary_location=False).count() == 2
 
 
-def test_a_country_is_mapped_to_a_validated_iso_code(batch):
+def test_the_country_is_staged_as_the_iso_code_the_template_asks_for(batch):
     nepal = SourceRiskLocation.objects.get(batch=batch, business_id="B-NEPAL")
-    assert nepal.country == "Nepal"
     assert nepal.country_code == "NP"
 
 
-def test_an_unrecognised_country_leaves_the_code_empty(project, analyst):
-    """A guess here would route a location to the wrong national grid."""
-    policies, locations = structural_extract()
-    locations[0]["country"] = "Atlantis"
-    result = import_extract(
-        project, as_workbook(policies, locations).getvalue(),
-        filename="extract.xlsx", actor=analyst,
+def test_a_country_with_no_grid_is_staged_and_left_unclassified(project, analyst):
+    """Not refused: the row is real, and a person has to see it to fix it.
+
+    What must not happen is a coordinate in a country CASS cannot screen being
+    treated as eligible, so the cohort rules place it nowhere.
+    """
+
+    risks, policies = structural_template()
+    risks[0]["Country"] = "FR"
+    result = import_portfolio(
+        project, as_template(risks, policies), filename="p.xlsx", actor=analyst
     )
     row = SourceRiskLocation.objects.get(batch=result, business_id="B-SINGLE")
-    assert row.country_code == ""
+    assert row.country_code == "FR"
+    assert row.cohort == str(extract.Cohort.UNCLASSIFIED)
+    assert "No country screen" in row.cohort_reason
 
 
 # -- versions in the audit trail -----------------------------------------------
 
 def test_the_batch_records_every_rule_version_that_decided_it(batch):
-    assert batch.schema_version == extract.SCHEMA_VERSION
-    assert batch.parser_version == extract.PARSER_VERSION
+    assert batch.schema_version == intake.PROFILE_VERSION
+    assert batch.parser_version == intake.PARSER_VERSION
     assert batch.cohort_rule_version == extract.COHORT_RULE_VERSION
-    assert batch.join_rule_version == extract.JOIN_RULE_VERSION
-    assert batch.profile == "Klapton Re geocoded policy extract"
+    assert batch.profile == intake_profile.PROFILE_NAME
 
 
 def test_the_checksum_and_parser_version_reach_the_audit_trail(batch):
@@ -162,11 +181,11 @@ def test_the_checksum_and_parser_version_reach_the_audit_trail(batch):
     ).first()
     assert event is not None
     assert event.after_reference["checksum"] == batch.source_checksum
-    assert event.after_reference["parser_version"] == extract.PARSER_VERSION
+    assert event.after_reference["parser_version"] == intake.PARSER_VERSION
 
 
 def test_the_upload_is_audited_without_a_row_of_the_source(project, analyst, workbook):
-    import_extract(project, workbook, filename="extract.xlsx", actor=analyst)
+    import_portfolio(project, workbook, filename="extract.xlsx", actor=analyst)
     event = AuditEvent.objects.filter(
         subject_type="project", action=AuditAction.UPLOAD
     ).first()
@@ -177,8 +196,8 @@ def test_the_upload_is_audited_without_a_row_of_the_source(project, analyst, wor
 
 def test_reimporting_the_same_bytes_returns_the_same_batch(project, analyst, workbook):
     """Section 8: rerunning the same checksum is idempotent."""
-    first = import_extract(project, workbook, filename="extract.xlsx", actor=analyst)
-    second = import_extract(project, workbook, filename="extract.xlsx", actor=analyst)
+    first = import_portfolio(project, workbook, filename="extract.xlsx", actor=analyst)
+    second = import_portfolio(project, workbook, filename="extract.xlsx", actor=analyst)
 
     assert first.id == second.id
     assert ImportBatch.objects.filter(project=project).count() == 1
@@ -186,61 +205,82 @@ def test_reimporting_the_same_bytes_returns_the_same_batch(project, analyst, wor
 
 
 def test_a_different_extract_is_a_different_batch(project, analyst, workbook):
-    policies, locations = structural_extract()
-    policies[0]["gross_limit"] = "1100000.00"
-    other = as_workbook(policies, locations).getvalue()
+    risks, policies = structural_template()
+    policies[0]["Total insured value"] = "1100000.00"
+    other = as_template(risks, policies)
 
-    import_extract(project, workbook, filename="a.xlsx", actor=analyst)
-    import_extract(project, other, filename="b.xlsx", actor=analyst)
+    import_portfolio(project, workbook, filename="a.xlsx", actor=analyst)
+    import_portfolio(project, other, filename="b.xlsx", actor=analyst)
     assert ImportBatch.objects.filter(project=project).count() == 2
 
 
-# -- the join report ------------------------------------------------------------
+# -- the intake report ------------------------------------------------------------
 
-def test_the_join_report_is_stored_with_the_batch(batch):
-    report = batch.join_report
-    assert report["policy_rows"] == 10
-    assert report["location_rows"] == 11
-    assert report["unique_location_keys"] == 11
-    assert report["primary_locations"] == 8
-    assert report["secondary_locations"] == 3
-
-
-def test_a_business_on_two_policy_rows_blocks_acceptance(batch, analyst):
-    """Joining on the business reference alone would repeat its locations."""
-    assert batch.blocking is True
-    assert batch.may_accept is False
-
-    with pytest.raises(ExtractImportError, match="blocking join finding"):
-        accept(batch, actor=analyst)
+def test_the_intake_report_is_stored_with_the_batch(batch):
+    report = batch.intake_report
+    assert report["risks"] == 11
+    assert report["policies"] == 10
+    assert report["accounts"] == 8
+    assert report["readable"] is True
+    assert report["has_policy_terms"] is True
 
 
-def test_a_clean_extract_can_be_accepted(project, analyst):
-    policies, locations = structural_extract()
-    policies = [p for p in policies if p["policy_id"] != "P-4b"]
-    clean = import_extract(
-        project, as_workbook(policies, locations).getvalue(),
-        filename="clean.xlsx", actor=analyst,
+def test_the_report_says_which_evidence_tier_each_risk_sits_in(batch):
+    """The number that says which assumptions are in play at all."""
+    evidence = batch.intake_report["coverage_evidence"]
+    assert evidence["risks"] == 11
+    assert evidence["risk_total_stated"] == 6
+    assert evidence["allocated_from_policy"] == 5
+
+
+def test_two_policies_on_one_account_are_ordinary_now(batch):
+    """They were a blocking join finding when the join had to be inferred.
+
+    The account reference is on both sheets because a person put it there, so
+    two policies over one schedule are two policies -- layers, sections, a
+    renewal -- rather than evidence that a reconstruction went wrong.
+    """
+    assert SourcePolicyRow.objects.filter(
+        batch=batch, business_id="B-TWOPOL"
+    ).count() == 2
+    assert batch.blocking is False
+    assert batch.may_accept is True
+
+
+def test_an_account_with_policy_terms_and_no_risks_is_reported_not_blocking(batch):
+    """Most of a facultative book is not geocoded. That is a state, not a defect."""
+    codes = batch.intake_report["findings_by_code"]
+    assert codes["policy_without_risks"] == 1
+    assert batch.blocking is False
+
+
+def test_a_file_that_cannot_be_read_blocks(project, analyst):
+    from openpyxl import Workbook
+
+    book = Workbook()
+    book.active.title = "Sheet1"
+    buffer = io.BytesIO()
+    book.save(buffer)
+
+    rejected = import_portfolio(
+        project, buffer.getvalue(), filename="wrong.xlsx", actor=analyst
     )
-    assert clean.blocking is False
-
-    accept(clean, actor=analyst)
-    clean.refresh_from_db()
-    assert clean.state == ImportState.ACCEPTED
-    assert clean.accepted_by_id == analyst.id
-    assert clean.accepted_at is not None
+    assert rejected.state == ImportState.REJECTED
+    assert "not a CASS intake template" in rejected.rejection_reason
 
 
-def test_a_batch_cannot_be_accepted_twice(project, analyst):
-    policies, locations = structural_extract()
-    policies = [p for p in policies if p["policy_id"] != "P-4b"]
-    clean = import_extract(
-        project, as_workbook(policies, locations).getvalue(),
-        filename="clean.xlsx", actor=analyst,
-    )
-    accept(clean, actor=analyst)
+def test_a_readable_batch_can_be_accepted(batch, analyst):
+    accept(batch, actor=analyst)
+    batch.refresh_from_db()
+    assert batch.state == ImportState.ACCEPTED
+    assert batch.accepted_by_id == analyst.id
+    assert batch.accepted_at is not None
+
+
+def test_a_batch_cannot_be_accepted_twice(batch, analyst):
+    accept(batch, actor=analyst)
     with pytest.raises(ExtractImportError, match="cannot be accepted"):
-        accept(clean, actor=analyst)
+        accept(batch, actor=analyst)
 
 
 # -- cohorts and the review queue -------------------------------------------------
@@ -281,25 +321,25 @@ def test_the_manifest_states_the_source_and_every_rule_version(batch):
     manifest = transformation_manifest(batch)
     assert manifest["source"]["checksum"] == batch.source_checksum
     assert manifest["versions"] == {
-        "schema": extract.SCHEMA_VERSION,
-        "parser": extract.PARSER_VERSION,
+        "schema": intake.PROFILE_VERSION,
+        "parser": intake.PARSER_VERSION,
         "cohort_rules": extract.COHORT_RULE_VERSION,
-        "join_rules": extract.JOIN_RULE_VERSION,
     }
 
 
-def test_the_manifest_withholds_counterparty_names_by_default(batch):
-    """A manifest is what gets attached to a ticket. The default must be safe."""
+def test_the_manifest_is_a_summary_rather_than_a_copy_of_the_book(batch):
+    """Not because rows are withheld -- they are on the batch -- but because a
+    manifest that reproduced the portfolio would be the portfolio."""
     manifest = transformation_manifest(batch)
-    assert manifest["confidential_columns_included"] is False
-    assert "insured_name" in manifest["confidential_columns_withheld"]
-    assert "Example Insured" not in str(manifest)
+    assert manifest["counts"]["risk_rows"] == 11
+    assert manifest["counts"]["policy_rows"] == 10
+    assert "Example Street" not in str(manifest)
 
 
 def test_the_manifest_states_the_value_basis(batch):
     """Nobody should have to remember that the share is already applied."""
     basis = transformation_manifest(batch)["value_basis"]
-    assert "KRE's share" in basis
+    assert "at the share CASS writes" in basis
     assert "not applied again" in basis
 
 
@@ -313,10 +353,19 @@ def test_the_manifest_totals_value_only_for_single_cohort_businesses(batch):
     assert Decimal(cohort_tiv["mixed"]) == Decimal("2000000.00")
 
 
+def test_the_manifest_prefers_a_stated_value_over_a_policy_total(batch):
+    """Adding both would count the same money twice."""
+    cohort_tiv = transformation_manifest(batch)["cohort_tiv_at_kre_share_usd"]
+    # Cohort A is a coordinate-eligibility cohort, not a class filter: the
+    # Nepali engineering risk and the liability one qualify on their geocode
+    # and are counted here even though no physical-damage run would take them.
+    assert Decimal(cohort_tiv["A"]) == Decimal("6225000.00")
+
+
 def test_the_manifest_carries_the_review_queue(batch):
     queue = transformation_manifest(batch)["review_queue"]
     assert queue["pending"] == 1
-    assert queue["by_country"]["Indonesia"] == 1
+    assert queue["by_country"]["ID"] == 1
 
 
 # -- the API -----------------------------------------------------------------------
@@ -333,8 +382,8 @@ def test_an_analyst_can_upload_an_extract(api, project, workbook):
     )
     assert response.status_code == 201, response.data
     assert response.data["policy_row_count"] == 10
-    assert response.data["location_row_count"] == 11
-    assert response.data["blocking"] is True
+    assert response.data["risk_row_count"] == 11
+    assert response.data["blocking"] is False
 
 
 def test_an_upload_needs_a_project_the_caller_belongs_to(client_for, outsider, project, workbook):
@@ -353,7 +402,7 @@ def test_an_upload_without_a_file_says_so(api, project):
         format="multipart",
     )
     assert response.status_code == 400
-    assert "workbook" in response.data["detail"]
+    assert "intake template" in response.data["detail"]
 
 
 def test_the_review_queue_is_filterable(api, batch):
@@ -373,29 +422,27 @@ def test_the_cohort_a_set_is_what_the_benchmark_may_use(api, batch):
     assert all(row["cohort"] == "A" for row in rows)
 
 
-def test_an_analyst_sees_the_address_but_a_modeller_does_not(client_for, modeller, api, batch):
-    """A modeller builds from coordinates and value, not from whose building it is."""
+def test_every_project_member_sees_the_address(client_for, modeller, api, batch):
+    """A modeller checks a coordinate against the address it came from.
+
+    An earlier draft hid it from them, on the reading that a risk address was
+    counterparty detail. It is not, and hiding it removed the only evidence
+    the geocoding review has.
+    """
+    from apps.projects.models import ProjectMembership, ProjectRole
+
     shown = api.get(f"{API}/portfolio-imports/{batch.id}/locations/").data
     rows = shown["results"] if "results" in shown else shown
     assert rows[0]["address"]
 
-    # A modeller is not a member of this project, so grant membership first.
-    from apps.projects.models import ProjectMembership, ProjectRole
-
     ProjectMembership.objects.create(
         project=batch.project, user=modeller, role=ProjectRole.CONTRIBUTOR
     )
-    hidden = client_for(modeller).get(
+    also = client_for(modeller).get(
         f"{API}/portfolio-imports/{batch.id}/locations/"
     ).data
-    rows = hidden["results"] if "results" in hidden else hidden
-    assert rows[0]["address"] is None
-
-
-def test_the_manifest_endpoint_withholds_names_by_default(api, batch):
-    response = api.get(f"{API}/portfolio-imports/{batch.id}/manifest/")
-    assert response.status_code == 200
-    assert response.data["confidential_columns_included"] is False
+    rows = also["results"] if "results" in also else also
+    assert rows[0]["address"]
 
 
 def test_a_manifest_download_is_audited(api, batch):
@@ -405,24 +452,21 @@ def test_a_manifest_download_is_audited(api, batch):
     ).exists()
 
 
-def test_a_role_without_permission_cannot_download_names(client_for, db, batch):
-    from apps.accounts.models import PlatformRole
-    from apps.projects.models import ProjectMembership, ProjectRole
+def test_accepting_through_the_api_is_refused_when_the_file_was_unreadable(
+    api, project, analyst
+):
+    from openpyxl import Workbook
 
-    reviewer = make_user("a-modeller", PlatformRole.MODELLER)
-    ProjectMembership.objects.create(
-        project=batch.project, user=reviewer, role=ProjectRole.CONTRIBUTOR
+    book = Workbook()
+    book.active.title = "Sheet1"
+    buffer = io.BytesIO()
+    book.save(buffer)
+    rejected = import_portfolio(
+        project, buffer.getvalue(), filename="wrong.xlsx", actor=analyst
     )
-    response = client_for(reviewer).get(
-        f"{API}/portfolio-imports/{batch.id}/manifest/?include_confidential=true"
-    )
-    assert response.status_code == 403
 
-
-def test_accepting_through_the_api_is_refused_while_a_finding_blocks(api, batch):
-    response = api.post(f"{API}/portfolio-imports/{batch.id}/accept/")
+    response = api.post(f"{API}/portfolio-imports/{rejected.id}/accept/")
     assert response.status_code == 409
-    assert "blocking join finding" in response.data["detail"]
 
 
 def test_the_batch_is_not_visible_outside_its_project(client_for, outsider, batch):
@@ -431,6 +475,6 @@ def test_the_batch_is_not_visible_outside_its_project(client_for, outsider, batc
 
 
 def test_an_artifact_is_reused_rather_than_duplicated(project, analyst, workbook):
-    import_extract(project, workbook, filename="extract.xlsx", actor=analyst)
-    import_extract(project, workbook, filename="extract.xlsx", actor=analyst)
+    import_portfolio(project, workbook, filename="extract.xlsx", actor=analyst)
+    import_portfolio(project, workbook, filename="extract.xlsx", actor=analyst)
     assert Artifact.objects.filter(role="portfolio_extract_source").count() == 1

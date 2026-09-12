@@ -19,7 +19,7 @@ import pytest
 import cass_extract as extract
 from apps.audit.models import AuditAction, AuditEvent
 from apps.common.storage import get_store
-from apps.exposure.extract import import_extract, location_identity
+from apps.exposure.extract import import_portfolio, location_identity
 from apps.exposure.models import ExposureState, ExposureVersion, SourceRiskLocation
 from apps.exposure.promotion import (
     UNKNOWN_OCCUPANCY,
@@ -34,16 +34,16 @@ _FIXTURES = Path(__file__).resolve().parents[2] / "packages" / "cass_extract" / 
 if str(_FIXTURES) not in sys.path:
     sys.path.insert(0, str(_FIXTURES))
 
-from fixtures import as_workbook, structural_extract  # noqa: E402
+from fixtures import as_template  # noqa: E402
 
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture()
 def batch(project, analyst):
-    policies, locations = structural_extract()
-    payload = as_workbook(policies, locations).getvalue()
-    return import_extract(project, payload, filename="extract.xlsx", actor=analyst)
+    return import_portfolio(
+        project, as_template(), filename="portfolio.xlsx", actor=analyst
+    )
 
 
 @pytest.fixture()
@@ -443,227 +443,150 @@ def test_someone_without_write_access_cannot_promote(client_for, outsider, batch
     assert response.status_code in (403, 404)
 
 
-# -- coverage values supplied per row, as OED actually works -----------------------
+# -- value reads in three tiers ------------------------------------------------------
 
-def template_for(batch, **kwargs) -> list[dict]:
-    from apps.exposure.promotion import template_rows
+def valued(**overrides):
+    """The standard portfolio with one risk's values overridden."""
+    from fixtures import policy_row, risk_row, structural_template
 
-    return template_rows(batch, **kwargs)
+    risks, policies = structural_template()
+    for row in risks:
+        if row["Account reference"] == "B-SINGLE":
+            row.update(overrides)
+    return as_template(risks, policies), policies, policy_row, risk_row
 
 
-def completed(rows, values) -> bytes:
-    """A completed template: identifiers from the platform, numbers from a user."""
-    buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(
-        buffer,
-        fieldnames=["AccNumber", "LocNumber", "BuildingTIV", "OtherTIV", "ContentsTIV", "BITIV"],
-        lineterminator="\n",
+def promoted(payload, project, analyst, **kwargs):
+    batch = import_portfolio(project, payload, filename="p.xlsx", actor=analyst)
+    return promote(batch, name="Tiered", actor=analyst, **kwargs)
+
+
+def test_a_risk_that_states_its_coverages_keeps_them_exactly(project, analyst):
+    """Nothing is assumed, so no split touches the row."""
+    payload, *_ = valued(
+        **{
+            "Total insured value": "",
+            "Building value": "600000.00",
+            "Contents value": "400000.00",
+        }
     )
-    writer.writeheader()
-    for row in rows:
-        key = (row["business_id"], row["location_number"])
-        writer.writerow(
-            {
-                "AccNumber": row["business_id"],
-                "LocNumber": row["location_number"],
-                **values(key, row["allocated_tiv"]),
-            }
-        )
-    return buffer.getvalue().encode("utf-8")
-
-
-def test_the_template_lists_the_selection_with_its_allocated_totals(batch):
-    rows = template_for(batch)
-    payload = extract.component_template(rows)
-    parsed = list(csv.DictReader(io.StringIO(payload.decode("utf-8"))))
-
-    assert {row["AccNumber"] for row in parsed} == {"B-SINGLE", "B-MULTI", "B-SHARED", "B-TWOPOL"}
-    assert all(row["BuildingTIV"] == "" for row in parsed)
-    single = next(row for row in parsed if row["AccNumber"] == "B-SINGLE")
-    assert single["AllocatedTIV"] == "1000000.00"
-    assert single["CountryCode"] == "ID"
-
-
-def test_supplied_values_are_used_exactly_as_given(batch, analyst):
-    """No single ratio describes a real schedule, so none is imposed."""
-    rows = template_for(batch)
-
-    def values(key, allocated):
-        # Deliberately uneven, and different on every row.
-        building = (allocated * Decimal("0.6")).quantize(Decimal("0.01"))
-        contents = allocated - building
-        return {"BuildingTIV": building, "OtherTIV": "", "ContentsTIV": contents, "BITIV": ""}
-
-    supplied = extract.read_reported_components(completed(rows, values))
-    version = promote(batch, name="Supplied", reported_components=supplied, actor=analyst)
-
+    version = promoted(payload, project, analyst)
     row = next(item for item in oed_rows(version) if item["AccNumber"] == "B-SINGLE")
+
     assert row["BuildingTIV"] == "600000.00"
     assert row["ContentsTIV"] == "400000.00"
 
 
-def test_a_schedule_may_carry_a_different_shape_on_every_row(batch, analyst):
-    """One site with contents and the next without is ordinary."""
-    rows = template_for(batch)
-
-    def values(key, allocated):
-        if key[0] == "B-SINGLE":
-            return {"BuildingTIV": allocated, "OtherTIV": "", "ContentsTIV": "", "BITIV": ""}
-        half = (allocated / 2).quantize(Decimal("0.01"))
-        return {
-            "BuildingTIV": half,
-            "OtherTIV": "",
-            "ContentsTIV": allocated - half,
-            "BITIV": "",
-        }
-
-    supplied = extract.read_reported_components(completed(rows, values))
-    version = promote(batch, name="Mixed", reported_components=supplied, actor=analyst)
-
-    single = next(item for item in oed_rows(version) if item["AccNumber"] == "B-SINGLE")
-    other = next(item for item in oed_rows(version) if item["AccNumber"] == "B-SHARED")
-    assert single["ContentsTIV"] == "0.00"
-    assert Decimal(other["ContentsTIV"]) > 0
-
-
-def test_supplied_values_are_recorded_as_reported_not_assumed(batch, analyst):
-    rows = template_for(batch)
-    supplied = extract.read_reported_components(
-        completed(rows, lambda key, allocated: {"BuildingTIV": allocated})
+def test_a_stated_zero_is_a_statement_and_is_not_split(project, analyst):
+    """A schedule with a building figure and no contents says there are none."""
+    payload, *_ = valued(
+        **{"Total insured value": "", "Building value": "1000000.00"}
     )
-    version = promote(batch, name="Reported", reported_components=supplied, actor=analyst)
+    version = promoted(payload, project, analyst)
+    row = next(item for item in oed_rows(version) if item["AccNumber"] == "B-SINGLE")
 
+    assert row["BuildingTIV"] == "1000000.00"
+    assert row["ContentsTIV"] == "0.00"
+
+
+def test_a_risk_total_is_divided_by_the_component_assumption(project, analyst):
+    """The middle tier: the value is known, the breakdown is not."""
+    version = promoted(
+        as_template(), project, analyst,
+        component_split=extract.preset("building_contents_test_v1"),
+    )
+    row = next(item for item in oed_rows(version) if item["AccNumber"] == "B-SINGLE")
+
+    assert row["BuildingTIV"] == "800000.00"
+    assert row["ContentsTIV"] == "200000.00"
+
+
+def test_the_lineage_counts_the_risks_in_each_tier(project, analyst):
+    """A reader cannot tell a stated number from an assumed one by looking."""
+    version = promoted(as_template(), project, analyst)
+    tiers = version.source_lineage["coverage"]["evidence_tiers"]
+
+    # Three single-site accounts state what their site is worth; B-MULTI's
+    # three sites state nothing and are divided from the policy total.
+    assert tiers["stated_total"] == 3
+    assert tiers["allocated_from_policy"] == 3
+    assert tiers["stated_coverages"] == 0
+    assert sum(tiers.values()) == version.location_count
+
+
+def test_a_portfolio_that_states_everything_needs_no_split_at_all(project, analyst):
+    """And the version says so rather than naming an assumption it never used."""
+    from fixtures import structural_template
+
+    risks, policies = structural_template()
+    for row in risks:
+        row["Total insured value"] = ""
+        row["Building value"] = "1000000.00"
+
+    version = promoted(as_template(risks, policies), project, analyst)
     coverage = version.source_lineage["coverage"]
-    assert coverage["source"] == "reported_location_values"
-    assert coverage["supplied"]["evidence"] == "reported"
-    assert "supplied per location rather than derived" in coverage["basis"]
+
+    assert coverage["source"] == "stated_coverage_values"
+    assert coverage["split"] is None
+    assert coverage["decision_note"] == "stated coverage values"
 
 
-def test_a_supplied_total_that_disagrees_is_refused_with_both_numbers(batch, analyst):
-    """Rescaling to fit would smooth away a real discrepancy."""
-    rows = template_for(batch)
-    supplied = extract.read_reported_components(
-        completed(
-            rows,
-            lambda key, allocated: {"BuildingTIV": allocated + Decimal("1000.00")},
-        )
-    )
-    with pytest.raises(PromotionError) as excinfo:
-        promote(batch, name="Restated", reported_components=supplied, actor=analyst)
+def test_a_mixed_portfolio_says_how_much_rested_on_the_assumption(project, analyst):
+    from fixtures import structural_template
 
-    message = str(excinfo.value)
-    assert "restating the portfolio total is a decision" in message
-    assert "5500000.00" in message  # what the allocation derived
+    risks, policies = structural_template()
+    for row in risks:
+        if row["Account reference"] == "B-SHARED":
+            row["Total insured value"] = ""
+            row["Building value"] = "250000.00"
 
-
-def test_a_restated_total_can_be_accepted_deliberately(batch, analyst):
-    """Reported location values outrank a derived split; a person decides."""
-    rows = template_for(batch)
-    supplied = extract.read_reported_components(
-        completed(
-            rows,
-            lambda key, allocated: {"BuildingTIV": allocated + Decimal("1000.00")},
-        )
-    )
-    version = promote(
-        batch,
-        name="Restated",
-        reported_components=supplied,
-        accept_restated_total=True,
-        actor=analyst,
-    )
+    version = promoted(as_template(risks, policies), project, analyst)
     coverage = version.source_lineage["coverage"]
-    assert coverage["restated_total_accepted"] is True
-    assert coverage["reconciliation"]["restates_total"] is True
-    # Six selected locations, each restated upward by 1,000.
-    assert version.total_tiv == Decimal("5506000.00")
+
+    assert coverage["source"] == "mixed_stated_and_derived"
+    assert "state no coverage breakdown" in coverage["basis"]
 
 
-def test_a_missing_location_is_refused_rather_than_valued_at_nothing(batch, analyst):
-    rows = template_for(batch)
-    supplied = extract.read_reported_components(
-        completed(rows[:-1], lambda key, allocated: {"BuildingTIV": allocated})
+def test_a_stated_occupancy_survives_the_promotion(project, analyst):
+    payload, *_ = valued(**{"Occupancy": "1150", "Construction": "5200"})
+    version = promoted(payload, project, analyst)
+    row = next(item for item in oed_rows(version) if item["AccNumber"] == "B-SINGLE")
+
+    assert row["OccupancyCode"] == "1150"
+    assert row["ConstructionCode"] == "5200"
+    assert version.source_lineage["taxonomy"]["source"] == "mixed_reported_and_assumed"
+
+
+def test_a_risk_with_no_value_and_no_policy_total_is_refused(project, analyst):
+    """A risk worth nothing is not what an empty row means."""
+    from fixtures import structural_template
+
+    risks, policies = structural_template()
+    for row in risks:
+        row["Total insured value"] = ""
+    policies = [item for item in policies if item["Account reference"] != "B-SINGLE"]
+
+    batch = import_portfolio(
+        project, as_template(risks, policies), filename="p.xlsx", actor=analyst
     )
-    with pytest.raises(PromotionError, match="no supplied coverage values"):
-        promote(batch, name="Incomplete", reported_components=supplied, actor=analyst)
-
-
-def test_a_blank_cell_is_read_as_zero_and_counted(batch):
-    payload = (
-        b"AccNumber,LocNumber,BuildingTIV,ContentsTIV\n"
-        b"B-SINGLE,1,1000.00,\n"
-    )
-    supplied = extract.read_reported_components(payload)
-    assert supplied.blank_cells == 1
-    assert supplied.apply(("B-SINGLE", 1))["ContentsTIV"] == Decimal("0.00")
-
-
-def test_a_file_with_no_coverage_column_says_what_to_supply():
-    with pytest.raises(extract.AllocationError, match="carries no coverage column"):
-        extract.read_reported_components(b"AccNumber,LocNumber\nB-1,1\n")
-
-
-def test_a_repeated_location_in_the_file_is_refused():
-    payload = b"AccNumber,LocNumber,BuildingTIV\nB-1,1,100\nB-1,1,200\n"
-    with pytest.raises(extract.AllocationError, match="repeats location"):
-        extract.read_reported_components(payload)
-
-
-def test_a_negative_coverage_value_is_refused():
-    payload = b"AccNumber,LocNumber,BuildingTIV\nB-1,1,-100\n"
-    with pytest.raises(extract.AllocationError, match="negative"):
-        extract.read_reported_components(payload)
-
-
-def test_thousands_separators_are_tolerated():
-    payload = b"AccNumber,LocNumber,BuildingTIV\nB-1,1,\"1,234,567.89\"\n"
-    supplied = extract.read_reported_components(payload)
-    assert supplied.apply(("B-1", 1))["BuildingTIV"] == Decimal("1234567.89")
+    with pytest.raises(PromotionError, match="would enter the model worth nothing"):
+        promote(batch, name="Unvalued", actor=analyst)
 
 
 # -- through the API ------------------------------------------------------------------
 
-def test_the_template_downloads_as_a_csv(api, batch):
-    response = api.get(f"{API}/portfolio-imports/{batch.id}/coverage-template/")
+def test_the_blank_template_downloads_as_a_workbook(api, project):
+    response = api.get(f"{API}/portfolio-imports/template/?project={project.id}")
     assert response.status_code == 200
-    assert response["Content-Type"] == "text/csv"
-    assert "coverage-template" in response["Content-Disposition"]
-
-    parsed = list(csv.DictReader(io.StringIO(response.content.decode("utf-8"))))
-    assert len(parsed) == 6
-    assert "BuildingTIV" in parsed[0]
+    assert "spreadsheetml" in response["Content-Type"]
+    assert "cass-portfolio-intake.xlsx" in response["Content-Disposition"]
 
 
-def test_a_completed_template_can_be_posted_with_the_promotion(api, batch):
-    from django.core.files.uploadedfile import SimpleUploadedFile
-
-    rows = template_for(batch)
-    payload = completed(rows, lambda key, allocated: {"BuildingTIV": allocated})
-
-    response = api.post(
-        f"{API}/portfolio-imports/{batch.id}/promote/",
-        {
-            "name": "From template",
-            "coverage_file": SimpleUploadedFile("coverage.csv", payload, "text/csv"),
-        },
-        format="multipart",
-    )
-    assert response.status_code == 201, response.data
-    assert response.data["coverage"]["source"] == "reported_location_values"
-
-
-def test_a_bad_coverage_file_is_refused_with_a_reason(api, batch):
-    from django.core.files.uploadedfile import SimpleUploadedFile
-
-    response = api.post(
-        f"{API}/portfolio-imports/{batch.id}/promote/",
-        {
-            "name": "Bad file",
-            "coverage_file": SimpleUploadedFile(
-                "coverage.csv", b"AccNumber,LocNumber\nB-1,1\n", "text/csv"
-            ),
-        },
-        format="multipart",
-    )
-    assert response.status_code == 409
-    assert "no coverage column" in response.data["detail"]
+def test_the_column_mapping_is_published_for_a_loading_api(api):
+    response = api.get(f"{API}/portfolio-imports/profile/")
+    assert response.status_code == 200
+    assert response.data["profile_version"]
+    columns = {item["name"]: item for item in response.data["sheets"]["Risks"]}
+    assert columns["Building value"]["oed_field"] == "BuildingTIV"
+    assert columns["Geocode precision"]["oed_field"] is None
+    assert columns["Geocode precision"]["purpose"]

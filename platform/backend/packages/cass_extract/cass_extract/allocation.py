@@ -85,7 +85,14 @@ class LocationShare:
     """One location's share of one policy."""
 
     business_id: str
-    location_number: int
+    location_number: str
+    """Text, because OED makes a location reference text.
+
+    A schedule that numbers its sites "SITE-A" is ordinary, and reading one as
+    an integer turns every site into zero -- which then collides, and the
+    collision looks like a duplicate rather than a parsing choice.
+    """
+
     amount: Decimal
     #: The unrounded weight, kept because the brief requires the assumption
     #: record to hold what was intended as well as what was paid out in cents.
@@ -174,14 +181,14 @@ class AllocationResult:
         """
         return all(item.reconciles for item in self.allocations)
 
-    def by_location(self) -> dict[tuple[str, int], Decimal]:
+    def by_location(self) -> dict[tuple[str, str], Decimal]:
         """Total allocated to each location, summed across policies.
 
         A business with two policies contributes to its locations twice, which
         is correct: each policy carries its own TIV and is allocated
         independently.
         """
-        totals: dict[tuple[str, int], Decimal] = {}
+        totals: dict[tuple[str, str], Decimal] = {}
         for allocation in self.allocations:
             for share in allocation.shares:
                 key = (share.business_id, share.location_number)
@@ -212,7 +219,7 @@ def allocate_policy(
     schedule: Sequence[Mapping[str, Any]],
     *,
     method: AllocationMethod = AllocationMethod.EQUAL_LOCATION,
-    concentrate_at: int | None = None,
+    concentrate_at: str | None = None,
 ) -> PolicyAllocation:
     """Divide one policy's TIV across its scheduled locations.
 
@@ -224,7 +231,10 @@ def allocate_policy(
     """
     policy_id = _text(policy.get("policy_id"))
     business_id = _text(policy.get("business_id"))
-    tiv = _money(policy.get("gross_limit"))
+    # ``policy_tiv`` rather than the source's own column name: the allocation
+    # engine reads canonical records, so it is not shaped by what one
+    # spreadsheet happened to call its value column.
+    tiv = _money(policy.get("policy_tiv"))
 
     if not schedule:
         raise AllocationError(
@@ -261,7 +271,7 @@ def allocate_policy(
     shares = tuple(
         LocationShare(
             business_id=_text(location.get("business_id")) or business_id,
-            location_number=_location_number(location),
+            location_number=_location_reference(location),
             amount=amount,
             weight=str(weight),
             residual_cent=_cents(amount) > floor,
@@ -308,7 +318,7 @@ def _reported_weights(
     """
     values = [_money(row.get("location_tiv")) for row in schedule]
     missing = [
-        _location_number(row)
+        _location_reference(row)
         for row, value in zip(schedule, values, strict=True)
         if not _text(row.get("location_tiv"))
     ]
@@ -349,7 +359,7 @@ def _primary_weights(schedule: Sequence[Mapping[str, Any]], policy_id: str) -> l
 
 
 def _concentration_weights(
-    schedule: Sequence[Mapping[str, Any]], concentrate_at: int | None, policy_id: str
+    schedule: Sequence[Mapping[str, Any]], concentrate_at: str | None, policy_id: str
 ) -> list[Fraction]:
     """The whole TIV at one nominated location."""
     if concentrate_at is None:
@@ -357,7 +367,7 @@ def _concentration_weights(
             f"A concentration variant for policy {policy_id} must name the location "
             "the whole TIV is placed at."
         )
-    numbers = [_location_number(row) for row in schedule]
+    numbers = [_location_reference(row) for row in schedule]
     if concentrate_at not in numbers:
         raise AllocationError(
             f"Policy {policy_id} does not schedule location {concentrate_at}."
@@ -372,7 +382,7 @@ def allocate(
     locations: Iterable[Mapping[str, Any]],
     *,
     method: AllocationMethod = AllocationMethod.EQUAL_LOCATION,
-    eligible: set[tuple[str, int]] | None = None,
+    eligible: set[tuple[str, str]] | None = None,
 ) -> AllocationResult:
     """Allocate every policy independently, and refuse to redistribute quietly.
 
@@ -402,9 +412,9 @@ def allocate(
 
         if eligible is not None:
             outside = [
-                _location_number(row)
+                _location_reference(row)
                 for row in schedule
-                if (business_id, _location_number(row)) not in eligible
+                if (business_id, _location_reference(row)) not in eligible
             ]
             if outside:
                 excluded.append(
@@ -441,7 +451,7 @@ def concentration_envelope(
             policy,
             schedule,
             method=AllocationMethod.CONCENTRATION,
-            concentrate_at=_location_number(location),
+            concentrate_at=_location_reference(location),
         )
         for location in sorted(schedule, key=_location_order)
     ]
@@ -493,16 +503,27 @@ def _cents(amount: Decimal) -> int:
 
 # -- helpers --------------------------------------------------------------------------
 
-def _location_order(location: Mapping[str, Any]) -> tuple[str, int]:
-    """The deterministic order the brief names for residual cents."""
-    return (_text(location.get("business_id")), _location_number(location))
+def _location_order(location: Mapping[str, Any]) -> tuple[str, int, str]:
+    """The deterministic order the brief names for residual cents.
+
+    Numeric references sort numerically -- 2 before 10, which a plain string
+    sort gets backwards -- and anything else sorts after them, alphabetically.
+    Two schedules that reference their sites differently must each still order
+    the same way on every run, because the order decides which site receives a
+    residual cent.
+    """
+    reference = _location_reference(location)
+    numeric = int(reference) if reference.isdigit() else None
+    return (
+        _text(location.get("business_id")),
+        numeric if numeric is not None else 2**31,
+        "" if numeric is not None else reference,
+    )
 
 
-def _location_number(location: Mapping[str, Any]) -> int:
-    try:
-        return int(location.get("location_number") or 0)
-    except (TypeError, ValueError):
-        return 0
+def _location_reference(location: Mapping[str, Any]) -> str:
+    """The location's reference, as text. OED makes it text."""
+    return _text(location.get("location_number"))
 
 
 def _money(value: Any) -> Decimal:

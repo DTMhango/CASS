@@ -1,39 +1,31 @@
-"""Promoting a selection of staged rows into an OED exposure version.
+"""Promoting a selection of staged risks into an OED exposure version.
 
-Section 4.4 of the integration brief gives the identity mapping and section 5.4
-gives the value mapping. What this module does is apply both to one selection
+What this module does is apply the identity and value mappings to one selection
 of one import batch and hand the result to the ordinary exposure pipeline --
 validated, published, and usable by a run like any other version.
 
-Two decisions in here are assumptions rather than translations, and both are
-recorded as such rather than absorbed.
+**Value reads in three tiers, and the tier is recorded.** A risk that states
+its coverages has stated them; nothing is assumed and no split applies. A risk
+that states a total but not its breakdown gets a named component assumption. A
+risk that states neither gets the policy total divided across its schedule
+under a named allocation scenario, and then the component assumption. The
+version's lineage says which tier each risk sat in, because "the building value
+was 1.5m" and "we assumed the building value was 1.5m" are different claims and
+a reader cannot tell them apart from the number.
 
-**Occupancy is not reported, so it is chosen.** OED requires
-``OccupancyCode`` and the extract has none. It gets the same treatment as the
-coverage split: a named, versioned assumption selected per promotion and
-recorded in the lineage. It is stated, never derived -- deriving one from
-``class_of_business`` would produce something that looks like information while
-resting on nothing, and section 6 puts that behind a controlled mapping and an
-approved assumption set. ``not_reported_v1`` writes OED's own unknown code and
-remains one parameter away, at the cost that no vulnerability function covers
-it and the section 8 gate will hold the run. Where a schedule states occupancy
-per row, that outranks the assumption for the rows it covers.
+**A schedule is valued consistently or not at all.** A business whose risks are
+partly valued is excluded rather than patched, for the same reason a partly
+qualifying schedule is: the remainder of the policy would have to go somewhere,
+and there is nowhere honest to put it.
 
-**The coverage split is a choice, not a constant.** Section 5.4 keeps it
-independent of the location split, and the source reports no component
-breakdown, so whatever is used is an assumption. It is therefore selected per
-promotion from a named, versioned set, recorded in the version's lineage, and
-reconciled to the cent. The default is the building-only smoke fixture the
-brief permits: a default that spread value across coverages would put an
-unapproved prior into every version that never asked for one.
+**Occupancy is chosen, not derived.** OED requires ``OccupancyCode`` and most
+schedules will not carry one. It gets the same treatment as the coverage split:
+a named, versioned assumption selected per promotion and recorded in the
+lineage. Where a risk states its own, that outranks the assumption for that
+row.
 
-The selection itself is business-complete: a business enters only when its
-whole schedule qualifies. Taking part of a schedule would leave the excluded
-sites' value to go somewhere, and there is nowhere honest for it to go.
-
-Nothing promoted here is fit for decision use. Every version says so in its
-lineage, and says why -- an unapproved coverage split and no reported
-vulnerability attributes.
+Nothing promoted under an assumption is fit for decision use. Every version
+says so in its lineage, and says which assumptions it rests on.
 """
 
 from __future__ import annotations
@@ -101,19 +93,15 @@ def promote(
     allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
     component_split: extract.ComponentSplit | None = None,
     occupancy: extract.OccupancyAssumption | None = None,
-    reported_components: extract.ReportedComponents | None = None,
-    accept_restated_total: bool = False,
     actor=None,
     request=None,
 ) -> ExposureVersion:
     """Turn one cohort selection of a batch into a published exposure version.
 
-    Coverage values come from one of two places, and reported ones win.
-    ``reported_components`` is a completed template: real numbers per location,
-    in whatever proportions the schedule actually shows, which is how OED works
-    and what the brief's evidence hierarchy ranks first. ``component_split`` is
-    the fallback for when nobody knows the breakdown, and it defaults to the
-    building-only smoke fixture rather than to something that spreads value.
+    The assumptions are the caller's: which cohort, which country, how a
+    multi-location policy divides where it has to, how a risk total splits
+    across coverages where it has to, and what occupancy to assume. Every one
+    is recorded on the version that results.
     """
     prepared = prepare(
         batch,
@@ -123,8 +111,6 @@ def promote(
         allocation_method=allocation_method,
         component_split=component_split,
         occupancy=occupancy,
-        reported_components=reported_components,
-        accept_restated_total=accept_restated_total,
     )
     selected_businesses = prepared.businesses
     selected_locations = prepared.locations
@@ -227,8 +213,6 @@ def prepare(
     allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
     component_split: extract.ComponentSplit | None = None,
     occupancy: extract.OccupancyAssumption | None = None,
-    reported_components: extract.ReportedComponents | None = None,
-    accept_restated_total: bool = False,
 ) -> PreparedSelection:
     """Resolve a selection into OED rows without creating anything.
 
@@ -248,15 +232,12 @@ def prepare(
         allocation_method=allocation_method,
     )
 
-    totals = allocation.by_location()
+    totals, tiers = _location_totals(locations, allocation)
     components, coverage_record = _coverage_values(
-        totals,
-        component_split=component_split,
-        reported_components=reported_components,
-        accept_restated_total=accept_restated_total,
+        locations, totals, tiers, component_split=component_split
     )
 
-    stated_taxonomy = reported_components.taxonomy if reported_components else None
+    stated_taxonomy = _stated_taxonomy(locations)
     taxonomy = extract.assign_taxonomy(totals, occupancy, reported=stated_taxonomy)
     taxonomy_record = extract.taxonomy_record(
         occupancy, taxonomy, reported=stated_taxonomy
@@ -270,6 +251,84 @@ def prepare(
         coverage_record=coverage_record,
         taxonomy_record=taxonomy_record,
     )
+
+
+#: How one risk's value was arrived at, best evidence first.
+STATED_COVERAGES = "stated_coverages"
+STATED_TOTAL = "stated_total"
+ALLOCATED = "allocated_from_policy"
+
+
+def _key(row: SourceRiskLocation) -> tuple[str, str]:
+    return (row.business_id, row.location_number)
+
+
+def _tier(row: SourceRiskLocation) -> str:
+    values = row.values or {}
+    if any(values.get(column) is not None for column in _COVERAGE_COLUMNS):
+        return STATED_COVERAGES
+    if values.get("location_tiv") is not None:
+        return STATED_TOTAL
+    return ALLOCATED
+
+
+def _location_totals(
+    locations: list[SourceRiskLocation], allocation
+) -> tuple[dict[tuple[str, str], Decimal], dict[tuple[str, str], str]]:
+    """What each risk is worth, and where that number came from.
+
+    The allocation is consulted only for the risks that need it. Reading it for
+    a risk that stated its own value would replace evidence with an assumption
+    and leave no trace that it had happened.
+    """
+    allocated = allocation.by_location()
+    totals: dict[tuple[str, str], Decimal] = {}
+    tiers: dict[tuple[str, str], str] = {}
+
+    for row in locations:
+        key = _key(row)
+        tier = _tier(row)
+        tiers[key] = tier
+        if tier is STATED_COVERAGES or tier == STATED_COVERAGES:
+            values = row.values or {}
+            totals[key] = sum(
+                (
+                    Decimal(str(values[column]))
+                    for column in _COVERAGE_COLUMNS
+                    if values.get(column) is not None
+                ),
+                Decimal("0.00"),
+            )
+        elif tier == STATED_TOTAL:
+            totals[key] = Decimal(str((row.values or {})["location_tiv"]))
+        else:
+            if key not in allocated:
+                raise PromotionError(
+                    f"Risk {key[0]}/{key[1]} states no value and its account's "
+                    "policies supply none to divide, so it would enter the model "
+                    "worth nothing. Supply the values on the risk, or the total "
+                    "insured value on the policy."
+                )
+            totals[key] = allocated[key]
+
+    return totals, tiers
+
+
+def _stated_taxonomy(
+    locations: list[SourceRiskLocation],
+) -> dict[tuple[str, str], dict[str, str]]:
+    """Occupancy and construction where a risk states its own."""
+    stated: dict[tuple[str, str], dict[str, str]] = {}
+    for row in locations:
+        values = row.values or {}
+        occupancy = str(values.get("occupancy_code") or "").strip()
+        if not occupancy:
+            continue
+        stated[_key(row)] = {
+            "OccupancyCode": occupancy,
+            "ConstructionCode": str(values.get("construction_code") or "").strip(),
+        }
+    return stated
 
 
 def _selection(
@@ -327,108 +386,76 @@ def _selection(
     return businesses, selected, allocation
 
 
-def template_rows(
-    batch: ImportBatch,
-    *,
-    cohort: extract.Cohort = extract.Cohort.A,
-    class_of_business: str | None = extract.cohorts.PHYSICAL_DAMAGE_CLASS,
-    country: str | None = None,
-    allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
-) -> list[dict[str, Any]]:
-    """The rows of a coverage template for one selection."""
-    _, selected, allocation = _selection(
-        batch,
-        cohort=cohort,
-        class_of_business=class_of_business,
-        country=country,
-        allocation_method=allocation_method,
-    )
-    totals = allocation.by_location()
-    return [
-        {
-            "business_id": row.business_id,
-            "location_number": row.location_number,
-            "country_code": row.country_code,
-            "label": row.precision,
-            "allocated_tiv": totals.get((row.business_id, row.location_number)),
-        }
-        for row in sorted(selected, key=lambda item: (item.business_id, item.location_number))
-    ]
-
-
 def _coverage_values(
-    totals,
+    locations: list[SourceRiskLocation],
+    totals: dict[tuple[str, str], Decimal],
+    tiers: dict[tuple[str, str], str],
     *,
     component_split: extract.ComponentSplit,
-    reported_components: extract.ReportedComponents | None,
-    accept_restated_total: bool,
 ):
-    """Resolve the coverage values, preferring what somebody actually reported.
+    """Resolve every risk's coverage values, preferring what was stated.
 
-    A supplied schedule that disagrees with the allocated total is not silently
-    rescaled and not silently accepted. The two numbers are different pieces of
-    reported information -- the policy's TIV and the schedule's -- and which is
-    right is a question for a person. So the difference is reported, and
-    proceeding on the schedule's total is something the caller asks for
-    explicitly.
+    A risk that states its coverages keeps them exactly, including the zeroes:
+    a schedule with a building figure and no contents is saying there are no
+    contents, and running that through a split would invent some.
     """
-    if reported_components is None:
-        components = extract.split_locations(totals, component_split)
-        check = extract.reconciliation(totals, components)
-        if not check["reconciles"]:
-            raise PromotionError(
-                "The coverage components do not add back to the location totals, so "
-                "the exposure version would misstate the portfolio."
-            )
-        return components, {
-            "source": "derived_split",
-            "split": component_split.as_dict(),
-            "reconciliation": check,
-            "basis": (
-                "No component split is reported in the source. Values were divided by "
-                f"the {component_split.name} assumption, which is "
-                + ("approved." if component_split.approved else "not an approved prior.")
-            ),
-            "decision_note": (
-                "an unapproved coverage split"
-                if not component_split.approved
-                else "an approved coverage split"
-            ),
-        }
+    components: dict[tuple[str, str], dict[str, Decimal]] = {}
+    stated_rows = 0
 
-    check = extract.reconcile_reported(reported_components, totals)
-    if check["missing_locations"]:
+    for row in locations:
+        key = _key(row)
+        if tiers[key] == STATED_COVERAGES:
+            values = row.values or {}
+            components[key] = {
+                column: Decimal(str(values.get(column) or "0.00")).quantize(
+                    Decimal("0.01")
+                )
+                for column in _COVERAGE_COLUMNS
+            }
+            stated_rows += 1
+        else:
+            components[key] = component_split.apply(totals[key])
+
+    check = extract.reconciliation(totals, components)
+    if not check["reconciles"]:
         raise PromotionError(
-            f"{len(check['missing_locations'])} selected locations carry no supplied "
-            "coverage values, so part of the portfolio would have no value at all. "
-            "First missing: " + ", ".join(check["missing_locations"][:5]) + "."
-        )
-    if check["restates_total"] and not accept_restated_total:
-        raise PromotionError(
-            "The supplied coverage values total "
-            f"{check['supplied_total']} against an allocated {check['allocated_total']}, "
-            f"a difference of {check['difference']} across {check['difference_count']} "
-            "locations. Reported location values outrank a derived split, so this may "
-            "be the better number -- but restating the portfolio total is a decision, "
-            "not a rounding. Correct the file, or promote again accepting the restated "
-            "total."
+            "The coverage components do not add back to the risk totals, so the "
+            "exposure version would misstate the portfolio."
         )
 
-    components = {key: reported_components.apply(key) for key in totals}
+    split_rows = len(locations) - stated_rows
+    counts = {tier: 0 for tier in (STATED_COVERAGES, STATED_TOTAL, ALLOCATED)}
+    for tier in tiers.values():
+        counts[tier] = counts.get(tier, 0) + 1
+
     return components, {
-        "source": "reported_location_values",
-        "supplied": reported_components.as_dict(),
+        "source": (
+            "stated_coverage_values"
+            if split_rows == 0
+            else "derived_split"
+            if stated_rows == 0
+            else "mixed_stated_and_derived"
+        ),
+        "split": component_split.as_dict() if split_rows else None,
         "reconciliation": check,
-        "restated_total_accepted": bool(check["restates_total"] and accept_restated_total),
+        "evidence_tiers": counts,
         "basis": (
-            "Coverage values were supplied per location rather than derived. "
-            + (
-                "They restate the portfolio total, which was accepted explicitly."
-                if check["restates_total"]
-                else "They reconcile to the allocated location totals."
+            "Every risk states its own coverage values."
+            if split_rows == 0
+            else (
+                f"{split_rows} of {len(locations)} risks state no coverage "
+                f"breakdown. Their value was divided by the {component_split.name} "
+                "assumption, which is "
+                + ("approved." if component_split.approved else "not an approved prior.")
             )
         ),
-        "decision_note": "reported coverage values that no approval covers",
+        "decision_note": (
+            "stated coverage values"
+            if split_rows == 0
+            else "an unapproved coverage split"
+            if not component_split.approved
+            else "an approved coverage split"
+        ),
     }
 
 

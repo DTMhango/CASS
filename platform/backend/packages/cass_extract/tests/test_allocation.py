@@ -17,7 +17,7 @@ from decimal import Decimal
 from fractions import Fraction
 
 import pytest
-from fixtures import location, policy, structural_extract
+from fixtures import location, priced, structural_extract
 
 from cass_extract import (
     ALLOCATION_RULE_VERSION,
@@ -27,7 +27,6 @@ from cass_extract import (
     allocate,
     allocate_policy,
     concentration_envelope,
-    read_workbook,
 )
 from cass_extract.allocation import _apportion
 
@@ -100,7 +99,7 @@ def test_an_amount_finer_than_a_cent_cannot_be_allocated_exactly():
 
 def test_a_single_location_policy_takes_the_whole_tiv():
     result = allocate_policy(
-        policy("P-1", "B-1", "1000000.00"), sites("B-1", 1)
+        priced("P-1", "B-1", "1000000.00"), sites("B-1", 1)
     )
     assert result.method is AllocationMethod.SINGLE_LOCATION
     assert result.shares[0].amount == Decimal("1000000.00")
@@ -109,12 +108,12 @@ def test_a_single_location_policy_takes_the_whole_tiv():
 
 def test_a_single_location_allocation_is_reported_not_assumed():
     """A whole allocation to the only site is a fact; an equal split is not."""
-    result = allocate_policy(policy("P-1", "B-1", "1000000.00"), sites("B-1", 1))
+    result = allocate_policy(priced("P-1", "B-1", "1000000.00"), sites("B-1", 1))
     assert result.evidence is AllocationEvidence.REPORTED
 
 
 def test_the_baseline_splits_equally_and_says_it_is_an_assumption():
-    result = allocate_policy(policy("P-1", "B-1", "3000000.00"), sites("B-1", 3))
+    result = allocate_policy(priced("P-1", "B-1", "3000000.00"), sites("B-1", 3))
     assert result.method is AllocationMethod.EQUAL_LOCATION
     assert result.evidence is AllocationEvidence.ASSUMED
     assert [share.amount for share in result.shares] == [Decimal("1000000.00")] * 3
@@ -122,29 +121,29 @@ def test_the_baseline_splits_equally_and_says_it_is_an_assumption():
 
 def test_nothing_is_repeated_at_every_location():
     """Writing the whole TIV at each site is the failure named first."""
-    result = allocate_policy(policy("P-1", "B-1", "3000000.00"), sites("B-1", 3))
+    result = allocate_policy(priced("P-1", "B-1", "3000000.00"), sites("B-1", 3))
     assert result.allocated == Decimal("3000000.00")
     assert result.allocated != Decimal("9000000.00")
 
 
 def test_every_share_records_the_weight_behind_it():
-    result = allocate_policy(policy("P-1", "B-1", "1000.00"), sites("B-1", 3))
+    result = allocate_policy(priced("P-1", "B-1", "1000.00"), sites("B-1", 3))
     assert {share.weight for share in result.shares} == {"1/3"}
 
 
 def test_the_rule_version_is_recorded_on_every_allocation():
-    result = allocate_policy(policy("P-1", "B-1", "1000.00"), sites("B-1", 2))
+    result = allocate_policy(priced("P-1", "B-1", "1000.00"), sites("B-1", 2))
     assert result.rule_version == ALLOCATION_RULE_VERSION
 
 
 def test_a_policy_with_no_scheduled_location_is_refused():
     """Its value would have nowhere to go."""
     with pytest.raises(AllocationError, match="nowhere to go"):
-        allocate_policy(policy("P-1", "B-1", "1000.00"), [])
+        allocate_policy(priced("P-1", "B-1", "1000.00"), [])
 
 
 def test_the_residual_cent_is_flagged_on_the_share_that_received_it():
-    result = allocate_policy(policy("P-1", "B-1", "1.00"), sites("B-1", 3))
+    result = allocate_policy(priced("P-1", "B-1", "1.00"), sites("B-1", 3))
     flagged = [share for share in result.shares if share.residual_cent]
     assert len(flagged) == 1
     assert flagged[0].amount == Decimal("0.34")
@@ -154,20 +153,20 @@ def test_the_residual_cent_is_flagged_on_the_share_that_received_it():
 
 def test_the_primary_sensitivity_puts_seventy_percent_at_the_primary_site():
     result = allocate_policy(
-        policy("P-1", "B-1", "1000000.00"),
+        priced("P-1", "B-1", "1000000.00"),
         sites("B-1", 3),
         method=AllocationMethod.PRIMARY_CONCENTRATED,
     )
     by_number = {share.location_number: share.amount for share in result.shares}
-    assert by_number[1] == Decimal("700000.00")
-    assert by_number[2] == Decimal("150000.00")
-    assert by_number[3] == Decimal("150000.00")
+    assert by_number["1"] == Decimal("700000.00")
+    assert by_number["2"] == Decimal("150000.00")
+    assert by_number["3"] == Decimal("150000.00")
     assert result.reconciles
 
 
 def test_the_primary_sensitivity_still_reconciles_on_an_awkward_amount():
     result = allocate_policy(
-        policy("P-1", "B-1", "1000.01"),
+        priced("P-1", "B-1", "1000.01"),
         sites("B-1", 3),
         method=AllocationMethod.PRIMARY_CONCENTRATED,
     )
@@ -180,7 +179,7 @@ def test_the_primary_sensitivity_needs_exactly_one_primary_site():
         row["primary_location"] = "Yes"
     with pytest.raises(AllocationError, match="marked primary"):
         allocate_policy(
-            policy("P-1", "B-1", "1000.00"),
+            priced("P-1", "B-1", "1000.00"),
             schedule,
             method=AllocationMethod.PRIMARY_CONCENTRATED,
         )
@@ -189,7 +188,7 @@ def test_the_primary_sensitivity_needs_exactly_one_primary_site():
 def test_the_primary_sensitivity_is_an_assumption_not_evidence():
     """It tests whether the primary flag is material; it does not assert it."""
     result = allocate_policy(
-        policy("P-1", "B-1", "1000.00"),
+        priced("P-1", "B-1", "1000.00"),
         sites("B-1", 2),
         method=AllocationMethod.PRIMARY_CONCENTRATED,
     )
@@ -200,15 +199,15 @@ def test_the_primary_sensitivity_is_an_assumption_not_evidence():
 
 def test_the_envelope_produces_one_variant_per_scheduled_location():
     variants = concentration_envelope(
-        policy("P-1", "B-1", "1000000.00"), sites("B-1", 3)
+        priced("P-1", "B-1", "1000000.00"), sites("B-1", 3)
     )
     assert len(variants) == 3
-    assert [item.concentrated_at for item in variants] == [1, 2, 3]
+    assert [item.concentrated_at for item in variants] == ["1", "2", "3"]
 
 
 def test_each_envelope_variant_holds_the_whole_policy_tiv_at_one_site():
     variants = concentration_envelope(
-        policy("P-1", "B-1", "1000000.00"), sites("B-1", 3)
+        priced("P-1", "B-1", "1000000.00"), sites("B-1", 3)
     )
     for variant in variants:
         held = [share for share in variant.shares if share.amount > 0]
@@ -221,7 +220,7 @@ def test_each_envelope_variant_holds_the_whole_policy_tiv_at_one_site():
 def test_a_concentration_variant_must_name_its_site():
     with pytest.raises(AllocationError, match="must name the location"):
         allocate_policy(
-            policy("P-1", "B-1", "1000.00"),
+            priced("P-1", "B-1", "1000.00"),
             sites("B-1", 2),
             method=AllocationMethod.CONCENTRATION,
         )
@@ -230,7 +229,7 @@ def test_a_concentration_variant_must_name_its_site():
 def test_a_concentration_variant_cannot_name_an_unscheduled_site():
     with pytest.raises(AllocationError, match="does not schedule location"):
         allocate_policy(
-            policy("P-1", "B-1", "1000.00"),
+            priced("P-1", "B-1", "1000.00"),
             sites("B-1", 2),
             method=AllocationMethod.CONCENTRATION,
             concentrate_at=9,
@@ -255,14 +254,14 @@ def test_geocoding_quality_never_changes_the_split(field, values):
     skewed[0][field] = values[0]
     skewed[1][field] = values[1]
 
-    first = allocate_policy(policy("P-1", "B-1", "1000.00"), baseline)
-    second = allocate_policy(policy("P-1", "B-1", "1000.00"), skewed)
+    first = allocate_policy(priced("P-1", "B-1", "1000.00"), baseline)
+    second = allocate_policy(priced("P-1", "B-1", "1000.00"), skewed)
     assert [s.amount for s in first.shares] == [s.amount for s in second.shares]
 
 
 def test_the_primary_flag_does_not_move_the_baseline_split():
     """It is an attribute, and the baseline must imply no ranking at all."""
-    result = allocate_policy(policy("P-1", "B-1", "1000.00"), sites("B-1", 2))
+    result = allocate_policy(priced("P-1", "B-1", "1000.00"), sites("B-1", 2))
     assert [share.amount for share in result.shares] == [
         Decimal("500.00"),
         Decimal("500.00"),
@@ -273,14 +272,22 @@ def test_the_primary_flag_does_not_move_the_baseline_split():
 
 @pytest.fixture()
 def extract_rows():
+    """A whole portfolio, through the intake path the platform actually uses.
+
+    Not the raw source rows. Feeding those in directly would test the engine
+    against a shape nothing else produces, and would have hidden that the
+    engine was reading a column name the platform no longer has.
+    """
+    import io
+
+    from cass_extract import intake, legacy
+
     policies, locations = structural_extract()
     from fixtures import as_workbook
 
-    read = read_workbook(as_workbook(policies, locations))
-    return (
-        [row.values for row in read.policies],
-        [row.values for row in read.locations],
-    )
+    payload, _ = legacy.migrate(as_workbook(policies, locations))
+    risks, policy_rows = intake.records(intake.read_workbook(io.BytesIO(payload)))
+    return policy_rows, risks
 
 
 def test_every_policy_in_the_portfolio_reconciles(extract_rows):
@@ -302,7 +309,7 @@ def test_each_policy_is_allocated_independently_even_on_a_shared_business(extrac
     assert {item.policy_id for item in twopol} == {"P-4a", "P-4b"}
 
     # The location carries both policies' value, which is correct.
-    assert result.by_location()[("B-TWOPOL", 1)] == Decimal("1250000.00")
+    assert result.by_location()[("B-TWOPOL", "1")] == Decimal("1250000.00")
 
 
 def test_a_policy_whose_business_has_no_location_is_excluded_with_a_reason(extract_rows):
@@ -324,9 +331,9 @@ def test_a_policy_with_a_site_outside_the_cohort_is_excluded_whole(extract_rows)
     policies, locations = extract_rows
     # Approve everything except B-MULTI's third site.
     eligible = {
-        (row["business_id"], int(row["location_number"]))
+        (row["business_id"], row["location_number"])
         for row in locations
-        if not (row["business_id"] == "B-MULTI" and int(row["location_number"]) == 3)
+        if not (row["business_id"] == "B-MULTI" and row["location_number"] == "3")
     }
     result = allocate(policies, locations, eligible=eligible)
 
@@ -339,9 +346,7 @@ def test_a_policy_with_a_site_outside_the_cohort_is_excluded_whole(extract_rows)
 
 def test_an_eligible_policy_is_unaffected_by_the_gate(extract_rows):
     policies, locations = extract_rows
-    eligible = {
-        (row["business_id"], int(row["location_number"])) for row in locations
-    }
+    eligible = {(row["business_id"], row["location_number"]) for row in locations}
     result = allocate(policies, locations, eligible=eligible)
     assert result.reconciles
     assert not any(
@@ -353,7 +358,7 @@ def test_the_gate_never_silently_moves_value(extract_rows):
     """The excluded policy's TIV is absent from the result, not spread over it."""
     policies, locations = extract_rows
     eligible = {
-        (row["business_id"], int(row["location_number"]))
+        (row["business_id"], row["location_number"])
         for row in locations
         if row["business_id"] != "B-MULTI"
     }
@@ -383,7 +388,7 @@ def _sited(business: str, number: int, value: str | None, **extra):
 
 def test_a_schedule_that_reports_its_values_needs_no_assumption():
     """The case where the allocation question does not arise at all."""
-    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    policy = {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("1000.00")}
     schedule = [_sited("B-1", 1, "750.00"), _sited("B-1", 2, "250.00")]
 
     result = allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
@@ -404,7 +409,7 @@ def test_reported_values_are_never_silently_read_as_an_equal_split():
     than one it refuses, because the lineage records the substitute as though
     somebody chose it.
     """
-    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    policy = {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("1000.00")}
     schedule = [_sited("B-1", 1, "900.00"), _sited("B-1", 2, "100.00")]
 
     reported = allocate_policy(policy, schedule, method=AllocationMethod.REPORTED)
@@ -420,12 +425,12 @@ def test_several_policies_over_one_schedule_divide_in_proportion():
     """Site values cannot equal every policy's TIV at once, so they are weights."""
     schedule = [_sited("B-1", 1, "750.00"), _sited("B-1", 2, "250.00")]
     first = allocate_policy(
-        {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")},
+        {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("1000.00")},
         schedule,
         method=AllocationMethod.REPORTED,
     )
     second = allocate_policy(
-        {"policy_id": "P-2", "business_id": "B-1", "gross_limit": Decimal("400.00")},
+        {"policy_id": "P-2", "business_id": "B-1", "policy_tiv": Decimal("400.00")},
         schedule,
         method=AllocationMethod.REPORTED,
     )
@@ -438,7 +443,7 @@ def test_several_policies_over_one_schedule_divide_in_proportion():
 
 def test_a_partly_reported_schedule_is_refused_and_names_the_gaps():
     """Part of a division is not a division."""
-    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    policy = {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("1000.00")}
     schedule = [_sited("B-1", 1, "750.00"), _sited("B-1", 2, None)]
 
     with pytest.raises(AllocationError) as excinfo:
@@ -449,7 +454,7 @@ def test_a_partly_reported_schedule_is_refused_and_names_the_gaps():
 
 
 def test_a_schedule_of_zeroes_is_not_a_reported_allocation():
-    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    policy = {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("1000.00")}
     schedule = [_sited("B-1", 1, "0.00"), _sited("B-1", 2, "0.00")]
 
     with pytest.raises(AllocationError, match="cannot divide anything"):
@@ -457,7 +462,7 @@ def test_a_schedule_of_zeroes_is_not_a_reported_allocation():
 
 
 def test_a_negative_reported_value_is_refused():
-    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("1000.00")}
+    policy = {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("1000.00")}
     schedule = [_sited("B-1", 1, "-10.00"), _sited("B-1", 2, "100.00")]
 
     with pytest.raises(AllocationError, match="negative value"):
@@ -466,7 +471,7 @@ def test_a_negative_reported_value_is_refused():
 
 def test_reported_values_reconcile_exactly_when_they_do_not_divide_evenly():
     """Thirds of a policy total still land on the cent."""
-    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("100.00")}
+    policy = {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("100.00")}
     schedule = [
         _sited("B-1", 1, "1.00"),
         _sited("B-1", 2, "1.00"),
@@ -479,7 +484,7 @@ def test_reported_values_reconcile_exactly_when_they_do_not_divide_evenly():
 
 def test_one_reported_site_is_still_recorded_as_a_single_location():
     """A whole allocation to the only site is a fact whatever method was asked for."""
-    policy = {"policy_id": "P-1", "business_id": "B-1", "gross_limit": Decimal("500.00")}
+    policy = {"policy_id": "P-1", "business_id": "B-1", "policy_tiv": Decimal("500.00")}
     result = allocate_policy(
         policy, [_sited("B-1", 1, "500.00")], method=AllocationMethod.REPORTED
     )

@@ -28,6 +28,22 @@ SHARED_LAT = Decimal("-6.200000")
 SHARED_LON = Decimal("106.800000")
 
 
+def priced(policy_id: str, business_id: str, policy_tiv: str, **extra: Any) -> dict[str, Any]:
+    """One policy as the allocation engine reads it.
+
+    Canonical names, not a source format's. ``policy`` below builds a row of
+    the retired two-sheet workbook, and feeding one of those straight into the
+    allocation engine only ever worked because the engine had that workbook's
+    column name compiled into it.
+    """
+    return {
+        "policy_id": policy_id,
+        "business_id": business_id,
+        "policy_tiv": policy_tiv,
+        **extra,
+    }
+
+
 def policy(
     policy_id: str,
     business_id: str,
@@ -82,6 +98,39 @@ def policy(
         "risk_location_method": "address",
         "risk_location_confidence": "high",
         "risk_location_needs_review": "No",
+    }
+
+
+def sited(
+    business_id: str,
+    number: int,
+    latitude: Any,
+    longitude: Any,
+    *,
+    primary: bool = True,
+    precision: str = "parcel",
+    needs_review: bool = False,
+    country_code: str = "ID",
+    class_of_business: str = "Fire",
+    **extra: Any,
+) -> dict[str, Any]:
+    """One risk as the cohorts and the allocation read it.
+
+    Canonical names, like ``priced``. ``location`` below builds a row of the
+    retired two-sheet workbook, and a rule that reads one of those directly is
+    a rule coupled to a source format it should know nothing about.
+    """
+    return {
+        "business_id": business_id,
+        "location_number": number,
+        "primary_location": primary,
+        "latitude": latitude,
+        "longitude": longitude,
+        "precision": precision,
+        "needs_review": needs_review,
+        "country_code": country_code,
+        "class_of_business": class_of_business,
+        **extra,
     }
 
 
@@ -224,3 +273,115 @@ def _cell(value: Any) -> Any:
     if isinstance(value, Decimal):
         return str(value)
     return value
+
+
+# -- the CASS intake template ------------------------------------------------------
+
+def risk_row(
+    account: str,
+    reference: str,
+    latitude: Any,
+    longitude: Any,
+    *,
+    total: str = "",
+    primary: str = "Yes",
+    precision: str = "parcel",
+    needs_review: str = "No",
+    country: str = "ID",
+    class_of_business: str = "Fire",
+    **extra: Any,
+) -> dict[str, Any]:
+    """One row of the Risks sheet, in template column names."""
+    row = {
+        "Account reference": account,
+        "Risk reference": reference,
+        "Country": country,
+        "Latitude": str(latitude),
+        "Longitude": str(longitude),
+        "Address": f"{reference} Example Street",
+        "Geocode precision": precision,
+        "Primary site": primary,
+        "Needs review": needs_review,
+        "Class of business": class_of_business,
+        "Total insured value": total,
+        "Perils covered": "QEQ",
+        "Currency": "USD",
+    }
+    row.update(extra)
+    return row
+
+
+def policy_row(account: str, reference: str, total: str, **extra: Any) -> dict[str, Any]:
+    """One row of the Policies sheet, in template column names."""
+    row = {
+        "Account reference": account,
+        "Policy reference": reference,
+        "Currency": "USD",
+        "Perils covered": "QEQ",
+        "Total insured value": total,
+    }
+    row.update(extra)
+    return row
+
+
+def structural_template() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The same eight businesses as ``structural_extract``, in the new format.
+
+    Written natively rather than migrated from the retired workbook, because a
+    fixture that reached the current format only by way of the previous one
+    could not outlive it -- and would quietly test the converter instead of the
+    thing under test.
+
+    Single-site accounts state what their site is worth, because that is a
+    fact. Multi-site accounts state nothing at the risk and carry the total on
+    the policy, because the source of this shape does not say how it divides.
+    """
+    risks = [
+        risk_row("B-SINGLE", "1", SHARED_LAT, SHARED_LON, total="1000000.00"),
+        risk_row("B-MULTI", "1", "-6.910000", "107.600000"),
+        risk_row("B-MULTI", "2", "-6.920000", "107.610000", primary="No"),
+        risk_row("B-MULTI", "3", "-6.930000", "107.620000", primary="No",
+                 precision="street"),
+        risk_row("B-PARTIAL", "1", "-7.250000", "112.750000"),
+        risk_row("B-PARTIAL", "2", "-7.260000", "112.760000", primary="No",
+                 needs_review="Yes"),
+        risk_row("B-TWOPOL", "1", "-6.100000", "106.700000", total="1250000.00"),
+        risk_row("B-SHARED", "1", SHARED_LAT, SHARED_LON, total="250000.00"),
+        risk_row("B-COARSE", "1", "-8.650000", "115.200000", total="400000.00",
+                 precision="locality"),
+        risk_row("B-NEPAL", "1", "27.700000", "85.320000", total="600000.00",
+                 country="NP", class_of_business="Engineering"),
+        risk_row("B-LIABILITY", "1", "-6.300000", "106.900000", total="125000.00",
+                 class_of_business="Liability"),
+    ]
+    policies = [
+        policy_row("B-SINGLE", "P-1", "1000000.00"),
+        policy_row("B-MULTI", "P-2", "3000000.00"),
+        policy_row("B-PARTIAL", "P-3", "2000000.00"),
+        policy_row("B-TWOPOL", "P-4a", "500000.00"),
+        policy_row("B-TWOPOL", "P-4b", "750000.00"),
+        policy_row("B-SHARED", "P-5", "250000.00"),
+        policy_row("B-COARSE", "P-6", "400000.00"),
+        policy_row("B-NEPAL", "P-7", "600000.00"),
+        policy_row("B-LIABILITY", "P-8", "125000.00"),
+        # An account with policy terms and no risks, like most of a facultative
+        # book: value CASS knows about and cannot place.
+        policy_row("B-NOLOC", "P-9", "800000.00"),
+    ]
+    return risks, policies
+
+
+def as_template(
+    risks: list[dict[str, Any]] | None = None,
+    policies: list[dict[str, Any]] | None = None,
+) -> bytes:
+    """Write rows to a real intake workbook, so the reader is tested on its own path."""
+    from cass_extract import template
+
+    if risks is None and policies is None:
+        risks, policies = structural_template()
+    return template.workbook(
+        project_reference="idn-fac-2026",
+        risks=risks or [],
+        policies=policies or [],
+    )

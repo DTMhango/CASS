@@ -145,7 +145,15 @@ def read_workbook(source: BinaryIO | str) -> IntakeRead:
     except ImportError as exc:  # pragma: no cover - packaging error
         raise IntakeError("openpyxl is required to read a template.") from exc
 
-    book = load_workbook(source, read_only=True, data_only=True)
+    try:
+        book = load_workbook(source, read_only=True, data_only=True)
+    except Exception as exc:
+        # Anything openpyxl cannot open: a CSV renamed, a truncated upload, a
+        # PDF. The source is still registered; this is what the batch records.
+        raise IntakeError(
+            "The file could not be opened as a workbook, so it is not a CASS "
+            f"intake template. ({exc})"
+        ) from exc
     names = {name.strip().lower(): name for name in book.sheetnames}
     if profile.RISK_SHEET.lower() not in names:
         raise IntakeError(
@@ -415,6 +423,10 @@ def _duplicate_policies(sheet: SheetRead) -> Iterator[Finding]:
             seen[key] = row.row_number
 
 
+def _accounts(count: int) -> str:
+    return "account has" if count == 1 else "accounts have"
+
+
 def _orphans(read: IntakeRead) -> Iterator[Finding]:
     """Accounts named on one sheet and not the other.
 
@@ -442,9 +454,9 @@ def _orphans(read: IntakeRead) -> Iterator[Finding]:
             field="Account reference",
             code="policy_without_risks",
             message=(
-                f"{len(uncovered)} accounts have policy terms but no risks, so "
-                "nothing would be modelled under them. This is expected where a "
-                "book is only partly geocoded. First: "
+                f"{len(uncovered)} {_accounts(len(uncovered))} policy terms but "
+                "no risks, so nothing would be modelled under them. This is "
+                "expected where a book is only partly geocoded. First: "
                 + ", ".join(account for account, _ in uncovered[:5])
                 + "."
             ),
@@ -468,9 +480,9 @@ def _orphans(read: IntakeRead) -> Iterator[Finding]:
             field="Account reference",
             code="risk_without_policy",
             message=(
-                f"{len(unpriced)} accounts have risks but no policy terms, while "
-                "others have them. Ground-up loss is unaffected; insured loss "
-                "cannot be calculated for them. First: "
+                f"{len(unpriced)} {_accounts(len(unpriced))} risks but no policy "
+                "terms, while others have them. Ground-up loss is unaffected; "
+                "insured loss cannot be calculated for them. First: "
                 + ", ".join(account for account, _ in unpriced[:5])
                 + "."
             ),
@@ -527,3 +539,81 @@ def coverage_evidence(read: IntakeRead) -> Mapping[str, int]:
         "risk_total_stated": totals,
         "allocated_from_policy": len(read.risks.rows) - coverages - totals,
     }
+
+
+# -- canonical records -------------------------------------------------------------
+
+#: Template column to the name the rest of the platform uses. The template is
+#: written for a person and the engine is written for a model, and this is the
+#: one place the two vocabularies meet: cohorts, allocation and promotion all
+#: read canonical names, so none of them is shaped by what a spreadsheet column
+#: happens to be called. A loading API that populates CASS directly produces
+#: these same records without going near a workbook.
+RISK_FIELDS: Mapping[str, str] = {
+    "Account reference": "business_id",
+    "Risk reference": "location_number",
+    "Risk name": "label",
+    "Primary site": "primary_location",
+    "Country": "country_code",
+    "Latitude": "latitude",
+    "Longitude": "longitude",
+    "Address": "address",
+    "Postal code": "postal_code",
+    "Administrative area": "area_code",
+    "Geocode precision": "precision",
+    "Needs review": "needs_review",
+    "Class of business": "class_of_business",
+    "Total insured value": "location_tiv",
+    "Occupancy": "occupancy_code",
+    "Construction": "construction_code",
+    "Year built": "year_built",
+    "Storeys": "storeys",
+    "Perils covered": "perils_covered",
+    "Currency": "currency",
+    "Building value": "BuildingTIV",
+    "Other structures value": "OtherTIV",
+    "Contents value": "ContentsTIV",
+    "Business interruption value": "BITIV",
+    "Risk deductible": "location_deductible",
+    "Risk limit": "location_limit",
+}
+
+POLICY_FIELDS: Mapping[str, str] = {
+    "Account reference": "business_id",
+    "Policy reference": "policy_id",
+    "Currency": "currency",
+    "Perils covered": "perils_covered",
+    "Total insured value": "policy_tiv",
+    "Inception date": "inception_date",
+    "Expiry date": "expiry_date",
+    "Layer": "layer_number",
+    "Signed share": "signed_share",
+    "Layer limit": "layer_limit",
+    "Layer attachment": "layer_attachment",
+    "Policy deductible": "policy_deductible",
+    "Policy limit": "policy_limit",
+}
+
+
+def risk_record(row: SourceRow) -> dict[str, Any]:
+    """One risk row under the names the platform reads."""
+    record = {name: row.values.get(column) for column, name in RISK_FIELDS.items()}
+    record["row_number"] = row.row_number
+    record["states_coverages"] = states_coverages(row)
+    record["states_risk_total"] = states_risk_total(row)
+    return record
+
+
+def policy_record(row: SourceRow) -> dict[str, Any]:
+    """One policy row under the names the platform reads."""
+    record = {name: row.values.get(column) for column, name in POLICY_FIELDS.items()}
+    record["row_number"] = row.row_number
+    return record
+
+
+def records(read: IntakeRead) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Both sheets as canonical records, in sheet order."""
+    return (
+        [risk_record(row) for row in read.risks.rows],
+        [policy_record(row) for row in read.policies.rows],
+    )

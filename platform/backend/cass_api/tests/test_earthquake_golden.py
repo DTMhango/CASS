@@ -34,7 +34,7 @@ from decimal import Decimal
 import pytest
 
 import cass_extract as extract
-from apps.exposure.extract import import_extract
+from apps.exposure.extract import import_portfolio
 from apps.exposure.promotion import promote
 from apps.modelregistry import pilot
 from apps.modelregistry.models import PublicationState
@@ -43,7 +43,7 @@ from apps.runs.services import RunBlocked, execute
 from cass_core.runs import RunState
 
 from .test_analysis_execution import engine_for, oasis_server
-from .test_promotion import as_workbook, oed_rows, structural_extract
+from .test_promotion import as_template, oed_rows
 
 pytestmark = pytest.mark.django_db
 
@@ -56,12 +56,8 @@ def pilot_model(db, modeller):
 
 @pytest.fixture()
 def batch(project, analyst):
-    policies, locations = structural_extract()
-    return import_extract(
-        project,
-        as_workbook(policies, locations).getvalue(),
-        filename="extract.xlsx",
-        actor=analyst,
+    return import_portfolio(
+        project, as_template(), filename="portfolio.xlsx", actor=analyst
     )
 
 
@@ -308,7 +304,7 @@ def test_a_portfolio_outside_the_model_country_is_held_rather_than_run(
         batch,
         name="Nepal only",
         class_of_business=None,
-        country="Nepal",
+        country="NP",
         actor=analyst,
     )
     analysis = analysis_for(project, nepal, pilot_model, analyst)
@@ -330,12 +326,12 @@ def test_a_country_selection_records_what_it_narrowed_to(batch, analyst):
         batch,
         name="Indonesia only",
         class_of_business=None,
-        country="Indonesia",
+        country="ID",
         actor=analyst,
     )
-    assert indonesia.source_lineage["country_filter"] == "Indonesia"
+    assert indonesia.source_lineage["country_filter"] == "ID"
     assert indonesia.source_lineage["countries"] == ["ID"]
-    assert "Indonesia only" in indonesia.source_description
+    assert "ID only" in indonesia.source_description
 
 
 # -- what the result may be used for -----------------------------------------------------
