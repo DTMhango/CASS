@@ -89,62 +89,35 @@ def promote(
     class_of_business: str | None = extract.cohorts.PHYSICAL_DAMAGE_CLASS,
     allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
     component_split: extract.ComponentSplit | None = None,
+    reported_components: extract.ReportedComponents | None = None,
+    accept_restated_total: bool = False,
     actor=None,
     request=None,
 ) -> ExposureVersion:
     """Turn one cohort selection of a batch into a published exposure version.
 
-    ``component_split`` is the coverage assumption. It defaults to the
-    building-only smoke fixture rather than to something that spreads value,
-    because a default that quietly asserted a building/contents ratio would put
-    an unapproved prior into every result that never asked for one.
+    Coverage values come from one of two places, and reported ones win.
+    ``reported_components`` is a completed template: real numbers per location,
+    in whatever proportions the schedule actually shows, which is how OED works
+    and what the brief's evidence hierarchy ranks first. ``component_split`` is
+    the fallback for when nobody knows the breakdown, and it defaults to the
+    building-only smoke fixture rather than to something that spreads value.
     """
     component_split = component_split or extract.DEFAULT_SPLIT
-    locations = list(batch.location_rows.all())
-    if not locations:
-        raise PromotionError("The batch staged no locations, so there is nothing to promote.")
-
-    rows = [row.values for row in locations]
-    assignments = extract.assign_all(rows)
-    selected_businesses = extract.business_complete(
-        rows, assignments, cohort=cohort, class_of_business=class_of_business
+    selected_businesses, selected_locations, allocation = _selection(
+        batch,
+        cohort=cohort,
+        class_of_business=class_of_business,
+        allocation_method=allocation_method,
     )
-    if not selected_businesses:
-        label = f"cohort {cohort}" + (f" {class_of_business}" if class_of_business else "")
-        raise PromotionError(
-            f"No business has its whole schedule in {label}, so there is nothing to "
-            "promote. Taking part of a schedule would leave the excluded sites' value "
-            "with nowhere honest to go."
-        )
-
-    selected_locations = [
-        row for row in locations if row.business_id in selected_businesses
-    ]
-    policies = list(
-        SourcePolicyRow.objects.filter(
-            batch=batch, business_id__in=selected_businesses
-        )
-    )
-
-    allocation = extract.allocate(
-        [policy.values for policy in policies],
-        [row.values for row in selected_locations],
-        method=allocation_method,
-    )
-    if not allocation.reconciles:
-        raise PromotionError(
-            "The allocation does not reconcile to the reported policy values, so the "
-            "exposure version would misstate the portfolio."
-        )
 
     totals = allocation.by_location()
-    components = extract.split_locations(totals, component_split)
-    component_check = extract.reconciliation(totals, components)
-    if not component_check["reconciles"]:
-        raise PromotionError(
-            "The coverage components do not add back to the location totals, so the "
-            "exposure version would misstate the portfolio."
-        )
+    components, coverage_record = _coverage_values(
+        totals,
+        component_split=component_split,
+        reported_components=reported_components,
+        accept_restated_total=accept_restated_total,
+    )
 
     version = _create_version(
         batch,
@@ -152,8 +125,7 @@ def promote(
         cohort=cohort,
         class_of_business=class_of_business,
         allocation=allocation,
-        component_split=component_split,
-        component_check=component_check,
+        coverage_record=coverage_record,
         selected_businesses=selected_businesses,
         selected_locations=selected_locations,
         actor=actor,
@@ -189,7 +161,7 @@ def promote(
             "import_batch": str(batch.id),
             "cohort": str(cohort),
             "allocation_method": str(allocation.method),
-            "coverage_split": component_split.name,
+            "coverage_source": coverage_record["source"],
             "locations": len(selected_locations),
         },
         detail="Promoted a source-extract cohort to an OED exposure version.",
@@ -199,6 +171,155 @@ def promote(
     return version
 
 
+def _selection(
+    batch: ImportBatch,
+    *,
+    cohort: extract.Cohort,
+    class_of_business: str | None,
+    allocation_method: extract.AllocationMethod,
+):
+    """The locations a promotion would cover, and what each would be allocated.
+
+    Shared by the promotion itself and the coverage template, so the template a
+    person fills in is always exactly the set the promotion will read back.
+    """
+    locations = list(batch.location_rows.all())
+    if not locations:
+        raise PromotionError("The batch staged no locations, so there is nothing to promote.")
+
+    rows = [row.values for row in locations]
+    assignments = extract.assign_all(rows)
+    businesses = extract.business_complete(
+        rows, assignments, cohort=cohort, class_of_business=class_of_business
+    )
+    if not businesses:
+        label = f"cohort {cohort}" + (f" {class_of_business}" if class_of_business else "")
+        raise PromotionError(
+            f"No business has its whole schedule in {label}, so there is nothing to "
+            "promote. Taking part of a schedule would leave the excluded sites' value "
+            "with nowhere honest to go."
+        )
+
+    selected = [row for row in locations if row.business_id in businesses]
+    policies = list(
+        SourcePolicyRow.objects.filter(batch=batch, business_id__in=businesses)
+    )
+    allocation = extract.allocate(
+        [policy.values for policy in policies],
+        [row.values for row in selected],
+        method=allocation_method,
+    )
+    if not allocation.reconciles:
+        raise PromotionError(
+            "The allocation does not reconcile to the reported policy values, so the "
+            "exposure version would misstate the portfolio."
+        )
+    return businesses, selected, allocation
+
+
+def template_rows(
+    batch: ImportBatch,
+    *,
+    cohort: extract.Cohort = extract.Cohort.A,
+    class_of_business: str | None = extract.cohorts.PHYSICAL_DAMAGE_CLASS,
+    allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
+) -> list[dict[str, Any]]:
+    """The rows of a coverage template for one selection."""
+    _, selected, allocation = _selection(
+        batch,
+        cohort=cohort,
+        class_of_business=class_of_business,
+        allocation_method=allocation_method,
+    )
+    totals = allocation.by_location()
+    return [
+        {
+            "business_id": row.business_id,
+            "location_number": row.location_number,
+            "country_code": row.country_code,
+            "label": row.precision,
+            "allocated_tiv": totals.get((row.business_id, row.location_number)),
+        }
+        for row in sorted(selected, key=lambda item: (item.business_id, item.location_number))
+    ]
+
+
+def _coverage_values(
+    totals,
+    *,
+    component_split: extract.ComponentSplit,
+    reported_components: extract.ReportedComponents | None,
+    accept_restated_total: bool,
+):
+    """Resolve the coverage values, preferring what somebody actually reported.
+
+    A supplied schedule that disagrees with the allocated total is not silently
+    rescaled and not silently accepted. The two numbers are different pieces of
+    reported information -- the policy's TIV and the schedule's -- and which is
+    right is a question for a person. So the difference is reported, and
+    proceeding on the schedule's total is something the caller asks for
+    explicitly.
+    """
+    if reported_components is None:
+        components = extract.split_locations(totals, component_split)
+        check = extract.reconciliation(totals, components)
+        if not check["reconciles"]:
+            raise PromotionError(
+                "The coverage components do not add back to the location totals, so "
+                "the exposure version would misstate the portfolio."
+            )
+        return components, {
+            "source": "derived_split",
+            "split": component_split.as_dict(),
+            "reconciliation": check,
+            "basis": (
+                "No component split is reported in the source. Values were divided by "
+                f"the {component_split.name} assumption, which is "
+                + ("approved." if component_split.approved else "not an approved prior.")
+            ),
+            "decision_note": (
+                "an unapproved coverage split"
+                if not component_split.approved
+                else "an approved coverage split"
+            ),
+        }
+
+    check = extract.reconcile_reported(reported_components, totals)
+    if check["missing_locations"]:
+        raise PromotionError(
+            f"{len(check['missing_locations'])} selected locations carry no supplied "
+            "coverage values, so part of the portfolio would have no value at all. "
+            "First missing: " + ", ".join(check["missing_locations"][:5]) + "."
+        )
+    if check["restates_total"] and not accept_restated_total:
+        raise PromotionError(
+            "The supplied coverage values total "
+            f"{check['supplied_total']} against an allocated {check['allocated_total']}, "
+            f"a difference of {check['difference']} across {check['difference_count']} "
+            "locations. Reported location values outrank a derived split, so this may "
+            "be the better number -- but restating the portfolio total is a decision, "
+            "not a rounding. Correct the file, or promote again accepting the restated "
+            "total."
+        )
+
+    components = {key: reported_components.apply(key) for key in totals}
+    return components, {
+        "source": "reported_location_values",
+        "supplied": reported_components.as_dict(),
+        "reconciliation": check,
+        "restated_total_accepted": bool(check["restates_total"] and accept_restated_total),
+        "basis": (
+            "Coverage values were supplied per location rather than derived. "
+            + (
+                "They restate the portfolio total, which was accepted explicitly."
+                if check["restates_total"]
+                else "They reconcile to the allocated location totals."
+            )
+        ),
+        "decision_note": "reported coverage values that no approval covers",
+    }
+
+
 def _create_version(
     batch: ImportBatch,
     *,
@@ -206,8 +327,7 @@ def _create_version(
     cohort: extract.Cohort,
     class_of_business: str | None,
     allocation,
-    component_split: extract.ComponentSplit,
-    component_check: dict[str, Any],
+    coverage_record: dict[str, Any],
     selected_businesses: set[str],
     selected_locations: list[SourceRiskLocation],
     actor,
@@ -247,10 +367,7 @@ def _create_version(
                     {str(item.method) for item in allocation.allocations}
                 ),
             },
-            "coverage_split": {
-                **component_split.as_dict(),
-                "reconciliation": component_check,
-            },
+            "coverage": coverage_record,
             "value_basis": (
                 "gross_limit is reported TIV at KRE's share in USD. The share is not "
                 "applied again, so a physical-damage result from this version is "
@@ -267,19 +384,11 @@ def _create_version(
                 "ConstructionCode": "Not in the source and not inferred.",
                 "YearBuilt": "Not in the source and not inferred.",
                 "NumberOfStoreys": "Not in the source and not inferred.",
-                "coverage_components": (
-                    "No component split is reported in the source. Values were "
-                    f"divided by the {component_split.name} assumption, which is "
-                    + ("approved." if component_split.approved else "not an approved prior.")
-                ),
+                "coverage_components": coverage_record["basis"],
             },
             "decision_use": (
                 "Blocked. This version carries "
-                + (
-                    "an unapproved coverage split"
-                    if not component_split.approved
-                    else "an approved coverage split"
-                )
+                + coverage_record["decision_note"]
                 + " and no reported vulnerability attributes; it is a research and "
                 "engine-test version."
             ),
@@ -352,7 +461,7 @@ def promotion_summary(version: ExposureVersion) -> dict[str, Any]:
         "total_tiv": str(version.total_tiv),
         "cohort": lineage.get("cohort"),
         "allocation": lineage.get("allocation"),
-        "coverage_split": lineage.get("coverage_split"),
+        "coverage": lineage.get("coverage"),
         "value_basis": lineage.get("value_basis"),
         "attributes_not_reported": sorted(lineage.get("attributes_not_reported", {})),
         "decision_use": lineage.get("decision_use"),

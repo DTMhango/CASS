@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 from django.conf import settings
+from django.http import HttpResponse
 from django.utils.dateparse import parse_date
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status, viewsets
@@ -500,14 +501,56 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
+
+    @action(detail=True, methods=["get"], url_path="coverage-template")
+    def coverage_template(self, request, pk=None, version=None):
+        """A CSV of the selected locations, ready for real coverage values.
+
+        The other half of the coverage story. A percentage split is fine when
+        nobody knows the breakdown, but OED lets a schedule carry whatever
+        numbers each row actually has, and this is how someone supplies them:
+        download, fill in, post back with the promotion.
+
+        The allocated total travels with each row so a person can see what they
+        are overriding, and it is not one of the coverage columns.
+        """
+        batch = self.get_object()
+        try:
+            rows = promotion.template_rows(
+                batch,
+                cohort=cass_extract.Cohort(str(request.query_params.get("cohort") or "A")),
+                class_of_business=_requested_class(request.query_params),
+                allocation_method=cass_extract.AllocationMethod(
+                    str(
+                        request.query_params.get("allocation_method")
+                        or cass_extract.AllocationMethod.EQUAL_LOCATION
+                    )
+                ),
+            )
+        except (promotion.PromotionError, cass_extract.AllocationError, ValueError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        payload = cass_extract.component_template(rows)
+        response = HttpResponse(payload, content_type="text/csv")
+        response["Content-Disposition"] = (
+            f'attachment; filename="coverage-template-{batch.id}.csv"'
+        )
+        return response
+
     @action(detail=True, methods=["post"])
     def promote(self, request, pk=None, version=None):
         """Turn a cohort selection into a published OED exposure version.
 
         The assumptions are the caller's to choose: which cohort, how a
-        multi-location policy divides, and how a location total splits across
-        coverages. Every one of them is recorded on the version that results,
-        so a later reader can see what produced it and run it again differently.
+        multi-location policy divides, and where the coverage values come from.
+        Every one of them is recorded on the version that results, so a later
+        reader can see what produced it and run it again differently.
+
+        Coverage values may be supplied outright. Post a completed coverage
+        template as ``coverage_file`` and those numbers are used as given, in
+        whatever proportions each row carries -- which is how OED works, and
+        what the brief's evidence hierarchy ranks above any split. Without one,
+        a named or custom percentage split applies.
         """
         batch = self.get_object()
         if not batch.project.may_write(request.user):
@@ -534,11 +577,21 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        class_of_business = request.data.get("class_of_business", "Fire")
-        if class_of_business in ("", "any", None):
-            class_of_business = None
+        class_of_business = _requested_class(request.data)
+
+        upload = request.FILES.get("coverage_file")
+        accept_restated = str(
+            request.data.get("accept_restated_total", "")
+        ).lower() in ("1", "true", "yes")
 
         try:
+            reported = (
+                cass_extract.read_reported_components(
+                    upload.read(), name=upload.name
+                )
+                if upload
+                else None
+            )
             split = _requested_split(request.data)
             exposure = promotion.promote(
                 batch,
@@ -547,6 +600,8 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
                 class_of_business=class_of_business,
                 allocation_method=method,
                 component_split=split,
+                reported_components=reported,
+                accept_restated_total=accept_restated,
                 actor=request.user,
                 request=request,
             )
@@ -663,3 +718,11 @@ class AssumptionCatalogueView(APIView):
                 "custom_split_allowed": True,
             }
         )
+
+
+def _requested_class(data) -> str | None:
+    """The class filter, where "any" means do not filter at all."""
+    requested = data.get("class_of_business", "Fire")
+    if requested in ("", "any", None):
+        return None
+    return str(requested)

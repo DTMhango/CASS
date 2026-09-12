@@ -2540,6 +2540,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportBatch'
           description: ''
+  /api/v1/portfolio-imports/{id}/coverage-template/:
+    get:
+      operationId: api_v1_portfolio_imports_coverage_template_retrieve
+      description: |-
+        A CSV of the selected locations, ready for real coverage values.
+
+        The other half of the coverage story. A percentage split is fine when
+        nobody knows the breakdown, but OED lets a schedule carry whatever
+        numbers each row actually has, and this is how someone supplies them:
+        download, fill in, post back with the promotion.
+
+        The allocated total travels with each row so a person can see what they
+        are overriding, and it is not one of the coverage columns.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
   /api/v1/portfolio-imports/{id}/locations/:
     get:
       operationId: api_v1_portfolio_imports_locations_retrieve
@@ -2600,9 +2633,15 @@ paths:
         Turn a cohort selection into a published OED exposure version.
 
         The assumptions are the caller's to choose: which cohort, how a
-        multi-location policy divides, and how a location total splits across
-        coverages. Every one of them is recorded on the version that results,
-        so a later reader can see what produced it and run it again differently.
+        multi-location policy divides, and where the coverage values come from.
+        Every one of them is recorded on the version that results, so a later
+        reader can see what produced it and run it again differently.
+
+        Coverage values may be supplied outright. Post a completed coverage
+        template as ``coverage_file`` and those numbers are used as given, in
+        whatever proportions each row carries -- which is how OED works, and
+        what the brief's evidence hierarchy ranks above any split. Without one,
+        a named or custom percentage split applies.
       parameters:
       - in: path
         name: id

@@ -58,6 +58,15 @@ from .reader import (
     read_rows,
     read_workbook,
 )
+from .reported import (
+    COMPONENT_COLUMNS,
+    TEMPLATE_COLUMNS,
+    TEMPLATE_VERSION,
+    ReportedComponents,
+)
+from .reported import read as read_reported_components
+from .reported import reconcile as reconcile_reported
+from .reported import template as component_template
 from .schema import (
     CONFIDENTIAL_COLUMNS,
     LOCATION_FIELDS,
@@ -77,10 +86,13 @@ __all__ = [
     "ALLOCATION_RULE_VERSION",
     "BUILDING_ONLY",
     "COMPONENT_RULE_VERSION",
+    "COMPONENT_COLUMNS",
     "COVERAGE_ORDER",
     "COHORT_RULE_VERSION",
     "DEFAULT_SPLIT",
     "PRESETS",
+    "TEMPLATE_COLUMNS",
+    "TEMPLATE_VERSION",
     "CONFIDENTIAL_COLUMNS",
     "JOIN_RULE_VERSION",
     "LOCATION_FIELDS",
@@ -98,6 +110,7 @@ __all__ = [
     "Cohort",
     "ComponentSplit",
     "Coverage",
+    "ReportedComponents",
     "DataType",
     "ExtractRead",
     "ExtractReadError",
@@ -119,9 +132,12 @@ __all__ = [
     "build_join_report",
     "business_complete",
     "apportion",
+    "component_template",
     "concentration_envelope",
     "custom",
     "preset",
+    "read_reported_components",
+    "reconcile_reported",
     "reconciliation",
     "split_locations",
     "country_code",
