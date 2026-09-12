@@ -276,8 +276,11 @@ def _coerce(
             field=item.name,
             code="unreadable_value",
             message=message,
-            # A confidential cell's contents are never repeated into a finding.
-            value="" if item.is_confidential else str(cell)[:120],
+            # The cell's own text, so a person can see what needs correcting.
+            # Nothing in a Klapton Re portfolio is withheld from a Klapton Re
+            # colleague; what a finding must not become is a route for whole
+            # source rows into a log, and quoting one cell is not that.
+            value=str(cell)[:120],
         )
 
     text = str(cell).strip()

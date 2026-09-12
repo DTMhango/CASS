@@ -247,7 +247,7 @@ def _coerce(
             code="unreadable_value",
             message=message,
             # A confidential cell's contents are not repeated into a finding.
-            value="" if spec.is_confidential else str(cell)[:120],
+            value=str(cell)[:120],
         )
 
     match spec.dtype:
@@ -314,10 +314,10 @@ def masked(row: Mapping[str, Any], *, include_confidential: bool = False) -> dic
     bundle. Reading the sensitivity off the schema rather than keeping a second
     list here is what stops the two drifting apart.
     """
-    from .schema import CONFIDENTIAL_COLUMNS
+    from .schema import RESTRICTED_COLUMNS
 
     if include_confidential:
         return dict(row)
     return {
-        key: value for key, value in row.items() if key not in CONFIDENTIAL_COLUMNS
+        key: value for key, value in row.items() if key not in RESTRICTED_COLUMNS
     }

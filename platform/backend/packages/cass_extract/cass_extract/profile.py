@@ -25,6 +25,15 @@ together would repeat policy terms on every risk row and invite them to
 disagree. Policy terms are optional: a portfolio without them still runs, at
 ground-up loss only, and CASS says so rather than inventing a term.
 
+**No column is classified.** An earlier draft graded these by sensitivity and
+role-gated the address, on the reading that a risk address was counterparty
+detail. It is not: a Klapton Re portfolio holds no information a Klapton Re
+colleague may not see, and a modeller who cannot read an address cannot check
+a coordinate against it, which is the review. What remains is a narrower
+operational rule that has nothing to do with roles -- whole source rows are not
+dumped into logs or support bundles, because those travel further than the
+platform does.
+
 **Blank is an answer.** Every optional column declares what CASS does when it
 is empty, and the answer is never "treat it as zero". An unknown occupancy
 reaches a named assumption; an unstated risk value reaches the allocation
@@ -50,8 +59,6 @@ from cass_oed.schema import (
     FileKind,
     field_map,
 )
-
-from .schema import Sensitivity
 
 #: Bumped when a column is added, removed or rebound to a different OED field.
 #: A completed template records it, so a file filled in under an earlier profile
@@ -113,7 +120,6 @@ class Column:
     when_blank: WhenBlank
     blank_effect: str = ""
     example: str = ""
-    sensitivity: Sensitivity = Sensitivity.OPEN
     #: Why this column has no OED destination. Required when ``oed_field`` is
     #: None and forbidden otherwise.
     purpose: str = ""
@@ -166,10 +172,6 @@ class Column:
             raise ProfileError(f"Column {self.name!r} binds to no known OED field.")
         return spec.dtype
 
-    @property
-    def is_confidential(self) -> bool:
-        return self.sensitivity is Sensitivity.CONFIDENTIAL
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -181,7 +183,6 @@ class Column:
             "when_blank": str(self.when_blank),
             "blank_effect": self.blank_effect,
             "example": self.example,
-            "confidential": self.is_confidential,
             "purpose": self.purpose,
             "reads_as": str(self.reads_as),
         }
@@ -189,6 +190,9 @@ class Column:
 
 class ProfileError(Exception):
     """Raised when the profile itself is inconsistent."""
+
+
+
 
 
 def _risk(
@@ -200,7 +204,6 @@ def _risk(
     when_blank: WhenBlank = WhenBlank.ABSENT,
     blank_effect: str = "",
     example: str = "",
-    sensitivity: Sensitivity = Sensitivity.OPEN,
     purpose: str = "",
     dtype: DataType | None = None,
 ) -> Column:
@@ -214,7 +217,6 @@ def _risk(
         when_blank=WhenBlank.REFUSED if required else when_blank,
         blank_effect=blank_effect,
         example=example,
-        sensitivity=sensitivity,
         purpose=purpose,
         dtype=dtype,
     )
@@ -230,7 +232,6 @@ def _policy(
     blank_effect: str = "",
     example: str = "",
     purpose: str = "",
-    sensitivity: Sensitivity = Sensitivity.OPEN,
     dtype: DataType | None = None,
 ) -> Column:
     return Column(
@@ -243,7 +244,6 @@ def _policy(
         when_blank=WhenBlank.REFUSED if required else when_blank,
         blank_effect=blank_effect,
         example=example,
-        sensitivity=sensitivity,
         purpose=purpose,
         dtype=dtype,
     )
@@ -278,7 +278,6 @@ RISK_COLUMNS: tuple[Column, ...] = (
         help_text="A description to recognise the site by. Never used in calculation.",
         blank_effect="The risk is identified by its account and risk reference alone.",
         example="Cikarang warehouse",
-        sensitivity=Sensitivity.CONFIDENTIAL,
         dtype=DataType.TEXT,
         purpose=(
             "Shown in the review interface so a person can recognise a row. OED "
@@ -312,9 +311,12 @@ RISK_COLUMNS: tuple[Column, ...] = (
     _risk(
         "Address",
         "StreetAddress",
-        help_text="Used for geocoding review only, never for calculation.",
+        help_text=(
+            "Used for geocoding review, never for calculation. Visible to every "
+            "project member: checking a coordinate against its address is the "
+            "review, and a modeller who cannot see it cannot do it."
+        ),
         blank_effect="Coordinates cannot be checked against an address during review.",
-        sensitivity=Sensitivity.CONFIDENTIAL,
     ),
     _risk(
         "Postal code",
@@ -356,6 +358,28 @@ RISK_COLUMNS: tuple[Column, ...] = (
         purpose=(
             "A reviewer's judgement about the row, which outranks the provider's "
             "own precision. It is CASS workflow state, not exposure data."
+        ),
+    ),
+    _risk(
+        "Primary site",
+        None,
+        help_text=(
+            "Yes on the main site of an account that holds several. Only "
+            "meaningful where the risk values are left blank: it is what the "
+            "primary-concentrated allocation sensitivity concentrates on."
+        ),
+        blank_effect=(
+            "Read as no. An account with no primary site marked cannot run the "
+            "primary-concentrated sensitivity, and the run says so rather than "
+            "picking one."
+        ),
+        example="Yes",
+        dtype=DataType.FLAG,
+        purpose=(
+            "Feeds the primary-concentrated allocation sensitivity. It is a "
+            "statement about which site matters commercially, not about the "
+            "building, so OED has no field for it -- and it is never treated as a "
+            "measure of value in its own right."
         ),
     ),
     _risk(

@@ -179,6 +179,7 @@ def _risk_row(business: str, site: SourceRow, value: str) -> dict[str, Any]:
         "Longitude": _plain(site.get("longitude")),
         "Address": _text(site.get("risk_location_address")),
         "Geocode precision": _text(site.get("precision")),
+        "Primary site": "Yes" if site.get("primary_location") else "No",
         "Needs review": "Yes" if site.get("needs_review") else "No",
         "Class of business": _text(site.get("class_of_business")),
         "Total insured value": value,

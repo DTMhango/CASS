@@ -85,13 +85,13 @@ from .reported import read as read_reported_components
 from .reported import reconcile as reconcile_reported
 from .reported import template as component_template
 from .schema import (
-    CONFIDENTIAL_COLUMNS,
     LOCATION_FIELDS,
     LOCATION_SHEET,
     PARSER_VERSION,
     POLICY_FIELDS,
     POLICY_SHEET,
     PROFILE_NAME,
+    RESTRICTED_COLUMNS,
     SCHEMA_VERSION,
     DataType,
     FieldSpec,
@@ -119,7 +119,7 @@ __all__ = [
     "TAXONOMY_COLUMNS",
     "TEMPLATE_COLUMNS",
     "TEMPLATE_VERSION",
-    "CONFIDENTIAL_COLUMNS",
+    "RESTRICTED_COLUMNS",
     "JOIN_RULE_VERSION",
     "LOCATION_FIELDS",
     "LOCATION_SHEET",

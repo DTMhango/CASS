@@ -389,7 +389,7 @@ def transformation_manifest(
 
     if not include_confidential:
         manifest["confidential_columns_withheld"] = sorted(
-            extract.CONFIDENTIAL_COLUMNS
+            extract.RESTRICTED_COLUMNS
         )
     return manifest
 

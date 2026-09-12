@@ -17,11 +17,11 @@ from fixtures import SHARED_LAT, SHARED_LON, as_workbook, location, structural_e
 
 from cass_extract import (
     COHORT_RULE_VERSION,
-    CONFIDENTIAL_COLUMNS,
     LOCATION_SHEET,
     PARSER_VERSION,
     POLICY_SHEET,
     PROFILE_NAME,
+    RESTRICTED_COLUMNS,
     SCHEMA_VERSION,
     Cohort,
     ExtractReadError,
@@ -194,46 +194,66 @@ def test_the_schema_and_parser_versions_are_stated():
     assert PARSER_VERSION
 
 
-# -- confidentiality ----------------------------------------------------------
+# -- what leaves the platform ---------------------------------------------------
 
-def test_the_confidential_columns_are_the_ones_that_name_a_counterparty():
-    assert CONFIDENTIAL_COLUMNS == {
+def test_the_restricted_columns_are_the_ones_a_support_bundle_omits():
+    """Not a permission. Every CASS user sees all of these in the platform.
+
+    A support bundle is a file that leaves it, sometimes to a vendor, so it
+    carries identifiers and codes rather than whole portfolio rows. Nothing
+    here is withheld from a colleague, and an earlier draft that withheld the
+    address from modellers made the geocoding review impossible to do.
+    """
+    assert RESTRICTED_COLUMNS == {
         "business_title",
         "insured_name",
         "cedent_name",
         "broker_name",
         "risk_location_address",
         "provider_address",
+        "gross_premium",
+        "net_premium",
+        "gross_limit",
+        "gross_paid",
+        "gross_outstanding",
+        "gross_incurred",
+        "loss_ratio_pct",
+        "prior_share_pct",
+        "renewal_premium",
+        "premium_growth_pct",
+        "renewal_share_pct",
     }
 
 
-def test_masking_removes_counterparty_detail_by_default(rows):
+def test_a_bundle_carries_identifiers_rather_than_portfolio_detail(rows):
     policies, _ = rows
     safe = masked(policies[0])
 
     assert "insured_name" not in safe
-    assert "cedent_name" not in safe
-    assert "broker_name" not in safe
+    assert "gross_limit" not in safe
     assert safe["policy_id"] == "P-1"
-    assert safe["gross_limit"] == Decimal("1000000.00")
+    assert safe["business_id"] == "B-SINGLE"
 
 
-def test_masking_can_be_lifted_for_a_role_that_needs_the_names(rows):
+def test_a_bundle_can_be_asked_to_carry_everything(rows):
     policies, _ = rows
     full = masked(policies[0], include_confidential=True)
     assert full["insured_name"] == "Example Insured Ltd"
+    assert full["gross_limit"] == Decimal("1000000.00")
 
 
-def test_a_finding_never_repeats_a_confidential_value():
-    """Findings are displayed and logged; section 10 keeps names out of both."""
+def test_a_finding_quotes_the_cell_that_needs_correcting():
+    """Blanking values would make a findings list unactionable.
+
+    A finding names one cell on one row, which is what a person needs to fix
+    it. That is a different thing from a bundle carrying the whole portfolio.
+    """
     policies, locations = structural_extract()
-    locations[0]["risk_location_address"] = "1 Real Street, Somewhere"
     locations[0]["latitude"] = "not-a-number"
     read = read_workbook(as_workbook(policies, locations))
 
-    for finding in read.findings:
-        assert "Real Street" not in finding.value
-        assert "Real Street" not in finding.message
+    finding = next(item for item in read.findings if item.field == "latitude")
+    assert finding.value == "not-a-number"
 
 
 # -- the join report ----------------------------------------------------------

@@ -871,16 +871,14 @@ def test_the_migration_is_reproducible(batch):
 
 @needs_extract
 def test_no_counterparty_column_crosses_into_the_template(batch):
-    """Insured, cedent and broker have no destination in the new format.
+    """Insured, cedent, broker and business title have no destination.
 
-    The columns, that is. Six of the source's addresses *begin* with the
-    insured's registered name -- "PT Ainul Hayat Sejahtera, Mangunreja 42455"
-    -- so a counterparty name does reach the template inside the address, and
-    stripping it would corrupt an address a reviewer needs. The protection is
-    the same either way: Address is a confidential column, so it is role-gated
-    and never logged, and the test below holds that.
+    Not because they are secret -- Klapton Re holds no portfolio information a
+    Klapton Re colleague may not see -- but because a name is not a property.
+    Nothing in the model consumes one, and a column nothing consumes is one
+    more thing to keep correct.
     """
-    from cass_extract import legacy, profile
+    from cass_extract import legacy
     from cass_extract.reader import read_workbook
 
     converted = legacy.convert(read_workbook(EXTRACT_PATH))
@@ -894,43 +892,20 @@ def test_no_counterparty_column_crosses_into_the_template(batch):
         for item in written
         if item.lower() in ("insured", "cedent", "broker", "business title", "insured name")
     }
-    # Every column that can carry a name is marked confidential in the profile.
-    assert profile.column("Address").is_confidential
-    assert profile.column("Risk name").is_confidential
 
 
 @needs_extract
-def test_an_address_that_embeds_a_name_is_still_a_confidential_column(batch):
-    """The reason Address is role-gated rather than merely tidy.
+def test_the_address_reaches_the_template_and_is_meant_to(batch):
+    """A modeller who cannot read the address cannot check the coordinate.
 
-    A geocoded address in this source is not neutral text: for some risks it
-    is the counterparty's registered name with a street after it. Treating the
-    column as open because "it is only an address" would put those names in
-    front of a modeller and into any log that quoted a row.
+    Six of this source's addresses begin with the insured's registered name --
+    "PT Ainul Hayat Sejahtera, Mangunreja 42455" -- and that is fine: the
+    address is what a reviewer compares a geocode against, and stripping the
+    name out of it would corrupt the only evidence the review has.
     """
-    from cass_extract import legacy, profile
+    from cass_extract import legacy
     from cass_extract.reader import read_workbook
 
-    source = read_workbook(EXTRACT_PATH)
-    names = {
-        str(row.get("insured_name") or "").strip()
-        for row in source.policies.rows
-        if row.get("insured_name")
-    }
-    converted = legacy.convert(source)
-    embedded = [
-        row
-        for row in converted.risks
-        if any(name and name in str(row.get("Address", "")) for name in names)
-    ]
-
-    assert embedded, "the source does embed insured names in addresses"
-    assert profile.column("Address").is_confidential
-    # And nowhere else on the row.
-    for row in embedded:
-        others = {
-            key: value for key, value in row.items() if key not in ("Address", "Risk name")
-        }
-        assert not any(
-            name and name in str(value) for value in others.values() for name in names
-        )
+    converted = legacy.convert(read_workbook(EXTRACT_PATH))
+    addressed = [row for row in converted.risks if row.get("Address")]
+    assert len(addressed) > 200

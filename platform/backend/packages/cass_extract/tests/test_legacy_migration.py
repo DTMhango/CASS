@@ -147,3 +147,14 @@ def test_the_migrated_file_needs_no_allocation_it_cannot_perform(migrated):
 def test_the_country_is_translated_to_its_iso_code(migrated):
     read, _ = migrated
     assert {row.get("Country") for row in read.risks.rows} <= {"ID", "NP"}
+
+
+def test_the_primary_site_flag_survives_the_migration(converted):
+    """Without it the primary-concentrated sensitivity silently stops working.
+
+    It matters only for the multi-site accounts, which are exactly the rows the
+    migration leaves blank -- so a conversion that dropped it would break the
+    one scenario those rows exist to be tested under, and break it quietly.
+    """
+    rows = [item for item in converted.risks if item["Account reference"] == "B-MULTI"]
+    assert [item["Primary site"] for item in rows] == ["Yes", "No", "No"]

@@ -56,16 +56,23 @@ class DataType(enum.StrEnum):
 
 
 class Sensitivity(enum.StrEnum):
-    """Who may see a column, and whether it may be logged."""
+    """Whether a column may travel outside the platform.
+
+    Not a permission model. Klapton Re holds no portfolio information a Klapton
+    Re colleague may not see, so nothing here gates a role: an earlier draft
+    did, and the cost was a modeller who could not read the address they were
+    being asked to check a coordinate against.
+
+    What survives is an operational distinction about *destinations* rather
+    than people. Logs and support bundles leave the platform, and sometimes the
+    company, so whole source rows do not go into them.
+    """
 
     OPEN = "open"
-    """Identifiers and codes. Safe in logs and support bundles."""
+    """Identifiers and codes. Safe to quote anywhere, including a support bundle."""
 
     RESTRICTED = "restricted"
-    """Commercial detail: premium, limit, loss. Project members only."""
-
-    CONFIDENTIAL = "confidential"
-    """Names a counterparty or an address. Role-gated, never logged."""
+    """Portfolio detail. Every user may see it; it stays out of support bundles."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -80,8 +87,9 @@ class FieldSpec:
     business_help: str = ""
 
     @property
-    def is_confidential(self) -> bool:
-        return self.sensitivity is Sensitivity.CONFIDENTIAL
+    def is_restricted(self) -> bool:
+        """Whether this column is held back from a support bundle."""
+        return self.sensitivity is Sensitivity.RESTRICTED
 
 
 def _f(
@@ -103,11 +111,11 @@ POLICY_FIELDS: tuple[FieldSpec, ...] = (
         "business_title",
         DataType.TEXT,
         "Business title",
-        sensitivity=Sensitivity.CONFIDENTIAL,
+        sensitivity=Sensitivity.RESTRICTED,
     ),
-    _f("insured_name", DataType.TEXT, "Insured", sensitivity=Sensitivity.CONFIDENTIAL),
-    _f("cedent_name", DataType.TEXT, "Cedent", sensitivity=Sensitivity.CONFIDENTIAL),
-    _f("broker_name", DataType.TEXT, "Broker", sensitivity=Sensitivity.CONFIDENTIAL),
+    _f("insured_name", DataType.TEXT, "Insured", sensitivity=Sensitivity.RESTRICTED),
+    _f("cedent_name", DataType.TEXT, "Cedent", sensitivity=Sensitivity.RESTRICTED),
+    _f("broker_name", DataType.TEXT, "Broker", sensitivity=Sensitivity.RESTRICTED),
     _f("insured_country", DataType.TEXT, "Insured country"),
     _f("insured_continent", DataType.TEXT, "Continent"),
     _f("main_class_of_business", DataType.TEXT, "Class of business"),
@@ -181,7 +189,7 @@ POLICY_FIELDS: tuple[FieldSpec, ...] = (
         "risk_location_address",
         DataType.TEXT,
         "Primary address",
-        sensitivity=Sensitivity.CONFIDENTIAL,
+        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f("risk_location_precision", DataType.TEXT, "Primary geocode precision"),
     _f("risk_location_method", DataType.TEXT, "Primary geocode method"),
@@ -200,13 +208,13 @@ LOCATION_FIELDS: tuple[FieldSpec, ...] = (
         "risk_location_address",
         DataType.TEXT,
         "Address",
-        sensitivity=Sensitivity.CONFIDENTIAL,
+        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f(
         "provider_address",
         DataType.TEXT,
         "Provider address",
-        sensitivity=Sensitivity.CONFIDENTIAL,
+        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f("precision", DataType.TEXT, "Geocode precision", required=True),
     _f("method", DataType.TEXT, "Geocode method"),
@@ -233,12 +241,13 @@ LOCATION_FIELDS: tuple[FieldSpec, ...] = (
 POLICY_FIELD_MAP = {spec.name: spec for spec in POLICY_FIELDS}
 LOCATION_FIELD_MAP = {spec.name: spec for spec in LOCATION_FIELDS}
 
-#: Columns that must never reach a log, a support bundle or a manifest that has
-#: not been explicitly asked to include them.
-CONFIDENTIAL_COLUMNS: frozenset[str] = frozenset(
+#: Columns kept out of a support bundle unless it is explicitly asked to carry
+#: them. Not a permission: every CASS user may see all of these in the
+#: platform. A support bundle is a file that leaves it.
+RESTRICTED_COLUMNS: frozenset[str] = frozenset(
     spec.name
     for spec in (*POLICY_FIELDS, *LOCATION_FIELDS)
-    if spec.is_confidential
+    if spec.sensitivity is Sensitivity.RESTRICTED
 )
 
 #: ISO codes for the pilot countries, as the source spells them.

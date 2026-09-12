@@ -20,7 +20,6 @@ from openpyxl import load_workbook
 
 from cass_extract import intake, profile, template
 from cass_extract.profile import ProfileError, Sheet, WhenBlank
-from cass_extract.schema import Sensitivity
 from cass_oed.schema import ACCOUNT_FIELDS, LOCATION_FIELDS, DataType, FileKind
 
 
@@ -142,10 +141,16 @@ def test_every_cass_only_column_states_its_own_type():
             assert item.purpose
 
 
-def test_confidential_columns_are_marked():
-    assert profile.column("Risk name").is_confidential
-    assert profile.column("Address").is_confidential
-    assert not profile.column("Building value").is_confidential
+def test_no_column_is_classified():
+    """A Klapton Re portfolio holds nothing a Klapton Re colleague may not see.
+
+    An earlier draft graded columns by sensitivity and role-gated the address.
+    That was an inference from a rule about counterparty *names*, and it had a
+    cost: a modeller who cannot read an address cannot check a coordinate
+    against it, which is the whole of the geocoding review.
+    """
+    assert not hasattr(profile.Column, "is_confidential")
+    assert "confidential" not in profile.COLUMNS[0].as_dict()
 
 
 # -- the generated template ------------------------------------------------------------
@@ -279,35 +284,8 @@ def test_an_unrecognised_column_is_reported_but_not_fatal():
     assert "Underwriter notes" in result.risks.unrecognised_columns
 
 
-def test_a_confidential_value_never_reaches_a_finding():
-    """Tested on the coercion directly, because the two confidential columns in
-    the profile are both free text and free text cannot fail to parse.
-
-    That makes the blanking defensive today and load-bearing the moment a
-    confidential column gains a type -- a date of purchase, a scheduled value.
-    A finding is displayed and logged, and section 10 keeps counterparty detail
-    out of both.
-    """
-    confidential = profile.Column(
-        name="Insured valuation",
-        sheet=Sheet.RISK,
-        oed_field=None,
-        oed_kind=None,
-        required=False,
-        help_text="",
-        when_blank=WhenBlank.ABSENT,
-        sensitivity=Sensitivity.CONFIDENTIAL,
-        dtype=DataType.MONEY,
-        purpose="test",
-    )
-    _, finding = intake._coerce(Sheet.RISK, 2, confidential, "Acme Holdings Ltd")
-    assert finding is not None
-    assert finding.value == ""
-    assert "Acme" not in finding.message
-
-
-def test_a_readable_column_does_repeat_its_value_so_a_person_can_see_it():
-    """The counterpart: blanking everything would make findings unactionable."""
+def test_a_finding_quotes_the_cell_so_a_person_can_correct_it():
+    """Blanking values would make a findings list unactionable."""
     result = read([risk(**{"Storeys": "four"})])
     finding = next(item for item in result.findings if item.field == "Storeys")
     assert finding.value == "four"
