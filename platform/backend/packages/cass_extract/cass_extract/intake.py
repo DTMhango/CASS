@@ -46,7 +46,7 @@ from cass_oed.schema import DataType
 
 from . import profile
 from .profile import PROFILE_VERSION, Column, Sheet
-from .reader import ExtractReadError, Finding, SheetRead, SourceRow
+from .records import ExtractReadError, Finding, SheetRead, SourceRow
 
 #: Bumped when this reader's interpretation changes, independently of the
 #: profile: the same file read by a later parser should be traceable to which.
@@ -369,6 +369,7 @@ def cross_check(read: IntakeRead) -> Iterator[Finding]:
     yield from _duplicate_policies(read.policies)
     yield from _orphans(read)
     yield from _allocation_needs(read)
+    yield from _construction_without_occupancy(read.risks)
 
 
 def _duplicate_risks(sheet: SheetRead) -> Iterator[Finding]:
@@ -487,6 +488,34 @@ def _orphans(read: IntakeRead) -> Iterator[Finding]:
                 + "."
             ),
             value=str(len(unpriced)),
+        )
+
+
+def _construction_without_occupancy(sheet: SheetRead) -> Iterator[Finding]:
+    """A construction code that cannot reach a vulnerability function.
+
+    OED routes on the pair, and the occupancy is the half that decides which
+    table is consulted, so a construction on its own reaches nothing. The
+    occupancy assumption would fill both -- silently discarding the one real
+    attribute the schedule stated. Better to say so while someone can still
+    supply the occupancy it belongs with.
+    """
+    for row in sheet.rows:
+        construction = str(row.get("Construction") or "").strip()
+        occupancy = str(row.get("Occupancy") or "").strip()
+        if not construction or occupancy:
+            continue
+        yield Finding(
+            sheet=sheet.sheet,
+            row_number=row.row_number,
+            field="Occupancy",
+            code="construction_without_occupancy",
+            message=(
+                f"This risk states a construction code with no occupancy code. OED "
+                f"requires an occupancy, and a construction alone cannot reach a "
+                f"vulnerability function -- so {construction} would be discarded and "
+                "the occupancy assumption would supply both. Supply the occupancy."
+            ),
         )
 
 

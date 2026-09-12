@@ -52,4 +52,7 @@ platform/model_data/
 
 # Confidential portfolio extracts. Commit only masked/synthetic structural fixtures.
 premium_policies_2026-06-30_geocoded.xlsx
+# Excel's owner-lock files, which appear beside a workbook while it is open
+# and carry the name of whoever opened it.
+~$*
 data/private/

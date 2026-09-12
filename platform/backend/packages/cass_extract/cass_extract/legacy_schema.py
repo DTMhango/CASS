@@ -1,45 +1,50 @@
-"""The Klapton Re geocoded policy extract, as a contract.
+"""The retired two-sheet extract, as a contract, for the migration to read.
 
 The 30 June 2026 extract is a two-sheet workbook of Klapton Reinsurance's own
-book, not an OED file. It is described here rather than inferred at read time
-so that a change of shape is a refusal with a reason, not a column quietly
-arriving as ``None`` and a total quietly coming out wrong.
+book, not an OED file and no longer a format CASS accepts. It is described here
+rather than inferred at read time so that a change of shape is a refusal with a
+reason, not a column quietly arriving as ``None`` and a total quietly coming
+out wrong.
 
-Three things this module fixes that the rest of the importer depends on.
+The live contract is :mod:`cass_extract.profile`, whose columns are bound to
+OED fields. This one is kept because the existing book is still in the old
+shape and :mod:`cass_extract.legacy` converts it once.
 
-**Sensitivity is a property of the column.** Insured, cedent and broker names,
-the business title and the street addresses identify real counterparties. The
-integration brief restricts them to roles that need them and keeps them out of
-technical logs, so every field says whether it is confidential and the manifest
-builder reads that rather than keeping its own list to fall out of date.
+Two things it fixes that the migration depends on.
 
 **Value is money.** ``gross_limit`` is the reported TIV at KRE's share in USD,
 and it is read as ``Decimal`` from the first moment. A float here would make
 the exact reconciliation the brief requires impossible to promise.
 
-**The version is stated.** ``SCHEMA_VERSION`` identifies the shape this parser
-was written against, and every import records it beside the source checksum, so
-a later extract that moved a column can be told apart from one that did not.
+**The version is stated.** ``LEGACY_SCHEMA_VERSION`` identifies the shape this parser
+was written against, and every migration records it beside the source checksum,
+so a later extract that moved a column can be told apart from one that did not.
+
+What it no longer fixes is confidentiality. An earlier draft graded each column
+by sensitivity, on the reading that insured, cedent and broker names had to be
+kept from some colleagues. Klapton Re holds no portfolio information a Klapton
+Re colleague may not see, and the grading is gone rather than left in place
+unread.
 """
+
 
 from __future__ import annotations
 
 import dataclasses
 import enum
 
-#: The import profile, named as the integration brief names it. CASS is the
-#: workspace; the profile is named for the source, which is Klapton Re's own
-#: book -- the build plan reserves the company name for exactly that.
-PROFILE_NAME = "Klapton Re geocoded policy extract"
+#: The source format, named as the integration brief named it. Prefixed
+#: ``LEGACY_`` so it cannot be mistaken for the live one: the profile CASS
+#: imports against is ``profile.PROFILE_NAME``, and a migration report that
+#: quoted the wrong one would misstate where its numbers came from.
+LEGACY_PROFILE_NAME = "Klapton Re geocoded policy extract"
 
-#: The extract shape this parser understands. Bump on any column change.
-#: Spelled out rather than abbreviated: the build plan forbids new ``kre_*``
-#: technical namespaces, and this string is an identifier as well as a label.
-SCHEMA_VERSION = "klapton-re-geocoded-policy-extract/2026-06-30.1"
+#: The extract shape this reader understands.
+LEGACY_SCHEMA_VERSION = "klapton-re-geocoded-policy-extract/2026-06-30.1"
 
-#: The parser itself, recorded alongside the schema in the audit trail so a
+#: The reader itself, recorded beside the source checksum on a migration so a
 #: reread of the same file by a later build is distinguishable.
-PARSER_VERSION = "1.0.0"
+LEGACY_PARSER_VERSION = "1.0.0"
 
 POLICY_SHEET = "Premium Policies"
 LOCATION_SHEET = "Risk Locations"
@@ -55,26 +60,6 @@ class DataType(enum.StrEnum):
     NUMBER = "number"
 
 
-class Sensitivity(enum.StrEnum):
-    """Whether a column may travel outside the platform.
-
-    Not a permission model. Klapton Re holds no portfolio information a Klapton
-    Re colleague may not see, so nothing here gates a role: an earlier draft
-    did, and the cost was a modeller who could not read the address they were
-    being asked to check a coordinate against.
-
-    What survives is an operational distinction about *destinations* rather
-    than people. Logs and support bundles leave the platform, and sometimes the
-    company, so whole source rows do not go into them.
-    """
-
-    OPEN = "open"
-    """Identifiers and codes. Safe to quote anywhere, including a support bundle."""
-
-    RESTRICTED = "restricted"
-    """Portfolio detail. Every user may see it; it stays out of support bundles."""
-
-
 @dataclasses.dataclass(frozen=True, slots=True)
 class FieldSpec:
     """One source column as CASS interprets it."""
@@ -83,13 +68,7 @@ class FieldSpec:
     dtype: DataType
     business_label: str
     required: bool = False
-    sensitivity: Sensitivity = Sensitivity.OPEN
     business_help: str = ""
-
-    @property
-    def is_restricted(self) -> bool:
-        """Whether this column is held back from a support bundle."""
-        return self.sensitivity is Sensitivity.RESTRICTED
 
 
 def _f(
@@ -98,10 +77,9 @@ def _f(
     label: str,
     *,
     required: bool = False,
-    sensitivity: Sensitivity = Sensitivity.OPEN,
     help_text: str = "",
 ) -> FieldSpec:
-    return FieldSpec(name, dtype, label, required, sensitivity, help_text)
+    return FieldSpec(name, dtype, label, required, help_text)
 
 
 POLICY_FIELDS: tuple[FieldSpec, ...] = (
@@ -111,11 +89,10 @@ POLICY_FIELDS: tuple[FieldSpec, ...] = (
         "business_title",
         DataType.TEXT,
         "Business title",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
-    _f("insured_name", DataType.TEXT, "Insured", sensitivity=Sensitivity.RESTRICTED),
-    _f("cedent_name", DataType.TEXT, "Cedent", sensitivity=Sensitivity.RESTRICTED),
-    _f("broker_name", DataType.TEXT, "Broker", sensitivity=Sensitivity.RESTRICTED),
+    _f("insured_name", DataType.TEXT, "Insured"),
+    _f("cedent_name", DataType.TEXT, "Cedent"),
+    _f("broker_name", DataType.TEXT, "Broker"),
     _f("insured_country", DataType.TEXT, "Insured country"),
     _f("insured_continent", DataType.TEXT, "Continent"),
     _f("main_class_of_business", DataType.TEXT, "Class of business"),
@@ -131,54 +108,47 @@ POLICY_FIELDS: tuple[FieldSpec, ...] = (
         "gross_premium",
         DataType.MONEY,
         "Gross premium",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
-    _f("net_premium", DataType.MONEY, "Net premium", sensitivity=Sensitivity.RESTRICTED),
+    _f("net_premium", DataType.MONEY, "Net premium"),
     _f(
         "gross_limit",
         DataType.MONEY,
         "Total insured value at KRE share",
         required=True,
-        sensitivity=Sensitivity.RESTRICTED,
         help_text=(
             "Confirmed as TIV at KRE's share in USD. The share is not applied "
             "again during loss calculation."
         ),
     ),
-    _f("gross_paid", DataType.MONEY, "Gross paid", sensitivity=Sensitivity.RESTRICTED),
+    _f("gross_paid", DataType.MONEY, "Gross paid"),
     _f(
         "gross_outstanding",
         DataType.MONEY,
         "Gross outstanding",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f(
         "gross_incurred",
         DataType.MONEY,
         "Gross incurred",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
-    _f("loss_ratio_pct", DataType.NUMBER, "Loss ratio %", sensitivity=Sensitivity.RESTRICTED),
+    _f("loss_ratio_pct", DataType.NUMBER, "Loss ratio %"),
     _f("renewed", DataType.TEXT, "Renewed"),
     _f("renewal_policy_id", DataType.TEXT, "Renewal policy reference"),
-    _f("prior_share_pct", DataType.NUMBER, "Prior share %", sensitivity=Sensitivity.RESTRICTED),
+    _f("prior_share_pct", DataType.NUMBER, "Prior share %"),
     _f(
         "renewal_premium",
         DataType.MONEY,
         "Renewal premium",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f(
         "premium_growth_pct",
         DataType.NUMBER,
         "Premium growth %",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f(
         "renewal_share_pct",
         DataType.NUMBER,
         "Renewal share %",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f("share_change", DataType.TEXT, "Share change"),
     _f("risk_location_status", DataType.TEXT, "Geocoding status"),
@@ -189,7 +159,6 @@ POLICY_FIELDS: tuple[FieldSpec, ...] = (
         "risk_location_address",
         DataType.TEXT,
         "Primary address",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f("risk_location_precision", DataType.TEXT, "Primary geocode precision"),
     _f("risk_location_method", DataType.TEXT, "Primary geocode method"),
@@ -208,13 +177,11 @@ LOCATION_FIELDS: tuple[FieldSpec, ...] = (
         "risk_location_address",
         DataType.TEXT,
         "Address",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f(
         "provider_address",
         DataType.TEXT,
         "Provider address",
-        sensitivity=Sensitivity.RESTRICTED,
     ),
     _f("precision", DataType.TEXT, "Geocode precision", required=True),
     _f("method", DataType.TEXT, "Geocode method"),
@@ -240,15 +207,6 @@ LOCATION_FIELDS: tuple[FieldSpec, ...] = (
 
 POLICY_FIELD_MAP = {spec.name: spec for spec in POLICY_FIELDS}
 LOCATION_FIELD_MAP = {spec.name: spec for spec in LOCATION_FIELDS}
-
-#: Columns kept out of a support bundle unless it is explicitly asked to carry
-#: them. Not a permission: every CASS user may see all of these in the
-#: platform. A support bundle is a file that leaves it.
-RESTRICTED_COLUMNS: frozenset[str] = frozenset(
-    spec.name
-    for spec in (*POLICY_FIELDS, *LOCATION_FIELDS)
-    if spec.sensitivity is Sensitivity.RESTRICTED
-)
 
 #: ISO codes for the pilot countries, as the source spells them.
 COUNTRY_CODES: dict[str, str] = {"indonesia": "ID", "nepal": "NP"}

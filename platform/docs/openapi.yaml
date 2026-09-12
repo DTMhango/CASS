@@ -2540,19 +2540,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportBatch'
           description: ''
-  /api/v1/portfolio-imports/{id}/coverage-template/:
+  /api/v1/portfolio-imports/{id}/allocation-scenarios/:
     get:
-      operationId: api_v1_portfolio_imports_coverage_template_retrieve
+      operationId: api_v1_portfolio_imports_allocation_scenarios_retrieve
       description: |-
-        A CSV of the selected locations, ready for real coverage values.
+        Compare multi-location allocation scenarios against a model version.
 
-        The other half of the coverage story. A percentage split is fine when
-        nobody knows the breakdown, but OED lets a schedule carry whatever
-        numbers each row actually has, and this is how someone supplies them:
-        download, fill in, post back with the promotion.
+        The question this answers is not "how does the value divide" -- the
+        allocation engine answers that exactly -- but "does the division
+        matter". It matters only where a business's sites fall in different
+        area-peril cells, so the comparison is run against a real grid and
+        reports the share of value for which the assumption is economically
+        live.
 
-        The allocated total travels with each row so a person can see what they
-        are overriding, and it is not one of the coverage columns.
+        Nothing is promoted. An analyst can try scenarios freely and promote
+        the one they choose, which is the separate audited act.
       parameters:
       - in: path
         name: id
@@ -2605,7 +2607,13 @@ paths:
   /api/v1/portfolio-imports/{id}/manifest/:
     get:
       operationId: api_v1_portfolio_imports_manifest_retrieve
-      description: The transformation manifest, without insured names by default.
+      description: |-
+        What was read, under which rules, and what it produced.
+
+        Downloaded rather than displayed, so the download is audited: a
+        manifest is the artefact most likely to be attached to a ticket or an
+        email, and knowing which of them left the platform is worth more than
+        deciding who may ask for one.
       parameters:
       - in: path
         name: id
@@ -2637,11 +2645,16 @@ paths:
         Every one of them is recorded on the version that results, so a later
         reader can see what produced it and run it again differently.
 
-        Coverage values may be supplied outright. Post a completed coverage
-        template as ``coverage_file`` and those numbers are used as given, in
-        whatever proportions each row carries -- which is how OED works, and
-        what the brief's evidence hierarchy ranks above any split. Without one,
-        a named or custom percentage split applies.
+        Coverage values, occupancy and construction come from the intake
+        template itself, row by row, and are used exactly as stated. The
+        assumptions named here fill only what a schedule left blank: a
+        component split where a risk states a total but no breakdown, an
+        allocation where it states neither, and an occupancy where it names
+        none.
+
+        ``country`` narrows the selection to one country, because a model
+        version covers one. A business with sites in two is excluded from both
+        rather than split, for the same reason a partial schedule is.
       parameters:
       - in: path
         name: id
@@ -2662,10 +2675,53 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportBatch'
           description: ''
+  /api/v1/portfolio-imports/profile/:
+    get:
+      operationId: api_v1_portfolio_imports_profile_retrieve
+      description: |-
+        The intake profile: every column, and the OED field it lands in.
+
+        Published as data because three things read it -- the template a person
+        downloads, the reader that interprets a completed one, and any loading
+        API that populates CASS from a source system. A mapping reimplemented
+        by a caller is a mapping that drifts.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
+  /api/v1/portfolio-imports/template/:
+    get:
+      operationId: api_v1_portfolio_imports_template_retrieve
+      description: |-
+        Download a blank CASS intake template.
+
+        Generated from the profile rather than kept as a file beside it, so the
+        workbook a person fills in can never describe a mapping the platform
+        does not implement.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
   /api/v1/portfolio-imports/upload/:
     post:
       operationId: api_v1_portfolio_imports_upload_create
-      description: Register, parse and profile one extract workbook.
+      description: Register, read and profile one completed intake template.
       tags:
       - api
       security:
@@ -4295,11 +4351,15 @@ components:
         coverages:
           type: array
           items: {}
+        occupancy_assumptions:
+          type: array
+          items: {}
       required:
       - allocation_methods
       - cohorts
       - coverage_splits
       - coverages
+      - occupancy_assumptions
     AssumptionSet:
       type: object
       properties:
@@ -5028,19 +5088,17 @@ components:
         cohort_rule_version:
           type: string
           readOnly: true
-        join_rule_version:
-          type: string
-          readOnly: true
         policy_row_count:
           type: integer
           readOnly: true
-        location_row_count:
+        risk_row_count:
           type: integer
           readOnly: true
         findings:
           readOnly: true
-          description: Type and required-value findings raised while parsing.
-        join_report:
+          description: Type, required-value and cross-sheet findings raised while
+            parsing.
+        intake_report:
           readOnly: true
         cohort_profile:
           readOnly: true
@@ -5070,15 +5128,14 @@ components:
       - created_at
       - findings
       - id
-      - join_report
-      - join_rule_version
-      - location_row_count
+      - intake_report
       - may_accept
       - parser_version
       - policy_row_count
       - profile
       - project
       - rejection_reason
+      - risk_row_count
       - schema_version
       - snapshot_date
       - source_checksum

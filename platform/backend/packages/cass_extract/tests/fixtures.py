@@ -1,17 +1,21 @@
-"""A synthetic extract that keeps the real one's structure and none of its data.
+"""A synthetic portfolio that keeps the real one's structure and none of its data.
 
-The integration brief is explicit that the real workbook must not become a test
-fixture: it is confidential working data. What the tests need from it is not its
-values but its awkward shapes, and section 8 of the brief lists them --
-a single-location business, a multi-location business, a business identifier on
-more than one policy row, a coordinate shared by different businesses, one
-location of each precision band, one flagged for review, both countries, and
-Fire, Engineering and an excluded class.
+The real workbook must not become a test fixture: it stays outside version
+control and outside the test images. What the tests need from it is not its
+values but its awkward shapes, and section 8 of the brief lists them -- a
+single-site account, a multi-site account, an account reference on more than
+one policy, a coordinate shared by unrelated accounts, one site of each
+precision band, one flagged for review, both countries, and Fire, Engineering
+and an excluded class.
 
-Every one of those is built here, with invented names and round amounts. The
-counts are small enough to assert exactly, which is the point: a test that says
-"63 locations" tells you nothing when it breaks, and one that says "this
-business's second site went missing" tells you everything.
+Every one of those is built here twice: once in the CASS intake template, which
+is what CASS reads, and once in the retired two-sheet extract, which only the
+migration still reads. The two builders produce the same portfolio, so a test
+of the migration can assert that nothing was lost in the conversion.
+
+The counts are small enough to assert exactly, which is the point: a test that
+says "63 locations" tells you nothing when it breaks, and one that says "this
+account's second site went missing" tells you everything.
 """
 
 from __future__ import annotations
@@ -20,7 +24,12 @@ import io
 from decimal import Decimal
 from typing import Any
 
-from cass_extract.schema import LOCATION_FIELDS, LOCATION_SHEET, POLICY_FIELDS, POLICY_SHEET
+from cass_extract.legacy_schema import (
+    LOCATION_FIELDS,
+    LOCATION_SHEET,
+    POLICY_FIELDS,
+    POLICY_SHEET,
+)
 
 #: A coordinate two unrelated businesses share, so the tests can prove it is
 #: reported and not deduplicated.

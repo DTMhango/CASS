@@ -1,7 +1,7 @@
 [project]
 name = "cass-extract"
 version = "0.1.0"
-description = "The KRE geocoded policy extract: parsing, coordinate cohorts and the join report."
+description = "CASS portfolio intake: the OED-bound template, its reader, and the rules that read it."
 requires-python = ">=3.11"
 dependencies = ["openpyxl>=3.1"]
 

@@ -7,9 +7,13 @@ it is identical on every run, and that real evidence displaces it.
 
 from __future__ import annotations
 
+import io
+
 import pytest
+from fixtures import as_template, risk_row
 
 import cass_extract as extract
+from cass_extract import intake, profile
 from cass_extract.allocation import AllocationError, AllocationEvidence
 
 KEYS = [("B-1", "1"), ("B-1", "2"), ("B-2", "1"), ("B-3", "1"), ("B-3", "2"), ("B-4", "1")]
@@ -203,35 +207,34 @@ def test_the_record_says_the_assumption_is_unapproved():
     assert "commercial_general_v1" in record["decision_note"]
 
 
-# -- the template carries them too -------------------------------------------------------
+# -- and the template lets a schedule state the real thing --------------------------
 
-def test_the_template_offers_the_taxonomy_columns():
-    assert "OccupancyCode" in extract.TEMPLATE_COLUMNS
-    assert "ConstructionCode" in extract.TEMPLATE_COLUMNS
+def test_the_intake_template_asks_for_occupancy_and_construction():
+    """The assumption is a fallback, so the template has to offer the alternative."""
+    columns = {column.name: column for column in profile.RISK_COLUMNS}
+    assert columns["Occupancy"].oed_field == "OccupancyCode"
+    assert columns["Construction"].oed_field == "ConstructionCode"
 
 
 def test_a_stated_taxonomy_is_read_back_from_a_completed_template():
-    supplied = extract.read_reported_components(
-        b"AccNumber,LocNumber,BuildingTIV,OccupancyCode,ConstructionCode\n"
-        b"B-1,1,100.00,1150,5200\n"
-        b"B-1,2,200.00,,\n"
-    )
-    assert dict(supplied.taxonomy) == {
-        ("B-1", "1"): {"OccupancyCode": "1150", "ConstructionCode": "5200"}
+    risks = [
+        risk_row("B-1", "1", "-6.2", "106.8", total="100.00",
+                 Occupancy="1150", Construction="5200"),
+        risk_row("B-1", "2", "-6.3", "106.9", total="200.00"),
+    ]
+    read = intake.read_workbook(io.BytesIO(as_template(risks, [])))
+    stated = {
+        (row["business_id"], row["location_number"]): row["occupancy_code"]
+        for row in intake.records(read)[0]
     }
+    assert stated == {("B-1", "1"): "1150", ("B-1", "2"): None}
 
 
-def test_a_construction_with_no_occupancy_is_refused():
-    """OED requires an occupancy, and construction alone reaches no function."""
-    with pytest.raises(AllocationError, match="construction code with no occupancy"):
-        extract.read_reported_components(
-            b"AccNumber,LocNumber,BuildingTIV,OccupancyCode,ConstructionCode\n"
-            b"B-1,1,100.00,,5200\n"
-        )
-
-
-def test_a_file_without_the_taxonomy_columns_is_still_valid():
-    supplied = extract.read_reported_components(
-        b"AccNumber,LocNumber,BuildingTIV\nB-1,1,100.00\n"
-    )
-    assert supplied.taxonomy == {}
+def test_a_construction_with_no_occupancy_is_reported_at_intake():
+    """It reaches no function, and the assumption would discard it in silence."""
+    risks = [
+        risk_row("B-1", "1", "-6.2", "106.8", total="100.00", Construction="5200"),
+    ]
+    read = intake.read_workbook(io.BytesIO(as_template(risks, [])))
+    codes = [finding.code for finding in intake.cross_check(read)]
+    assert "construction_without_occupancy" in codes

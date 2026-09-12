@@ -940,7 +940,7 @@ def test_no_counterparty_column_crosses_into_the_template(batch):
     more thing to keep correct.
     """
     from cass_extract import legacy
-    from cass_extract.reader import read_workbook
+    from cass_extract.legacy_reader import read_workbook
 
     converted = legacy.convert(read_workbook(EXTRACT_PATH))
     written = {key for row in converted.risks for key in row}
@@ -965,7 +965,7 @@ def test_the_address_reaches_the_template_and_is_meant_to(batch):
     name out of it would corrupt the only evidence the review has.
     """
     from cass_extract import legacy
-    from cass_extract.reader import read_workbook
+    from cass_extract.legacy_reader import read_workbook
 
     converted = legacy.convert(read_workbook(EXTRACT_PATH))
     addressed = [row for row in converted.risks if row.get("Address")]

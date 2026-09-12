@@ -1,25 +1,30 @@
-"""Reading the two sheets, independently and without joining them.
+"""Reading the retired two-sheet extract, for the migration and nothing else.
 
-The integration brief is explicit about the order: parse both sheets into
-staging records without changing the source values, validate types, required
-identifiers and coordinate pairs, and only then produce a deterministic join
-report. Joining during parsing is how a fan-out becomes invisible -- the rows
-multiply before anyone has counted them.
+Klapton Re's geocoded policy extract was a workbook of two sheets: one row per
+policy, and a separate schedule of risk locations joined back by a business
+reference. CASS no longer accepts it. The intake template does, at one row per
+risk, which is where the value belongs.
 
-So this module does one thing. It turns a workbook into two lists of rows that
-keep their original values, plus the findings raised while coercing types.
-Nothing here looks at the other sheet.
+This module survives because the book itself still exists in that shape, and
+:mod:`cass_extract.legacy` converts it once. It is the only caller. Nothing in
+the live path reads a sheet called "Premium Policies", and nothing new should:
+a second source format is a second set of assumptions about what a column
+means, and the intake profile exists so there is exactly one.
+
+It reads both sheets and joins neither. That was true when this was the live
+reader -- joining during parsing is how a fan-out becomes invisible, because
+the rows multiply before anyone has counted them -- and it stays true now, with
+the reconciliation left to the migration that has to report on it.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import datetime as dt
-from collections.abc import Iterator, Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any, BinaryIO
 
-from .schema import (
+from .legacy_schema import (
     LOCATION_FIELD_MAP,
     LOCATION_FIELDS,
     LOCATION_SHEET,
@@ -30,62 +35,7 @@ from .schema import (
     FieldSpec,
     is_not_applicable,
 )
-
-
-class ExtractReadError(Exception):
-    """Raised when the workbook cannot be read as this extract at all."""
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class Finding:
-    """One problem with one cell or row, in the analyst's terms."""
-
-    sheet: str
-    row_number: int
-    field: str
-    code: str
-    message: str
-    #: Never the value itself for a confidential column: a finding is displayed
-    #: and logged, and section 10 keeps counterparty names out of both.
-    value: str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
-
-
-@dataclasses.dataclass(slots=True)
-class SourceRow:
-    """One parsed row, with the original text kept beside the typed values."""
-
-    sheet: str
-    row_number: int
-    raw: dict[str, str]
-    values: dict[str, Any]
-
-    def get(self, field: str, default: Any = None) -> Any:
-        value = self.values.get(field)
-        return default if value is None else value
-
-    def text(self, field: str, default: str = "") -> str:
-        return self.raw.get(field, default)
-
-
-@dataclasses.dataclass(slots=True)
-class SheetRead:
-    """What one sheet produced."""
-
-    sheet: str
-    columns: tuple[str, ...]
-    rows: list[SourceRow]
-    missing_columns: tuple[str, ...]
-    unrecognised_columns: tuple[str, ...]
-    findings: list[Finding]
-
-    def __len__(self) -> int:
-        return len(self.rows)
-
-    def __iter__(self) -> Iterator[SourceRow]:
-        return iter(self.rows)
+from .records import ExtractReadError, Finding, SheetRead, SourceRow
 
 
 @dataclasses.dataclass(slots=True)
@@ -144,14 +94,6 @@ def read_workbook(source: BinaryIO | str) -> ExtractRead:
         )
     finally:
         workbook.close()
-
-
-def read_rows(
-    sheet: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]
-) -> SheetRead:
-    """Read already-extracted cells. Used by tests and by a CSV fallback."""
-    fields = POLICY_FIELDS if sheet == POLICY_SHEET else LOCATION_FIELDS
-    return _read_values(sheet, list(columns), rows, fields)
 
 
 def _read_sheet(worksheet, sheet: str, fields: tuple[FieldSpec, ...]) -> SheetRead:
@@ -246,7 +188,6 @@ def _coerce(
             field=spec.name,
             code="unreadable_value",
             message=message,
-            # A confidential cell's contents are not repeated into a finding.
             value=str(cell)[:120],
         )
 
@@ -305,19 +246,3 @@ def _coerce(
                 return bad(f"{spec.business_label} is not a date.")
 
     return str(cell).strip(), None  # pragma: no cover - every type is handled
-
-
-def masked(row: Mapping[str, Any], *, include_confidential: bool = False) -> dict[str, Any]:
-    """A row with counterparty detail removed unless it was asked for.
-
-    Used wherever a row leaves the importer -- a manifest, a log line, a support
-    bundle. Reading the sensitivity off the schema rather than keeping a second
-    list here is what stops the two drifting apart.
-    """
-    from .schema import RESTRICTED_COLUMNS
-
-    if include_confidential:
-        return dict(row)
-    return {
-        key: value for key, value in row.items() if key not in RESTRICTED_COLUMNS
-    }

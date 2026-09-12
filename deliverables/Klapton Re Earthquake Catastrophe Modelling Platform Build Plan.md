@@ -900,7 +900,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 
 1. Approve the Indonesia and Nepal earthquake source-model versions, data rights, peril scope and model approval roles.
 
-1. Register the available 30 June 2026 KRE portfolio extract as a restricted immutable artifact. Implement its parser, join report and coordinate cohorts using `gross_limit` as KRE-share TIV, USD as the currency and earthquake as covered; then complete the outstanding data dictionary for TIV component allocation, multi-location allocation, financial terms and occupancy evidence.
+1. Publish the CASS portfolio intake template at per-risk granularity, with every column bound to an OED field, and register the available 30 June 2026 KRE portfolio extract as an immutable artifact migrated into it. Implement the intake reader, cross-checks and coordinate cohorts using the risk total insured value as KRE-share TIV, USD as the currency and earthquake as covered; then complete the outstanding data dictionary for TIV component allocation, multi-location allocation, financial terms and occupancy evidence.
 
 1. Approve the exposure evidence hierarchy and prototype Baseline, More Robust and More Vulnerable conditional-prior assumption sets with exact TIV reconciliation.
 

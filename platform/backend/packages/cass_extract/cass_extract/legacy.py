@@ -39,8 +39,9 @@ from decimal import Decimal
 from typing import Any, BinaryIO
 
 from . import template
-from .reader import ExtractRead, SourceRow, read_workbook
-from .schema import country_code
+from .legacy_reader import ExtractRead, read_workbook
+from .legacy_schema import country_code
+from .records import SourceRow
 
 #: Recorded on the converted file so a migrated fixture can be traced back.
 MIGRATION_VERSION = "legacy-two-sheet-to-intake/1.0.0"
