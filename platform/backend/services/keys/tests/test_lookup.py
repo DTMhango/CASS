@@ -225,6 +225,8 @@ def test_keys_row_matches_the_oasis_column_contract(grid, vulnerability):
 
     assert set(row) == {
         "LocID",
+        "AccNumber",
+        "LocNumber",
         "PerilID",
         "CoverageTypeID",
         "AreaPerilID",
@@ -233,6 +235,45 @@ def test_keys_row_matches_the_oasis_column_contract(grid, vulnerability):
         "Message",
     }
     assert row["Status"] == "success"
+
+
+def test_two_accounts_may_each_schedule_a_location_one(grid, vulnerability):
+    """OED makes a location number unique within an account, not a portfolio.
+
+    A promoted Klapton Re cohort is the case that proves it: four businesses,
+    each with a location 1, at four different coordinates. Keyed on the number
+    alone, three of them would receive another's area peril and the mapped
+    count would report four locations as one.
+    """
+    result = lookup(
+        [
+            location(AccNumber="B-ONE", LocNumber="1"),
+            # Same coordinates, which the real extract also carries: two
+            # businesses can occupy one building, and the pair still has to
+            # count as two locations.
+            location(AccNumber="B-TWO", LocNumber="1"),
+        ],
+        grid=grid,
+        vulnerability=vulnerability,
+    )
+    assert {record.location_id for record in result.successes} == {"B-ONE/1", "B-TWO/1"}
+
+
+def test_the_keys_row_carries_the_account_and_number_it_was_built_from(grid, vulnerability):
+    """The composite is for counting; the errors file still has to be readable."""
+    result = lookup(
+        [location(AccNumber="B-ONE", LocNumber="7")], grid=grid, vulnerability=vulnerability
+    )
+    row = next(r for r in result.records if r.coverage_type == 1).as_row()
+    assert row["LocID"] == "B-ONE/7"
+    assert row["AccNumber"] == "B-ONE"
+    assert row["LocNumber"] == "7"
+
+
+def test_a_location_with_no_account_keeps_its_bare_number(grid, vulnerability):
+    """A single-account file needs no qualification and should not gain one."""
+    result = lookup([location()], grid=grid, vulnerability=vulnerability)
+    assert {record.location_id for record in result.successes} == {"LOC-1"}
 
 
 def test_failures_are_separable_for_the_errors_file(grid, vulnerability):

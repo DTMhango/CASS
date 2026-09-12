@@ -551,6 +551,14 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         whatever proportions each row carries -- which is how OED works, and
         what the brief's evidence hierarchy ranks above any split. Without one,
         a named or custom percentage split applies.
+
+        Occupancy works the same way. The template's ``OccupancyCode`` and
+        ``ConstructionCode`` columns are used where a row states them, and
+        ``occupancy`` names the assumption that fills the rest.
+
+        ``country`` narrows the selection to one country, because a model
+        version covers one. A business with sites in two is excluded from both
+        rather than split, for the same reason a partial schedule is.
         """
         batch = self.get_object()
         if not batch.project.may_write(request.user):
@@ -593,13 +601,16 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
                 else None
             )
             split = _requested_split(request.data)
+            occupancy = _requested_occupancy(request.data)
             exposure = promotion.promote(
                 batch,
                 name=name,
                 cohort=cohort,
                 class_of_business=class_of_business,
+                country=str(request.data.get("country") or "").strip() or None,
                 allocation_method=method,
                 component_split=split,
+                occupancy=occupancy,
                 reported_components=reported,
                 accept_restated_total=accept_restated,
                 actor=request.user,
@@ -651,6 +662,29 @@ def _requested_split(data) -> cass_extract.ComponentSplit:
     return cass_extract.preset(requested)
 
 
+def _requested_occupancy(data) -> cass_extract.OccupancyAssumption:
+    """The occupancy assumption the caller asked for, preset or their own.
+
+    An arbitrary OED code is accepted, because the interface has to be able to
+    ask "what if this book were all industrial?" without a release. The code is
+    not checked against OED's list here: an occupancy OED does not define is
+    reported by validation, and one no vulnerability function covers is
+    reported by the keys lookup as fail_v. Refusing it here would only move the
+    same answer earlier and pretend this layer owned the code list.
+    """
+    code = str(data.get("occupancy_code") or "").strip()
+    if code:
+        return cass_extract.uniform(
+            str(data.get("occupancy") or f"occupancy_{code}_v1"),
+            code,
+            str(data.get("construction_code") or cass_extract.UNKNOWN_CONSTRUCTION),
+            description=str(data.get("occupancy_description") or ""),
+        )
+    requested = str(data.get("occupancy") or "").strip()
+    if not requested:
+        return cass_extract.DEFAULT_OCCUPANCY
+    return cass_extract.occupancy_preset(requested)
+
 
 class AssumptionCatalogueView(APIView):
     """The assumptions a promotion may be run under.
@@ -672,6 +706,7 @@ class AssumptionCatalogueView(APIView):
                 "allocation_methods": serializers.ListField(),
                 "coverage_splits": serializers.ListField(),
                 "coverages": serializers.ListField(),
+                "occupancy_assumptions": serializers.ListField(),
             },
         )
     )
@@ -714,8 +749,17 @@ class AssumptionCatalogueView(APIView):
                     {"value": str(item), "label": item.label}
                     for item in cass_extract.COVERAGE_ORDER
                 ],
+                "occupancy_assumptions": [
+                    item.as_dict()
+                    for item in sorted(
+                        cass_extract.OCCUPANCY_PRESETS.values(),
+                        key=lambda entry: entry.name,
+                    )
+                ],
                 "default_coverage_split": cass_extract.DEFAULT_SPLIT.name,
+                "default_occupancy": cass_extract.DEFAULT_OCCUPANCY.name,
                 "custom_split_allowed": True,
+                "custom_occupancy_allowed": True,
             }
         )
 

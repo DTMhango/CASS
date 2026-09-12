@@ -106,18 +106,80 @@ def test_a_deterministic_location_identity_is_recorded(batch):
     )
 
 
-# -- occupancy is not invented -------------------------------------------------------
+# -- occupancy is stated, never invented ---------------------------------------------
 
-def test_the_unreported_occupancy_is_written_as_oed_unknown(version):
-    """Deriving one from class of business would be enrichment, not mapping."""
-    assert {row["OccupancyCode"] for row in oed_rows(version)} == {UNKNOWN_OCCUPANCY}
+def test_the_default_occupancy_is_one_stated_class_for_every_row(version):
+    """A single visible assumption, not a derivation dressed up as information."""
+    assert {row["OccupancyCode"] for row in oed_rows(version)} == {"1100"}
+    assert version.source_lineage["taxonomy"]["assumption"]["name"] == "commercial_general_v1"
+    assert version.source_lineage["taxonomy"]["source"] == "assumed"
+
+
+def test_the_honest_assumption_writes_oed_unknown_and_is_still_available(batch, analyst):
+    """The source supports nothing else, and saying so must stay one parameter away."""
+    result = promote(
+        batch, name="Unknown", occupancy=extract.NOT_REPORTED, actor=analyst
+    )
+    assert {row["OccupancyCode"] for row in oed_rows(result)} == {UNKNOWN_OCCUPANCY}
+    assert result.source_lineage["taxonomy"]["assumption"]["approved"] is True
+
+
+def test_no_preset_but_the_honest_one_claims_approval():
+    """An assumed occupancy is an assumption about the answer, not about an input."""
+    approved = {
+        name for name, item in extract.OCCUPANCY_PRESETS.items() if item.approved
+    }
+    assert approved == {"not_reported_v1"}
+
+
+def test_a_spread_assumption_is_reproducible_rather_than_random(batch, analyst):
+    """A loss that moved between runs must have moved for a reason."""
+    first = promote(
+        batch, name="Mixed one", occupancy=extract.MIXED_COMMERCIAL, actor=analyst
+    )
+    second = promote(
+        batch, name="Mixed two", occupancy=extract.MIXED_COMMERCIAL, actor=analyst
+    )
+    codes = {
+        (row["AccNumber"], row["LocNumber"]): row["OccupancyCode"]
+        for row in oed_rows(first)
+    }
+    assert codes == {
+        (row["AccNumber"], row["LocNumber"]): row["OccupancyCode"]
+        for row in oed_rows(second)
+    }
+    assert len(set(codes.values())) > 1
+
+
+def test_a_spread_assumption_reports_what_it_assigned(batch, analyst):
+    result = promote(
+        batch, name="Mixed", occupancy=extract.MIXED_COMMERCIAL, actor=analyst
+    )
+    record = result.source_lineage["taxonomy"]
+    assert sum(record["class_distribution"].values()) == result.location_count
+    assert sum(record["occupancy_counts"].values()) == result.location_count
+
+
+def test_an_analyst_may_state_any_occupancy_without_a_release(batch, analyst):
+    result = promote(
+        batch,
+        name="All industrial",
+        occupancy=extract.uniform("industrial_test_v1", "1150", "5200"),
+        actor=analyst,
+    )
+    rows = oed_rows(result)
+    assert {row["OccupancyCode"] for row in rows} == {"1150"}
+    assert {row["ConstructionCode"] for row in rows} == {"5200"}
 
 
 def test_the_lineage_says_which_attributes_were_not_reported(version):
     absent = version.source_lineage["attributes_not_reported"]
-    assert "OccupancyCode" in absent
-    assert "ConstructionCode" in absent
-    assert "not inferred" in absent["ConstructionCode"]
+    assert "not in the source" in absent["OccupancyCode"]
+    assert "not inferred" in absent["YearBuilt"]
+    assert (
+        "an unapproved occupancy assumption (commercial_general_v1)"
+        in version.source_lineage["decision_use"]
+    )
 
 
 # -- the coverage split is a choice ----------------------------------------------------

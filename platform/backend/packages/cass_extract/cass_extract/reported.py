@@ -25,6 +25,13 @@ needs correcting.
 It will not treat a blank as a zero without saying so. An empty contents column
 may mean "no contents" or "not yet known", and the two are different; a blank
 is read as zero and counted, so the count is visible.
+
+The same template carries ``OccupancyCode`` and ``ConstructionCode``, for the
+same reason. The source reports neither, so a promotion applies a named
+occupancy assumption -- but a schedule that states the real thing should not
+have to accept one, and a schedule that states it for half its rows should not
+have to choose all or nothing. A stated code is used; a blank falls through to
+the assumption.
 """
 
 from __future__ import annotations
@@ -40,7 +47,7 @@ from .allocation import AllocationError, AllocationEvidence
 from .components import COVERAGE_ORDER
 
 #: Bumped when the template's shape changes.
-TEMPLATE_VERSION = "1.0.0"
+TEMPLATE_VERSION = "1.1.0"
 
 #: Columns the template carries. The first four identify the row and are not
 #: edited; the reference total is there so someone filling it in can see what
@@ -48,7 +55,18 @@ TEMPLATE_VERSION = "1.0.0"
 IDENTITY_COLUMNS = ("AccNumber", "LocNumber", "CountryCode", "LocationName")
 REFERENCE_COLUMN = "AllocatedTIV"
 COMPONENT_COLUMNS = tuple(str(coverage) for coverage in COVERAGE_ORDER)
-TEMPLATE_COLUMNS = (*IDENTITY_COLUMNS, REFERENCE_COLUMN, *COMPONENT_COLUMNS)
+
+#: Vulnerability attributes a schedule may state per row. Optional: a file that
+#: leaves them blank falls through to whichever occupancy assumption the
+#: promotion selected, which is the common case for this source.
+TAXONOMY_COLUMNS = ("OccupancyCode", "ConstructionCode")
+
+TEMPLATE_COLUMNS = (
+    *IDENTITY_COLUMNS,
+    REFERENCE_COLUMN,
+    *COMPONENT_COLUMNS,
+    *TAXONOMY_COLUMNS,
+)
 
 LocationKey = tuple[str, int]
 
@@ -68,6 +86,12 @@ class ReportedComponents:
     evidence: AllocationEvidence = AllocationEvidence.REPORTED
     approved: bool = True
     template_version: str = TEMPLATE_VERSION
+    #: Occupancy and construction where the file stated them. Only rows that
+    #: carry a code appear, so "supplied nothing" and "supplied a blank" are
+    #: the same thing here and both fall through to the assumption.
+    taxonomy: Mapping[LocationKey, Mapping[str, str]] = dataclasses.field(
+        default_factory=dict
+    )
 
     def __len__(self) -> int:
         return len(self.values)
@@ -97,6 +121,7 @@ class ReportedComponents:
             "template_version": self.template_version,
             "location_count": len(self.values),
             "blank_cells_read_as_zero": self.blank_cells,
+            "locations_with_stated_taxonomy": len(self.taxonomy),
             "total": str(
                 sum(
                     (self.total_for(key) for key in self.values),
@@ -125,6 +150,7 @@ def template(rows: Iterable[Mapping[str, Any]]) -> bytes:
                 "LocationName": row.get("label", ""),
                 REFERENCE_COLUMN: _text(row.get("allocated_tiv")),
                 **{column: "" for column in COMPONENT_COLUMNS},
+                **{column: "" for column in TAXONOMY_COLUMNS},
             }
         )
     return buffer.getvalue().encode("utf-8")
@@ -154,7 +180,9 @@ def read(payload: bytes | str, *, name: str = "supplied_location_values") -> Rep
             + "."
         )
 
+    stated_taxonomy = [column for column in TAXONOMY_COLUMNS if column in columns]
     values: dict[LocationKey, dict[str, Decimal]] = {}
+    taxonomy: dict[LocationKey, dict[str, str]] = {}
     blanks = 0
 
     for line, row in enumerate(reader, start=2):
@@ -197,9 +225,29 @@ def read(payload: bytes | str, *, name: str = "supplied_location_values") -> Rep
             )
         values[key] = supplied
 
+        # A blank taxonomy cell is not an assertion, so it is left out rather
+        # than stored empty. Storing it would make "the schedule says nothing"
+        # indistinguishable from "the schedule says unknown", and only the
+        # second should override an assumption.
+        codes = {
+            column: str(row.get(column) or "").strip()
+            for column in stated_taxonomy
+            if str(row.get(column) or "").strip()
+        }
+        if codes.get("OccupancyCode"):
+            taxonomy[key] = codes
+        elif codes:
+            raise AllocationError(
+                f"Line {line} states a construction code with no occupancy code. OED "
+                "requires an occupancy, and a construction alone cannot reach a "
+                "vulnerability function."
+            )
+
     if not values:
         raise AllocationError("The coverage file has no rows.")
-    return ReportedComponents(name=name, values=values, blank_cells=blanks)
+    return ReportedComponents(
+        name=name, values=values, blank_cells=blanks, taxonomy=taxonomy
+    )
 
 
 def reconcile(

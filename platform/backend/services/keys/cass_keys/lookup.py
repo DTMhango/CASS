@@ -189,6 +189,15 @@ class KeyRecord:
     """One response row. Every expected combination produces exactly one."""
 
     location_id: str
+    """The OED location identity: account and location number together.
+
+    Not ``LocNumber`` alone. OED makes a location number unique within an
+    account, not within a portfolio, so a portfolio of four businesses that
+    each schedule a location 1 has four rows sharing that number -- at four
+    different coordinates. Keying on it would give three of them another's
+    area peril.
+    """
+
     peril_id: str
     coverage_type: int
     status: KeyStatus
@@ -197,11 +206,17 @@ class KeyRecord:
     imt: str | None = None
     message: str = ""
     tiv: Decimal = Decimal(0)
+    #: The two halves of the identity, kept so the keys and errors files stay
+    #: readable against the source OED rather than needing the composite split.
+    account_id: str = ""
+    location_number: str = ""
 
     def as_row(self) -> dict[str, Any]:
         """The shape written to keys.csv."""
         return {
             "LocID": self.location_id,
+            "AccNumber": self.account_id,
+            "LocNumber": self.location_number,
             "PerilID": self.peril_id,
             "CoverageTypeID": self.coverage_type,
             "AreaPerilID": self.area_peril_id if self.area_peril_id is not None else "",
@@ -351,6 +366,22 @@ def _buckets_touched(cell: GridCell) -> Iterator[tuple[int, int]]:
         latitude += 1
 
 
+def _location_identity(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    """The account, the location number, and the identity they form together.
+
+    OED's location key is the portfolio, the account and the location number.
+    The portfolio is constant within one lookup, so account and location number
+    are what distinguish a row -- and a promoted Klapton Re cohort is the case
+    that proves the number alone will not: four businesses, each with a
+    location 1, at four different coordinates.
+    """
+    number = str(row.get("LocNumber") or row.get("LocID") or "").strip()
+    account = str(row.get("AccNumber") or "").strip()
+    if not number:
+        return account, "", ""
+    return account, number, f"{account}/{number}" if account else number
+
+
 def _decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
@@ -389,7 +420,7 @@ def lookup(
     report = CoverageReport()
 
     for row in locations:
-        location_id = str(row.get("LocNumber") or row.get("LocID") or "").strip()
+        account_id, location_number, location_id = _location_identity(row)
         latitude = _decimal(row.get("Latitude"))
         longitude = _decimal(row.get("Longitude"))
         occupancy = str(row.get("OccupancyCode") or "").strip()
@@ -409,6 +440,8 @@ def lookup(
             for peril in subperils:
                 record = _resolve(
                     location_id=location_id,
+                    account_id=account_id,
+                    location_number=location_number,
                     peril=peril,
                     coverage_type=coverage_type,
                     tiv=tiv,
@@ -438,6 +471,8 @@ def lookup(
 def _resolve(
     *,
     location_id: str,
+    account_id: str,
+    location_number: str,
     peril: str,
     coverage_type: int,
     tiv: Decimal,
@@ -454,6 +489,8 @@ def _resolve(
     def record(status: KeyStatus, message: str = "", **extra: Any) -> KeyRecord:
         return KeyRecord(
             location_id=location_id,
+            account_id=account_id,
+            location_number=location_number,
             peril_id=peril,
             coverage_type=coverage_type,
             status=status,

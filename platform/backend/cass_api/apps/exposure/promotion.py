@@ -8,12 +8,16 @@ validated, published, and usable by a run like any other version.
 Two decisions in here are assumptions rather than translations, and both are
 recorded as such rather than absorbed.
 
-**Occupancy is not reported.** OED requires ``OccupancyCode`` and the extract
-has none. Writing OED's own unknown code says exactly that; deriving one from
-``class_of_business`` would be an enrichment decision, and section 6 puts that
-behind a controlled mapping and an approved assumption set, not here. So the
-lineage records the field as not reported, and a keys lookup will say what an
-unknown occupancy maps to rather than being handed a guess that hides it.
+**Occupancy is not reported, so it is chosen.** OED requires
+``OccupancyCode`` and the extract has none. It gets the same treatment as the
+coverage split: a named, versioned assumption selected per promotion and
+recorded in the lineage. It is stated, never derived -- deriving one from
+``class_of_business`` would produce something that looks like information while
+resting on nothing, and section 6 puts that behind a controlled mapping and an
+approved assumption set. ``not_reported_v1`` writes OED's own unknown code and
+remains one parameter away, at the cost that no vulnerability function covers
+it and the section 8 gate will hold the run. Where a schedule states occupancy
+per row, that outranks the assumption for the rows it covers.
 
 **The coverage split is a choice, not a constant.** Section 5.4 keeps it
 independent of the location split, and the source reports no component
@@ -51,7 +55,7 @@ from .models import ExposureVersion, ImportBatch, SourcePolicyRow, SourceRiskLoc
 
 #: OED's own code for an occupancy that is not known. Writing it states a fact;
 #: deriving a real occupancy from class of business would be an assumption.
-UNKNOWN_OCCUPANCY = "1000"
+UNKNOWN_OCCUPANCY = extract.UNKNOWN_OCCUPANCY
 
 #: The brief confirms earthquake coverage for every policy in this extract, and
 #: USD for every monetary field.
@@ -70,6 +74,7 @@ LOCATION_COLUMNS = (
     "Latitude",
     "Longitude",
     "OccupancyCode",
+    "ConstructionCode",
     "LocPerilsCovered",
     *(str(coverage) for coverage in extract.COVERAGE_ORDER),
     "LocCurrency",
@@ -87,8 +92,10 @@ def promote(
     name: str,
     cohort: extract.Cohort = extract.Cohort.A,
     class_of_business: str | None = extract.cohorts.PHYSICAL_DAMAGE_CLASS,
+    country: str | None = None,
     allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
     component_split: extract.ComponentSplit | None = None,
+    occupancy: extract.OccupancyAssumption | None = None,
     reported_components: extract.ReportedComponents | None = None,
     accept_restated_total: bool = False,
     actor=None,
@@ -104,10 +111,12 @@ def promote(
     building-only smoke fixture rather than to something that spreads value.
     """
     component_split = component_split or extract.DEFAULT_SPLIT
+    occupancy = occupancy or extract.DEFAULT_OCCUPANCY
     selected_businesses, selected_locations, allocation = _selection(
         batch,
         cohort=cohort,
         class_of_business=class_of_business,
+        country=country,
         allocation_method=allocation_method,
     )
 
@@ -119,19 +128,27 @@ def promote(
         accept_restated_total=accept_restated_total,
     )
 
+    stated_taxonomy = reported_components.taxonomy if reported_components else None
+    taxonomy = extract.assign_taxonomy(totals, occupancy, reported=stated_taxonomy)
+    taxonomy_record = extract.taxonomy_record(
+        occupancy, taxonomy, reported=stated_taxonomy
+    )
+
     version = _create_version(
         batch,
         name=name,
         cohort=cohort,
         class_of_business=class_of_business,
+        country=country,
         allocation=allocation,
         coverage_record=coverage_record,
+        taxonomy_record=taxonomy_record,
         selected_businesses=selected_businesses,
         selected_locations=selected_locations,
         actor=actor,
     )
 
-    payload = _location_csv(batch, version, selected_locations, components)
+    payload = _location_csv(batch, version, selected_locations, components, taxonomy)
     services.attach_file(
         version,
         FileKind.LOCATION,
@@ -162,6 +179,7 @@ def promote(
             "cohort": str(cohort),
             "allocation_method": str(allocation.method),
             "coverage_source": coverage_record["source"],
+            "occupancy_assumption": occupancy.name,
             "locations": len(selected_locations),
         },
         detail="Promoted a source-extract cohort to an OED exposure version.",
@@ -177,6 +195,7 @@ def _selection(
     cohort: extract.Cohort,
     class_of_business: str | None,
     allocation_method: extract.AllocationMethod,
+    country: str | None = None,
 ):
     """The locations a promotion would cover, and what each would be allocated.
 
@@ -190,10 +209,18 @@ def _selection(
     rows = [row.values for row in locations]
     assignments = extract.assign_all(rows)
     businesses = extract.business_complete(
-        rows, assignments, cohort=cohort, class_of_business=class_of_business
+        rows,
+        assignments,
+        cohort=cohort,
+        class_of_business=class_of_business,
+        country=country,
     )
     if not businesses:
-        label = f"cohort {cohort}" + (f" {class_of_business}" if class_of_business else "")
+        label = (
+            f"cohort {cohort}"
+            + (f" {class_of_business}" if class_of_business else "")
+            + (f" in {country}" if country else "")
+        )
         raise PromotionError(
             f"No business has its whole schedule in {label}, so there is nothing to "
             "promote. Taking part of a schedule would leave the excluded sites' value "
@@ -222,6 +249,7 @@ def template_rows(
     *,
     cohort: extract.Cohort = extract.Cohort.A,
     class_of_business: str | None = extract.cohorts.PHYSICAL_DAMAGE_CLASS,
+    country: str | None = None,
     allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
 ) -> list[dict[str, Any]]:
     """The rows of a coverage template for one selection."""
@@ -229,6 +257,7 @@ def template_rows(
         batch,
         cohort=cohort,
         class_of_business=class_of_business,
+        country=country,
         allocation_method=allocation_method,
     )
     totals = allocation.by_location()
@@ -326,8 +355,10 @@ def _create_version(
     name: str,
     cohort: extract.Cohort,
     class_of_business: str | None,
+    country: str | None,
     allocation,
     coverage_record: dict[str, Any],
+    taxonomy_record: dict[str, Any],
     selected_businesses: set[str],
     selected_locations: list[SourceRiskLocation],
     actor,
@@ -341,6 +372,7 @@ def _create_version(
             f"Promoted from {batch.profile} {batch.source_filename or ''} "
             f"(checksum {batch.source_checksum}), cohort {cohort}"
             + (f" {class_of_business}" if class_of_business else "")
+            + (f", {country} only" if country else "")
             + "."
         ).strip(),
         run_currency=CURRENCY,
@@ -353,6 +385,7 @@ def _create_version(
             "cohort": str(cohort),
             "cohort_rule_version": batch.cohort_rule_version,
             "class_of_business": class_of_business,
+            "country_filter": country,
             "business_count": len(selected_businesses),
             "location_count": len(selected_locations),
             "countries": countries,
@@ -368,6 +401,7 @@ def _create_version(
                 ),
             },
             "coverage": coverage_record,
+            "taxonomy": taxonomy_record,
             "value_basis": (
                 "gross_limit is reported TIV at KRE's share in USD. The share is not "
                 "applied again, so a physical-damage result from this version is "
@@ -376,12 +410,8 @@ def _create_version(
             # Section 8: an assumed attribute must never look like a reported
             # one. These are the fields the source did not carry.
             "attributes_not_reported": {
-                "OccupancyCode": (
-                    f"Not in the source. Written as OED unknown ({UNKNOWN_OCCUPANCY}); "
-                    "deriving one from class of business is enrichment work under an "
-                    "approved assumption set, not a mapping decision."
-                ),
-                "ConstructionCode": "Not in the source and not inferred.",
+                "OccupancyCode": taxonomy_record["basis"],
+                "ConstructionCode": taxonomy_record["basis"],
                 "YearBuilt": "Not in the source and not inferred.",
                 "NumberOfStoreys": "Not in the source and not inferred.",
                 "coverage_components": coverage_record["basis"],
@@ -389,8 +419,9 @@ def _create_version(
             "decision_use": (
                 "Blocked. This version carries "
                 + coverage_record["decision_note"]
-                + " and no reported vulnerability attributes; it is a research and "
-                "engine-test version."
+                + " and "
+                + taxonomy_record["decision_note"]
+                + "; it is a research and engine-test version."
             ),
         },
         created_by=actor,
@@ -403,6 +434,7 @@ def _location_csv(
     version: ExposureVersion,
     locations: list[SourceRiskLocation],
     components: dict[tuple[str, int], dict[str, Decimal]],
+    taxonomy: dict[tuple[str, int], dict[str, str]],
 ) -> bytes:
     """Write the OED location file for a selection.
 
@@ -426,6 +458,7 @@ def _location_csv(
                 f"Location {row.business_id}/{row.location_number} was selected but "
                 "received no allocation, so the selection and the allocation disagree."
             )
+        codes = taxonomy[(row.business_id, row.location_number)]
         writer.writerow(
             {
                 "PortNumber": batch.project.reference,
@@ -434,7 +467,8 @@ def _location_csv(
                 "CountryCode": row.country_code,
                 "Latitude": _coordinate(row.latitude),
                 "Longitude": _coordinate(row.longitude),
-                "OccupancyCode": UNKNOWN_OCCUPANCY,
+                "OccupancyCode": codes["OccupancyCode"],
+                "ConstructionCode": codes["ConstructionCode"],
                 "LocPerilsCovered": COVERED_PERIL,
                 "LocCurrency": CURRENCY,
                 **{
@@ -462,6 +496,7 @@ def promotion_summary(version: ExposureVersion) -> dict[str, Any]:
         "cohort": lineage.get("cohort"),
         "allocation": lineage.get("allocation"),
         "coverage": lineage.get("coverage"),
+        "taxonomy": lineage.get("taxonomy"),
         "value_basis": lineage.get("value_basis"),
         "attributes_not_reported": sorted(lineage.get("attributes_not_reported", {})),
         "decision_use": lineage.get("decision_use"),

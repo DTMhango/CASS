@@ -473,8 +473,153 @@ def test_the_promoted_oed_names_no_counterparty(batch, analyst):
     assert len(rows) == 42
     assert set(rows[0]) == {
         "PortNumber", "AccNumber", "LocNumber", "CountryCode", "Latitude",
-        "Longitude", "OccupancyCode", "LocPerilsCovered", "BuildingTIV",
-        "OtherTIV", "ContentsTIV", "BITIV", "LocCurrency",
+        "Longitude", "OccupancyCode", "ConstructionCode", "LocPerilsCovered",
+        "BuildingTIV", "OtherTIV", "ContentsTIV", "BITIV", "LocCurrency",
     }
     # Business references only, never a name.
     assert all(row["AccNumber"].startswith("PFAC") for row in rows)
+
+
+# -- step 5: the KRE-share earthquake golden test, on the real extract -------------------
+
+@pytest.fixture()
+def pilot_models(db, modeller):
+    """Both prototype country models, registered with their cells and functions."""
+    from apps.modelregistry import pilot
+
+    return {model.country_code: model for model in pilot.register_all(actor=modeller)}
+
+
+def _keys_for(version, model):
+    """Run the CASS keys lookup over a published version, as a run would."""
+    from apps.exposure import services as exposure_services
+    from apps.modelregistry.assets import load_grid, load_vulnerability
+    from cass_keys.lookup import lookup
+
+    files = exposure_services.load_files(version)
+    return lookup(
+        [dict(row.raw) for row in files.location.rows],
+        grid=load_grid(model.grid),
+        vulnerability=load_vulnerability(model.vulnerability_set),
+    )
+
+
+@needs_extract
+@pytest.mark.parametrize(
+    ("country", "code"), [("Indonesia", "ID"), ("Nepal", "NP")]
+)
+def test_every_benchmark_location_maps_against_its_country_model(
+    batch, analyst, pilot_models, country, code
+):
+    """The heart of step 5: no benchmark location falls outside grid or taxonomy."""
+    from apps.exposure.promotion import promote
+
+    version = promote(batch, name=f"{country} benchmark", country=country, actor=analyst)
+    result = _keys_for(version, pilot_models[code])
+
+    # Distinct locations, not records: each location produces one record per
+    # coverage type, so a record count answers a different question.
+    assert len({item.location_id for item in result.successes}) == version.location_count
+    assert [item.message for item in result.failures] == []
+
+
+@needs_extract
+@pytest.mark.parametrize(
+    ("country", "code"), [("Indonesia", "ID"), ("Nepal", "NP")]
+)
+def test_the_whole_kre_share_tiv_maps_and_reconciles(
+    batch, analyst, pilot_models, country, code
+):
+    """Section 15: unmapped TIV is exposure silently omitted from the loss."""
+    from apps.exposure.promotion import promote
+
+    version = promote(batch, name=f"{country} benchmark", country=country, actor=analyst)
+    report = _keys_for(version, pilot_models[code]).report
+
+    assert report.source_tiv == version.total_tiv
+    assert report.mapped_tiv == version.total_tiv
+    assert report.failed_tiv == 0
+    assert report.reconciled is True
+    assert report.difference == 0
+
+
+@needs_extract
+def test_the_two_country_benchmark_splits_into_two_runnable_selections(batch, analyst):
+    """A model version covers one country, so the 42 risks are two runs, not one.
+
+    The two selections must add back to the whole benchmark: a country filter
+    that quietly dropped a risk would understate the book by exactly the amount
+    nobody noticed.
+    """
+    from decimal import Decimal
+
+    from apps.exposure.promotion import promote
+
+    whole = promote(batch, name="Whole benchmark", actor=analyst)
+    indonesia = promote(batch, name="Indonesia benchmark", country="Indonesia", actor=analyst)
+    nepal = promote(batch, name="Nepal benchmark", country="Nepal", actor=analyst)
+
+    assert indonesia.location_count + nepal.location_count == whole.location_count == 42
+    assert indonesia.total_tiv + nepal.total_tiv == whole.total_tiv == Decimal("147044599.14")
+
+
+@needs_extract
+def test_the_whole_benchmark_cannot_run_against_one_country_model(
+    batch, analyst, pilot_models
+):
+    """Reported rather than hidden: the Nepali sites are outside every ID tile."""
+    from apps.exposure.promotion import promote
+
+    whole = promote(batch, name="Whole benchmark", actor=analyst)
+    report = _keys_for(whole, pilot_models["ID"]).report
+
+    assert report.failed_tiv > 0
+    assert report.mapped_tiv + report.failed_tiv == report.source_tiv
+    assert any("outside the area-peril grid" in reason for reason in report.by_reason)
+
+
+@needs_extract
+def test_the_benchmark_is_reproducible_key_for_key(batch, analyst, pilot_models):
+    """A golden test that is not byte-identical between runs pins nothing."""
+    from apps.exposure.promotion import promote
+
+    first = promote(batch, name="Benchmark one", country="Indonesia", actor=analyst)
+    second = promote(batch, name="Benchmark two", country="Indonesia", actor=analyst)
+
+    rows_one = [item.as_row() for item in _keys_for(first, pilot_models["ID"]).records]
+    rows_two = [item.as_row() for item in _keys_for(second, pilot_models["ID"]).records]
+    assert rows_one == rows_two
+
+
+@needs_extract
+def test_the_real_benchmark_still_holds_at_the_gate_without_an_occupancy(
+    batch, analyst, pilot_models
+):
+    """The assumption is what unlocks the engine, on the real book as much as a fixture."""
+    from apps.exposure.promotion import promote
+
+    version = promote(
+        batch,
+        name="Occupancy not reported",
+        country="Indonesia",
+        occupancy=extract.NOT_REPORTED,
+        actor=analyst,
+    )
+    report = _keys_for(version, pilot_models["ID"]).report
+
+    assert report.mapped_tiv == 0
+    assert report.failed_tiv == version.total_tiv
+    assert report.reconciled is True
+
+
+@needs_extract
+def test_the_real_benchmark_maps_across_the_grid_rather_than_into_one_cell(
+    batch, analyst, pilot_models
+):
+    """42 risks in one cell would mean the grid, not the book, chose the answer."""
+    from apps.exposure.promotion import promote
+
+    version = promote(batch, name="Benchmark", country="Indonesia", actor=analyst)
+    result = _keys_for(version, pilot_models["ID"])
+    cells = {item.area_peril_id for item in result.successes}
+    assert len(cells) > 10

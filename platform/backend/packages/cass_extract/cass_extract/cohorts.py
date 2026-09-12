@@ -251,6 +251,7 @@ def business_complete(
     *,
     cohort: Cohort = Cohort.A,
     class_of_business: str | None = PHYSICAL_DAMAGE_CLASS,
+    country: str | None = None,
 ) -> set[str]:
     """Businesses where *every* scheduled location qualifies.
 
@@ -260,6 +261,12 @@ def business_complete(
     included sites, overstating them, or it silently disappears. Requiring the
     whole schedule to qualify means neither happens, at the cost of a smaller
     benchmark -- which is the right trade.
+
+    ``country`` narrows the same way, and for a concrete reason: a model
+    version covers one country, so a portfolio spanning two cannot be run
+    against either. Selecting by country is how a two-country book becomes two
+    runs, and the whole-schedule rule means a business with sites in both is
+    excluded from both rather than split across them.
     """
     schedules: dict[str, list[bool]] = {}
     for location, assignment in zip(locations, assignments, strict=True):
@@ -268,6 +275,10 @@ def business_complete(
         if class_of_business is not None:
             qualifies = qualifies and (
                 str(location.get("class_of_business") or "").strip() == class_of_business
+            )
+        if country is not None:
+            qualifies = qualifies and (
+                str(location.get("country") or "").strip().lower() == country.strip().lower()
             )
         schedules.setdefault(business_id, []).append(qualifies)
 

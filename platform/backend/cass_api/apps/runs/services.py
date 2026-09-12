@@ -884,6 +884,8 @@ def _keys_csv(records) -> bytes:
         buffer,
         fieldnames=[
             "LocID",
+            "AccNumber",
+            "LocNumber",
             "PerilID",
             "CoverageTypeID",
             "AreaPerilID",
@@ -951,7 +953,14 @@ def _csv_rows(text: str) -> int:
 #: Columns an Oasis keys file may use for the location identity, best first.
 #: ``LocNumber`` is the OED identifier and the one the published exposure
 #: shares; ``loc_id`` is Oasis's own sequential index and only a fallback.
+#:
+#: A location number is qualified by its account wherever the file carries one.
+#: OED makes the number unique within an account rather than within a
+#: portfolio, so a book where several businesses each schedule a location 1
+#: would otherwise reconcile three real locations down to one and report a
+#: complete mapping as a shortfall.
 _LOCATION_COLUMNS = ("locnumber", "loc_id", "locid")
+_ACCOUNT_COLUMN = "accnumber"
 
 
 def _keys_locations(text: str, what: str) -> set[str]:
@@ -987,11 +996,21 @@ def _keys_locations(text: str, what: str) -> set[str]:
             f"Columns present: {', '.join(header)}."
         )
 
-    return {
-        row[index].strip()
-        for row in reader
-        if len(row) > index and row[index].strip()
-    }
+    # Only when the identifier is the OED number. Oasis's own ``loc_id`` is
+    # already unique across the portfolio, and qualifying it would invent a
+    # distinction the file does not make.
+    account = columns.get(_ACCOUNT_COLUMN) if candidate == "locnumber" else None
+
+    identities: set[str] = set()
+    for row in reader:
+        if len(row) <= index or not row[index].strip():
+            continue
+        number = row[index].strip()
+        if account is not None and len(row) > account and row[account].strip():
+            identities.add(f"{row[account].strip()}/{number}")
+        else:
+            identities.add(number)
+    return identities
 
 
 def _location_count(analysis_run) -> int:
