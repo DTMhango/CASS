@@ -156,13 +156,18 @@ EARTHEN_QUALIFIERS = ("ADO", "STDRE", "STRUB")
 def macro_class(taxonomy: Taxonomy) -> str:
     """The exposure summary's macro class for a vulnerability taxonomy.
 
-    The two files describe the same buildings in different alphabets: the
-    vulnerability model names a full taxonomy, the exposure summaries group
-    them. GEM publishes a mapping between them, but it is one of the licensed
-    assets the release manifest records as outstanding, so this reconstructs
-    the grouping from the taxonomy string. It is an assumption, and a shallow
-    one; it is here rather than inline so that replacing it with the licensed
-    mapping is a change to one function.
+    The fallback, used when GEM's own mapping is not to hand. The two files
+    describe the same buildings in different alphabets: the vulnerability model
+    names a full taxonomy, the exposure summaries group them into a handful of
+    macro classes, and this reconstructs the grouping by reading the taxonomy
+    string.
+
+    It is coarse in a specific way. A macro class holding four vulnerability
+    functions has its value divided equally between them, which is a statement
+    about nothing. GEM's ``Vulnerability_mapping_ISO3.csv`` says which function
+    each exposure taxonomy actually uses; where that file has been supplied,
+    ``apply_vulnerability_mapping`` produces exact weights and this function is
+    not consulted at all.
     """
     material = taxonomy.material
     base, _, qualifier = material.partition("+")
@@ -185,13 +190,54 @@ def macro_class(taxonomy: Taxonomy) -> str:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class StockPrior:
-    """Value and count by occupancy and macro class, from a published summary."""
+    """Value and count by occupancy and macro class, from a published summary.
+
+    Two levels of precision, and which one is in use is worth knowing.
+
+    The macro level always works: the public summaries group every taxonomy
+    into a handful of classes -- non-ductile concrete, confined masonry and so
+    on -- and a vulnerability taxonomy can be placed in one of those by reading
+    its own string. It is coarse. A macro class holding four vulnerability
+    functions splits its share equally between them, which is a statement about
+    nothing.
+
+    The exact level needs GEM's ``Vulnerability_mapping_ISO3.csv``, which says
+    which vulnerability function each exposure taxonomy uses. With it, every
+    function gets precisely the value that maps to it, and the macro grouping
+    is not consulted at all. That file ships with the licensed spatial exposure
+    download rather than the public repository, so ``by_taxonomy`` is empty
+    until someone fetches it -- and ``uses_exact_weights`` says which
+    calculation produced any given prior, because two model releases weighted
+    differently are different models.
+    """
 
     country_code: str
     shares: Mapping[tuple[str, str], tuple[float, float]]
     source_name: str
     checksum: str
     weighting: Weighting = Weighting.VALUE
+    #: Value and count per exposure taxonomy, kept so a mapping can be applied
+    #: later without re-reading the summary.
+    by_exposure_taxonomy: Mapping[tuple[str, str], tuple[float, float]] = (
+        dataclasses.field(default_factory=dict)
+    )
+    #: Exact share per *vulnerability* taxonomy, once GEM's mapping has been
+    #: applied. Empty until then.
+    by_taxonomy: Mapping[tuple[str, str], float] = dataclasses.field(
+        default_factory=dict
+    )
+    mapping_source: str = ""
+    mapping_checksum: str = ""
+
+    @property
+    def uses_exact_weights(self) -> bool:
+        return bool(self.by_taxonomy)
+
+    def taxonomy_weight(self, occupancy: OccupancyClass, taxonomy: str) -> float | None:
+        """The exact share this vulnerability function holds, if it is known."""
+        if not self.by_taxonomy:
+            return None
+        return self.by_taxonomy.get((str(occupancy), taxonomy))
 
     def weight(self, occupancy: OccupancyClass, macro: str) -> float:
         """The share of this occupancy's stock the macro class holds."""
@@ -225,6 +271,9 @@ class StockPrior:
             "source_name": self.source_name,
             "checksum": self.checksum,
             "weighting": str(self.weighting),
+            "uses_exact_weights": self.uses_exact_weights,
+            "mapping_source": self.mapping_source,
+            "mapping_checksum": self.mapping_checksum,
             "occupancies": {
                 str(item): self.profile(item)
                 for item in OccupancyClass
@@ -270,6 +319,7 @@ def read_stock_prior(
     # two shapes are counted and the overlap refused.
     settlements: dict[tuple[str, str], set[str]] = {}
     shares: dict[tuple[str, str], list[float]] = {}
+    per_taxonomy: dict[tuple[str, str], list[float]] = {}
     for row in rows:
         occupancy = (row.get("OCCUPANCY") or "").strip()
         macro = (row.get("MACRO_TAXONOMY") or "").strip()
@@ -285,9 +335,17 @@ def read_stock_prior(
                 "settlement. Summing both would count the same buildings twice."
             )
 
+        buildings = _number(row.get("BUILDINGS"))
+        cost = _number(row.get("BLDG_REPL_COST_USD"))
+
         entry = shares.setdefault((occupancy, macro), [0.0, 0.0])
-        entry[0] += _number(row.get("BUILDINGS"))
-        entry[1] += _number(row.get("BLDG_REPL_COST_USD"))
+        entry[0] += buildings
+        entry[1] += cost
+
+        if taxonomy:
+            detail = per_taxonomy.setdefault((occupancy, taxonomy), [0.0, 0.0])
+            detail[0] += buildings
+            detail[1] += cost
 
     return StockPrior(
         country_code=country_code.upper(),
@@ -295,8 +353,175 @@ def read_stock_prior(
         source_name=path.name,
         checksum=hashlib.sha256(payload).hexdigest(),
         weighting=weighting,
+        by_exposure_taxonomy={
+            key: (value[0], value[1]) for key, value in per_taxonomy.items()
+        },
     )
 
+
+#: Column names GEM's ``Vulnerability_mapping_ISO3.csv`` is expected to use.
+#: Both are overridable, because this file ships with the licensed download
+#: rather than the public repository and CASS has not seen one: if the headers
+#: differ, ``read_vulnerability_mapping`` says which columns it did find rather
+#: than guessing between them.
+MAPPING_TAXONOMY_COLUMNS = ("taxonomy", "TAXONOMY", "exposure_taxonomy", "asset_taxonomy")
+MAPPING_FUNCTION_COLUMNS = (
+    "vulnerability_function",
+    "VULNERABILITY_FUNCTION",
+    "vulnerabilityFunction",
+    "vuln_function",
+    "VULN_FUNC",
+    "function_id",
+)
+
+
+def read_vulnerability_mapping(
+    source: str | pathlib.Path,
+    *,
+    taxonomy_column: str | None = None,
+    function_column: str | None = None,
+) -> tuple[Mapping[str, str], str, str]:
+    """Read GEM's exposure-taxonomy to vulnerability-function mapping.
+
+    Returns the mapping, the file name and its checksum, so a build records
+    which mapping it used alongside which vulnerability model.
+
+    This is what replaces the reconstruction in ``macro_class``. Reading a
+    taxonomy string to guess its macro class works and is coarse -- a macro
+    class holding four functions divides its value equally between them. GEM's
+    mapping says which function each exposure taxonomy actually uses, so every
+    function gets the value that belongs to it.
+    """
+    path = pathlib.Path(source)
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise EnrichmentError(f"{path} could not be read: {exc}") from exc
+
+    rows = list(csv.DictReader(payload.decode("utf-8-sig").splitlines()))
+    if not rows:
+        raise EnrichmentError(f"{path.name} has no rows.")
+
+    columns = list(rows[0])
+    taxonomy_key = taxonomy_column or _first_present(columns, MAPPING_TAXONOMY_COLUMNS)
+    function_key = function_column or _first_present(columns, MAPPING_FUNCTION_COLUMNS)
+    if taxonomy_key is None or function_key is None:
+        raise EnrichmentError(
+            f"{path.name} does not carry the columns this reader expects. It has: "
+            + ", ".join(columns)
+            + ". Pass taxonomy_column and function_column to name them explicitly; "
+            "the file is a licensed GEM asset and CASS does not assume its headers."
+        )
+
+    mapping: dict[str, str] = {}
+    for row in rows:
+        exposure = (row.get(taxonomy_key) or "").strip()
+        function = (row.get(function_key) or "").strip()
+        if not exposure or not function:
+            continue
+        existing = mapping.get(exposure)
+        if existing is not None and existing != function:
+            raise EnrichmentError(
+                f"{path.name} maps {exposure!r} to both {existing!r} and "
+                f"{function!r}. Which applied would depend on row order."
+            )
+        mapping[exposure] = function
+
+    if not mapping:
+        raise EnrichmentError(
+            f"{path.name} carries no usable rows in {taxonomy_key!r}/{function_key!r}."
+        )
+    return mapping, path.name, hashlib.sha256(payload).hexdigest()
+
+
+def _first_present(columns: Sequence[str], candidates: Sequence[str]) -> str | None:
+    lowered = {item.lower(): item for item in columns}
+    for candidate in candidates:
+        found = lowered.get(candidate.lower())
+        if found is not None:
+            return found
+    return None
+
+
+def apply_vulnerability_mapping(
+    prior: StockPrior,
+    mapping: Mapping[str, str],
+    *,
+    source_name: str = "",
+    checksum: str = "",
+) -> StockPrior:
+    """A prior that weights vulnerability functions directly, not macro classes.
+
+    Every exposure taxonomy's value is attributed to the vulnerability function
+    GEM says it uses, and the shares are normalised within each occupancy. An
+    exposure taxonomy the mapping does not cover is left out and reported by
+    ``mapping_coverage``, rather than being spread over the functions that are
+    covered -- that would move value onto buildings it does not belong to.
+    """
+    if not prior.by_exposure_taxonomy:
+        raise EnrichmentError(
+            "This prior was built without per-taxonomy detail, so a mapping "
+            "cannot be applied to it."
+        )
+
+    totals: dict[tuple[str, str], float] = {}
+    for (occupancy, exposure), (buildings, cost) in prior.by_exposure_taxonomy.items():
+        function = mapping.get(exposure)
+        if function is None:
+            continue
+        amount = cost if prior.weighting is Weighting.VALUE else buildings
+        key = (occupancy, function)
+        totals[key] = totals.get(key, 0.0) + amount
+
+    by_occupancy: dict[str, float] = {}
+    for (occupancy, _), amount in totals.items():
+        by_occupancy[occupancy] = by_occupancy.get(occupancy, 0.0) + amount
+
+    shares = {
+        key: amount / by_occupancy[key[0]]
+        for key, amount in totals.items()
+        if by_occupancy.get(key[0], 0.0) > 0.0
+    }
+    if not shares:
+        raise EnrichmentError(
+            "The mapping covered none of this summary's taxonomies, so it would "
+            "produce a prior with no weights at all."
+        )
+
+    return dataclasses.replace(
+        prior,
+        by_taxonomy=shares,
+        mapping_source=source_name,
+        mapping_checksum=checksum,
+    )
+
+
+def mapping_coverage(
+    prior: StockPrior, mapping: Mapping[str, str]
+) -> dict[str, Any]:
+    """How much of the country's value the mapping actually places.
+
+    A mapping that covers 99% of value is fine and a mapping that covers 60% is
+    a finding, and the difference is invisible unless somebody measures it.
+    """
+    covered = uncovered = 0.0
+    missing: list[str] = []
+    for (_, exposure), (buildings, cost) in prior.by_exposure_taxonomy.items():
+        amount = cost if prior.weighting is Weighting.VALUE else buildings
+        if exposure in mapping:
+            covered += amount
+        else:
+            uncovered += amount
+            missing.append(exposure)
+
+    total = covered + uncovered
+    return {
+        "country_code": prior.country_code,
+        "weighting": str(prior.weighting),
+        "covered_share": covered / total if total else 0.0,
+        "uncovered_taxonomies": sorted(set(missing))[:20],
+        "uncovered_count": len(set(missing)),
+    }
 
 def _number(value: str | None) -> float:
     try:
@@ -648,9 +873,15 @@ class Enrichment:
             counts[macro] = counts.get(macro, 0) + 1
 
         raw: list[float] = []
-        for macro in macros:
+        for item, macro in zip(candidates, macros, strict=True):
             weight = self.weight_overrides.get(macro)
             if weight is None:
+                # GEM's own mapping, where it has been supplied: the value that
+                # belongs to this function rather than to the group it sits in.
+                exact = prior.taxonomy_weight(occupancy, item.taxonomy.text)
+                if exact is not None:
+                    raw.append(exact or _NOMINAL_SHARE)
+                    continue
                 weight = prior.weight(occupancy, macro)
             # A macro class the summary does not report for this occupancy gets
             # nothing from the prior. Its taxonomies stay in the mixture at a

@@ -17,9 +17,21 @@ Both repositories were clean immediately after cloning. The detached HEAD state 
 
 ## Pilot-country availability
 
-The public exposure repository contains Indonesia and Nepal national, Adm1 and taxonomy summary CSVs and associated figures. It does **not** contain the spatially disaggregated approximately 1 km exposure archives or country vulnerability-mapping CSVs described in the project README. Those inputs require the relevant GEM data/licence request and must be added separately when authorised.
+The public exposure repository contains Indonesia and Nepal national, Adm1 and taxonomy summary CSVs and associated figures. It does **not** contain the spatially disaggregated approximately 1 km exposure archives or the country vulnerability-mapping CSVs. Both ship with the licensed download obtained through the [GEM licence request page](https://www.globalquakemodel.org/license-request/global-exposure-model).
 
 The vulnerability repository contains structural, non-structural, contents and fatalities XMLs for both Indonesia and Nepal.
+
+## Outstanding licensed assets
+
+Commercial use has been cleared, but the files below still have to be requested and downloaded; clearance is not delivery. CASS reads them the moment they are placed beside the summaries.
+
+| File | Where it goes | What it changes |
+| --- | --- | --- |
+| `Vulnerability_mapping_IDN.csv` | `global_exposure_model/Southeast_Asia/Indonesia/` | Replaces the reconstructed macro-class grouping in `cass_converter.enrichment.macro_class` with GEM's own exposure-taxonomy to vulnerability-function mapping. Each vulnerability function then receives exactly the replacement cost that maps to it, instead of an equal share of its macro class. Read it with `read_vulnerability_mapping` and apply it with `apply_vulnerability_mapping`; `mapping_coverage` reports how much of the country's value it places. |
+| `Vulnerability_mapping_NPL.csv` | `global_exposure_model/South_Asia/Nepal/` | As above. It matters more for Nepal, where 45 residential taxonomies fall into four macro classes and the equal split inside each is at its crudest. |
+| Spatially disaggregated exposure (~1 km, `csv.gz`) | either country folder | Not yet read by CASS. It would allow the stock prior to be conditioned on administrative area rather than on the country as a whole, which is the next thing that would narrow a mixture. |
+
+Until they arrive the build runs on the reconstructed grouping and says so: every `StockPrior` carries `uses_exact_weights`, and it is `false`.
 
 ## SHA-256 — pilot-country machine-readable files
 

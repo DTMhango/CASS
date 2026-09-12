@@ -38,10 +38,13 @@ from .enrichment import (
     Mixture,
     StockPrior,
     Weighting,
+    apply_vulnerability_mapping,
     coverage,
     macro_class,
+    mapping_coverage,
     mixture_report,
     read_stock_prior,
+    read_vulnerability_mapping,
     resolve_all,
 )
 from .footprint import (
@@ -122,6 +125,9 @@ from .vulnerability import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "read_vulnerability_mapping",
+    "mapping_coverage",
+    "apply_vulnerability_mapping",
     "Attributes",
     "BetaError",
     "Bin",

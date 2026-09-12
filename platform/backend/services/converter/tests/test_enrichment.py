@@ -404,3 +404,152 @@ def test_the_mixture_report_counts_what_was_assumed(enrichment, model, prior):
 
 def test_an_empty_report_is_not_an_error():
     assert mixture_report([]) == {"risks": 0}
+
+
+# -- GEM's own mapping, when it is available --------------------------------------
+
+def summary(tmp_path):
+    path = tmp_path / "Exposure_Summary_Taxonomy.csv"
+    path.write_text(
+        "OCCUPANCY,MACRO_TAXONOMY,TAXONOMY,SETTLEMENT,BUILDINGS,BLDG_REPL_COST_USD\n"
+        "COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,TOTAL,10,900\n"
+        "COM,CR+,CR/LFINF/CDM+ERM/H:1-3/COM,TOTAL,10,100\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def mapping_file(tmp_path, **columns):
+    path = tmp_path / "Vulnerability_mapping_IDN.csv"
+    header = columns.get("header", "taxonomy,vulnerability_function")
+    path.write_text(
+        f"{header}\n"
+        "CR/LFINF/CDL+ERL/H:1-3/COM,CR/LFINF/CDL+ERM/H:2/COM\n"
+        "CR/LFINF/CDM+ERM/H:1-3/COM,CR/LFINF/CDM+ERM/H:2/COM\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_prior_keeps_its_taxonomy_detail_so_a_mapping_can_be_applied(tmp_path):
+    from cass_converter.enrichment import read_stock_prior
+
+    prior = read_stock_prior(summary(tmp_path), country_code="ID")
+    assert prior.by_exposure_taxonomy
+    assert prior.uses_exact_weights is False
+
+
+def test_gems_mapping_gives_each_function_the_value_that_belongs_to_it(tmp_path):
+    """Rather than dividing a macro class equally among its functions."""
+    from cass_converter.enrichment import (
+        apply_vulnerability_mapping,
+        read_stock_prior,
+        read_vulnerability_mapping,
+    )
+
+    prior = read_stock_prior(summary(tmp_path), country_code="ID")
+    mapping, name, checksum = read_vulnerability_mapping(mapping_file(tmp_path))
+    exact = apply_vulnerability_mapping(
+        prior, mapping, source_name=name, checksum=checksum
+    )
+
+    assert exact.uses_exact_weights
+    assert exact.mapping_checksum == checksum
+    assert exact.taxonomy_weight(
+        OccupancyClass.COMMERCIAL, "CR/LFINF/CDL+ERM/H:2/COM"
+    ) == pytest.approx(0.9)
+    assert exact.taxonomy_weight(
+        OccupancyClass.COMMERCIAL, "CR/LFINF/CDM+ERM/H:2/COM"
+    ) == pytest.approx(0.1)
+
+
+def test_the_resolver_prefers_the_exact_weights_over_the_macro_ones(tmp_path, model):
+    from cass_converter.enrichment import (
+        apply_vulnerability_mapping,
+        read_stock_prior,
+        read_vulnerability_mapping,
+    )
+
+    prior = read_stock_prior(summary(tmp_path), country_code="ID")
+    mapping, name, checksum = read_vulnerability_mapping(mapping_file(tmp_path))
+    exact = apply_vulnerability_mapping(prior, mapping, source_name=name, checksum=checksum)
+
+    bare = Enrichment(name="x", version="1", country_code="ID")
+    mixture = bare.resolve(Attributes("1100", "5150", storeys=2), model, exact)
+    weights = {item.taxonomy: item.weight for item in mixture.candidates}
+    assert weights["CR/LFINF/CDL+ERM/H:2/COM"] == pytest.approx(0.9)
+    assert weights["CR/LFINF/CDM+ERM/H:2/COM"] == pytest.approx(0.1)
+
+
+def test_a_mapping_with_unexpected_headers_says_what_it_found(tmp_path):
+    """The file is a licensed asset CASS has not seen, so it does not guess."""
+    from cass_converter.enrichment import read_vulnerability_mapping
+
+    path = mapping_file(tmp_path, header="class,curve")
+    with pytest.raises(EnrichmentError, match="does not carry the columns"):
+        read_vulnerability_mapping(path)
+
+    mapping, _, _ = read_vulnerability_mapping(
+        path, taxonomy_column="class", function_column="curve"
+    )
+    assert len(mapping) == 2
+
+
+def test_a_mapping_that_contradicts_itself_is_refused(tmp_path):
+    from cass_converter.enrichment import read_vulnerability_mapping
+
+    path = tmp_path / "m.csv"
+    path.write_text(
+        "taxonomy,vulnerability_function\nA/B/C/D/E,F/G/H/I/J\nA/B/C/D/E,K/L/M/N/O\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(EnrichmentError, match="maps .* to both"):
+        read_vulnerability_mapping(path)
+
+
+def test_the_coverage_report_says_how_much_value_the_mapping_places(tmp_path):
+    """99% covered is fine and 60% is a finding, and only a number tells them apart."""
+    from cass_converter.enrichment import (
+        mapping_coverage,
+        read_stock_prior,
+        read_vulnerability_mapping,
+    )
+
+    prior = read_stock_prior(summary(tmp_path), country_code="ID")
+    mapping, _, _ = read_vulnerability_mapping(mapping_file(tmp_path))
+    assert mapping_coverage(prior, mapping)["covered_share"] == pytest.approx(1.0)
+
+    partial = {"CR/LFINF/CDL+ERL/H:1-3/COM": "CR/LFINF/CDL+ERM/H:2/COM"}
+    report = mapping_coverage(prior, partial)
+    assert report["covered_share"] == pytest.approx(0.9)
+    assert report["uncovered_count"] == 1
+
+
+def test_an_unmapped_taxonomy_is_left_out_rather_than_spread_over_the_others(tmp_path):
+    """Spreading it would move value onto buildings it does not belong to."""
+    from cass_converter.enrichment import (
+        apply_vulnerability_mapping,
+        read_stock_prior,
+    )
+
+    prior = read_stock_prior(summary(tmp_path), country_code="ID")
+    exact = apply_vulnerability_mapping(
+        prior, {"CR/LFINF/CDL+ERL/H:1-3/COM": "CR/LFINF/CDL+ERM/H:2/COM"}
+    )
+    assert exact.taxonomy_weight(
+        OccupancyClass.COMMERCIAL, "CR/LFINF/CDL+ERM/H:2/COM"
+    ) == pytest.approx(1.0)
+    assert (
+        exact.taxonomy_weight(OccupancyClass.COMMERCIAL, "CR/LFINF/CDM+ERM/H:2/COM")
+        is None
+    )
+
+
+def test_a_prior_with_no_taxonomy_detail_cannot_take_a_mapping():
+    from cass_converter.enrichment import apply_vulnerability_mapping
+
+    bare = StockPrior(
+        country_code="ID", shares={}, source_name="x.csv", checksum="0" * 64
+    )
+    with pytest.raises(EnrichmentError, match="without per-taxonomy detail"):
+        apply_vulnerability_mapping(bare, {"a": "b"})
