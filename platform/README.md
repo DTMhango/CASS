@@ -151,17 +151,47 @@ plausible. Converting every vulnerability function to one common intensity
 measure is rejected even when chosen explicitly, because section 6 requires its
 own scientific derivation and approval first.
 
+**The M2 engine slice works against a real Oasis.** An analysis run publishes
+its frozen OED to an Oasis portfolio, maps it through the CASS keys service,
+clears the section 8 reconciliation gate, generates the kernel files, runs the
+losses and collects the ORD package as a checksummed artifact — driven from the
+CASS API, with no one opening the native Oasis interface. The official PiWind
+portfolio does this end to end in the `integration` suite.
+
+**Value that cannot be mapped stops the run rather than disappearing.** Keys
+reconciliation distinguishes two things. Successful, not-at-risk and failed TIV
+that do not sum to the published source means the lookup lost value, which is a
+defect and fails. Value that adds up but the model could not map is a fact
+about the portfolio, and the run holds in `blocked` until someone records a
+run-exception approval. A blocked run is not a failed one: it keeps its
+progress, has its own `gate_summary`, and resumes from the gate rather than
+republishing its portfolio.
+
+### Running an analysis needs model assets
+
+A model version cannot map anything until its grid cells and vulnerability
+mapping are attached — `apps.modelregistry.assets` registers both as immutable
+model-asset artifacts and is the only place the control plane parses them. Both
+are plain CSV, because a grid is a governed artifact a reviewer has to be able
+to read and diff without a tool:
+
+```
+AreaPerilID,MinLatitude,MaxLatitude,MinLongitude,MaxLongitude,CountryCode,Offshore,Vs30
+VulnerabilityID,CoverageTypeID,RequiredIMT,OccupancyCodes,ConstructionCodes,Label
+```
+
+Multi-valued taxonomy columns separate codes with `|`. A run against a model
+version with no cells fails with that as the reason rather than proceeding on
+an empty grid and mapping nothing.
+
 ## What is not built
 
 Ordered as the roadmap orders it.
 
-- **Phase 2, engine vertical slice.** The Oasis adapter, keys generation
-  through the platform, `generate-oasis-files`, and loss submission. The
-  analysis builder shows its preconditions and states that submission awaits
-  this.
 - **Phase 3, hazard.** OpenQuake job submission, the Indonesia and Nepal
-  adaptive grids, and site-condition treatment. The grid model and its
-  versioning rules exist; the geometry does not.
+  adaptive grids, and site-condition treatment. The grid model, its versioning
+  rules and the loader that reads its cells exist; the published geometry does
+  not.
 - **Phase 4, converter.** Chunked HDF5 reading and vulnerability
   discretisation. The framework around them — policy gating, deterministic
   identifiers, intensity binning, streaming footprint accumulation, frequency

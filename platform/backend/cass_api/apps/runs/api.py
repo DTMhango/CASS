@@ -44,6 +44,7 @@ class RunSerializer(serializers.ModelSerializer):
             "progress", "pipeline", "execution_profile", "correlation_id",
             "queued_at", "started_at", "finished_at", "duration_seconds",
             "peak_memory_mb", "failure_stage", "failure_summary", "failure_detail",
+            "gate_summary", "gate_detail",
             "settings_hash", "retry_of", "may_retry", "may_publish_results",
             "is_active", "created_at",
         ]

@@ -6235,6 +6235,12 @@ components:
         failure_detail:
           type: string
           readOnly: true
+        gate_summary:
+          type: string
+          readOnly: true
+        gate_detail:
+          type: string
+          readOnly: true
         settings_hash:
           type: string
           readOnly: true
@@ -6265,6 +6271,8 @@ components:
       - failure_stage
       - failure_summary
       - finished_at
+      - gate_detail
+      - gate_summary
       - id
       - is_active
       - kind

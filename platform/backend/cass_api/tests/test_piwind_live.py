@@ -30,12 +30,17 @@ the engine boundary can be exercised on real data.
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.artifacts.models import ArtifactLink
 from apps.exposure.models import ExposureVersion
+from apps.modelregistry.assets import (
+    attach_grid_cells,
+    attach_vulnerability_mapping,
+)
 from apps.modelregistry.models import AreaPerilGrid, ModelVersion, VulnerabilitySet
 from apps.runs.models import AnalysisRun, Run, RunKind
 from apps.runs.services import execute
@@ -100,6 +105,19 @@ def piwind_exposure(api, project, piwind_root) -> ExposureVersion:
     return ExposureVersion.objects.get(id=exposure_id)
 
 
+#: A cell covering the PiWind sites near Melton Mowbray. CASS keys needs a grid
+#: to run at all, even where -- as here -- nothing will map to it.
+PIWIND_GRID_CELLS = (
+    b"AreaPerilID,MinLatitude,MaxLatitude,MinLongitude,MaxLongitude,CountryCode,Offshore\n"
+    b"1,52.0,53.0,-1.5,-0.5,GB,false\n"
+)
+
+PIWIND_VULNERABILITY = (
+    b"VulnerabilityID,CoverageTypeID,RequiredIMT,OccupancyCodes,ConstructionCodes,Label\n"
+    b"1,1,SA(0.3),,,Generic building\n"
+)
+
+
 @pytest.fixture()
 def piwind_model_version(db, modeller, settings) -> ModelVersion:
     settings.CASS_OASIS_MODEL_SUPPLIER_ID = "OasisLMF"
@@ -115,6 +133,8 @@ def piwind_model_version(db, modeller, settings) -> ModelVersion:
         cell_count=0,
         created_by=modeller,
     )
+    attach_grid_cells(grid, PIWIND_GRID_CELLS, actor=modeller)
+
     vulnerability = VulnerabilitySet.objects.create(
         country_code="GB",
         version="piwind-1",
@@ -122,6 +142,8 @@ def piwind_model_version(db, modeller, settings) -> ModelVersion:
         function_count=1,
         created_by=modeller,
     )
+    attach_vulnerability_mapping(vulnerability, PIWIND_VULNERABILITY, actor=modeller)
+
     return ModelVersion.objects.create(
         country_code="GB",
         version="piwind-1",
@@ -207,3 +229,57 @@ def test_the_wind_portfolio_is_reported_as_unmodelled_rather_than_zero(piwind_ex
     codes = {finding["code"] for finding in report["validation"]["findings"]}
     assert "no_modelled_peril" in codes
     assert report["publishable"] is True
+
+
+@live
+def test_cass_keys_calls_a_wind_portfolio_not_at_risk_rather_than_failing_it(
+    piwind_exposure, piwind_model_version, analyst, project, engine
+):
+    """The section 8 distinction, on real data.
+
+    CASS models earthquake. Every PiWind location is covered for windstorm
+    only, so none of it maps -- but none of it *failed* either: it is
+    deliberately out of scope, which is a different thing and is reported
+    separately. Nothing is lost, the accounting balances, and the gate opens
+    without needing an exception approval.
+    """
+    run = Run.objects.create(
+        kind=RunKind.ANALYSIS,
+        project=project,
+        label="PiWind keys cohort",
+        created_by=analyst,
+    )
+    analysis_run = AnalysisRun.objects.create(
+        run=run,
+        exposure_version=piwind_exposure,
+        model_version=piwind_model_version,
+        perspectives=["ground_up"],
+        created_by=analyst,
+    )
+
+    execute(
+        analysis_run,
+        adapter=engine,
+        actor=analyst,
+        poll_interval=POLL_INTERVAL,
+        timeout=POLL_TIMEOUT,
+    )
+    analysis_run.refresh_from_db()
+
+    summary = analysis_run.keys_summary
+    assert summary["source"] == "cass_keys"
+    assert Decimal(summary["failed_tiv"]) == 0
+    assert Decimal(summary["mapped_tiv"]) == 0
+    assert Decimal(summary["not_at_risk_tiv"]) == Decimal(summary["source_tiv"])
+    assert Decimal(summary["source_tiv"]) > 0
+    assert analysis_run.keys_reconciled is True
+    assert analysis_run.may_proceed_past_keys is True
+
+    # The two lookups are recorded as disagreeing, which is the honest answer:
+    # a CASS earthquake grid cannot map a windstorm portfolio, and Oasis's own
+    # wind keys server can.
+    comparison = Run.objects.get(id=run.id).manifest["oasis_keys"]["cass_keys_comparison"]
+    assert comparison["compared"] is True
+    assert comparison["cass_mapped_locations"] == 0
+    assert comparison["oasis_mapped_locations"] == 10
+    assert comparison["agree"] is False

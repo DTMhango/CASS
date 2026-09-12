@@ -6,19 +6,27 @@ errors, reconciliation and lineage visible -- and without anyone opening the
 native Oasis interface. This module is the orchestration half of that. The
 protocol half is the adapter; nothing here speaks HTTP.
 
-Five of the eleven stages in the analysis pipeline cross the engine boundary,
-and those are the five this service performs:
+Seven of the eleven stages in the analysis pipeline are performed here:
 
 ``publish_oed``
     Create the Oasis portfolio and upload the frozen OED artifacts.
+
+``keys``
+    Map the published exposure to the model through the CASS keys service.
+    Section 5 gives CASS keys this job; OasisLMF builds the kernel files from
+    what it produces.
+
+``reconcile_keys``
+    The section 8 gate. Value that does not add up fails the run; value that
+    adds up but could not be mapped holds it for an approval.
 
 ``generate_inputs``
     Create the analysis, post its settings, and let the pinned OasisLMF build
     the kernel and financial files.
 
 ``validate_inputs``
-    Read back what Oasis's own lookup did with the exposure and reconcile it
-    against the published record count.
+    Read back what Oasis's own lookup did and check every published location is
+    accounted for, comparing it with the CASS keys result.
 
 ``losses``
     Run the requested perspectives.
@@ -27,17 +35,19 @@ and those are the five this service performs:
     Pull the ORD outputs back into the artifact store and complete the run
     manifest.
 
-The other six belong to workstreams that are not built yet: ``validate_exposure``
-and ``enrich`` to the exposure services, ``keys`` and ``reconcile_keys`` to the
-CASS keys service, and ``smoke`` and ``review`` to the operational gates. They
-are recorded in the manifest as not performed rather than skipped silently,
-because a manifest that omits them reads as though they passed.
+The remaining four belong to workstreams that are not built yet:
+``validate_exposure`` and ``enrich`` to the exposure services, and ``smoke``
+and ``review`` to the operational gates. They are recorded in the manifest as
+not performed rather than skipped silently, because a manifest that omits them
+reads as though they passed.
 
-The rule that shapes the failure paths: a run that stops must say why in terms
-an analyst can act on, and must never leave a published partial result. Every
+Two rules shape everything below. A run that stops must say why in terms an
+analyst can act on, and must never leave a published partial result: every
 engine failure is caught, recorded against the stage that raised it with the
 engine's own traceback in the detail, and the run is failed rather than left
-holding a queue slot.
+holding a queue slot. And a run held at a gate is not a run that failed --
+blocking has its own state, its own fields and its own resume path, so a
+waiting analysis is never reported as broken.
 """
 
 from __future__ import annotations
@@ -45,6 +55,9 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Mapping
+from decimal import Decimal
+from typing import Any
 
 from django.db import transaction
 
@@ -53,10 +66,13 @@ from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from apps.common.engines import oasis_adapter, oasis_model_triple
 from apps.common.storage import bucket, get_store
+from apps.exposure import services as exposure_services
+from apps.modelregistry.assets import ModelAssetError, load_grid, load_vulnerability
 from cass_adapters.base import AdapterError, EngineState
 from cass_adapters.oasis import OasisPhase, PortfolioFileKind
 from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_core.runs import RunState
+from cass_keys.lookup import lookup as keys_lookup
 from cass_oed.perspectives import Perspective
 
 from .models import AnalysisRun
@@ -74,6 +90,8 @@ OASIS_FILE_BY_ROLE: dict[str, PortfolioFileKind] = {
 #: Stages this service performs, in pipeline order.
 ENGINE_STAGES = (
     "publish_oed",
+    "keys",
+    "reconcile_keys",
     "generate_inputs",
     "validate_inputs",
     "losses",
@@ -86,8 +104,6 @@ ENGINE_STAGES = (
 UNPERFORMED_STAGES: dict[str, str] = {
     "validate_exposure": "Performed by the exposure workspace before the run is submitted.",
     "enrich": "Assumption sets are applied by the enrichment service; not yet wired to a run.",
-    "keys": "The CASS keys service is not yet part of the analysis pipeline.",
-    "reconcile_keys": "Awaits the CASS keys service; Oasis's own lookup is reconciled at validate_inputs.",
     "smoke": "The reduced-event pre-loss check is not yet implemented.",
     "review": "Operational and scientific result review is a separate governance step.",
 }
@@ -95,6 +111,21 @@ UNPERFORMED_STAGES: dict[str, str] = {
 
 class AnalysisExecutionError(Exception):
     """Raised when a run cannot be executed in its current shape."""
+
+
+class RunBlocked(Exception):
+    """Raised when a governance gate stops a run pending an approval.
+
+    Deliberately not an ``AnalysisExecutionError``. A blocked run has not
+    failed: nothing is wrong with it, a person simply has to decide something
+    before it goes on. Sharing a base class with failure is how the two end up
+    being handled together and a waiting run gets reported as broken.
+    """
+
+    def __init__(self, summary: str, *, detail: str = "") -> None:
+        super().__init__(summary)
+        self.summary = summary
+        self.detail = detail
 
 
 # -- settings ---------------------------------------------------------------
@@ -278,13 +309,161 @@ def _generate_inputs(analysis_run, engine, actor, *, poll_interval, timeout) -> 
     return {"oasis_analysis_id": analysis_id, "oasis_model": model.as_dict()}
 
 
-def _validate_inputs(analysis_run, engine, actor) -> dict:
-    """Reconcile what Oasis's own lookup did against the published exposure.
+def _keys(analysis_run, actor) -> dict:
+    """Map the published exposure to the model through the CASS keys service.
 
-    Two lookups disagreeing is a defect rather than a business exception, so
-    this fails the run rather than blocking it for approval. The approval gate
-    that section 8 requires belongs to ``reconcile_keys``, which reconciles the
-    CASS keys result before anything is submitted.
+    Section 5 gives CASS keys the mapping: CASS owns the business records and
+    the immutable OED, CASS keys maps exposure to the model, and OasisLMF
+    builds the kernel files from that. Running our own lookup before submission
+    is also what makes ``validate_inputs`` meaningful later -- two independent
+    lookups over the same exposure ought to agree, and a disagreement is worth
+    knowing about.
+    """
+    run = analysis_run.run
+    model_version = analysis_run.model_version
+
+    grid = load_grid(model_version.grid)
+    vulnerability = load_vulnerability(model_version.vulnerability_set)
+
+    files = exposure_services.load_files(analysis_run.exposure_version)
+    # The raw text, not the coerced values: section 5 keeps reported exposure
+    # immutable, and the lookup does its own decimal conversion.
+    locations = [dict(row.raw) for row in files.location.rows]
+
+    result = keys_lookup(locations, grid=grid, vulnerability=vulnerability)
+    report = result.report.as_dict()
+
+    keys_csv = _keys_csv(result.records)
+    errors_csv = _keys_csv(result.failures)
+    stored = {
+        "keys": _store_keys_file(run, "cass_keys", keys_csv, actor),
+        "errors": _store_keys_file(run, "cass_keys_errors", errors_csv, actor),
+    }
+
+    summary = {
+        "source": "cass_keys",
+        "grid": result.grid_reference,
+        "vulnerability": result.vulnerability_reference,
+        "locations": len(locations),
+        # Distinct locations, not records: a location produces one record per
+        # coverage and sub-peril, so a record count answers a different
+        # question and is the wrong thing to compare Oasis against.
+        "mapped_locations": len({item.location_id for item in result.successes}),
+        **report,
+    }
+    analysis_run.keys_summary = summary
+    analysis_run.keys_reconciled = result.report.reconciled
+    analysis_run.save(update_fields=["keys_summary", "keys_reconciled", "updated_at"])
+
+    run.advance(
+        "keys",
+        actor=actor,
+        message=(
+            f"CASS keys mapped {report['mapped_tiv']} of {report['source_tiv']} TIV "
+            f"against {result.grid_reference}."
+        ),
+        metrics={
+            "grid": result.grid_reference,
+            "vulnerability": result.vulnerability_reference,
+            "record_count": len(result.records),
+            "failure_count": len(result.failures),
+        },
+    )
+    return {**summary, "artifacts": stored}
+
+
+def _reconcile_keys(analysis_run, actor) -> dict:
+    """The section 8 gate: no run proceeds on exposure nobody has accounted for.
+
+    Two different things can be wrong here and they are not the same, so they
+    do not get the same answer.
+
+    Value that does not add up -- successful plus not-at-risk plus failed TIV
+    not equal to the published source -- means the lookup lost some. Every
+    combination is supposed to produce exactly one record, so that is a defect
+    in CASS rather than a fact about the portfolio, and the run fails.
+
+    Value that adds up but could not be mapped is a fact about the portfolio,
+    and section 8 requires a person to decide whether the analysis is still
+    worth running. The run blocks for an approval rather than failing, which is
+    what ``RunState.BLOCKED`` exists for, and proceeds once a ``run_exception``
+    approval is attached and granted.
+    """
+    run = analysis_run.run
+    summary = analysis_run.keys_summary or {}
+    source_tiv = Decimal(summary.get("source_tiv", "0"))
+    failed_tiv = analysis_run.unmapped_tiv
+    not_at_risk_tiv = Decimal(summary.get("not_at_risk_tiv", "0"))
+
+    if not analysis_run.keys_reconciled:
+        raise AnalysisExecutionError(
+            "Keys TIV does not reconcile to the published exposure: "
+            f"{summary.get('accounted_tiv')} accounted against {summary.get('source_tiv')} "
+            f"published, a difference of {summary.get('difference')}. Every location, "
+            "coverage and sub-peril is supposed to produce exactly one response, so "
+            "value that has gone missing is a defect rather than a portfolio fact."
+        )
+
+    approval = analysis_run.exception_approval
+    approved = approval is not None and approval.is_cleared
+
+    # One definition of the gate, shared with the API through the model, so a
+    # screen cannot show a run as clear while the service holds it.
+    if not analysis_run.may_proceed_past_keys:
+        raise RunBlocked(
+            f"{failed_tiv} of {source_tiv} TIV could not be mapped to the model.",
+            detail=_unmapped_detail(summary),
+        )
+
+    run.advance(
+        "reconcile_keys",
+        actor=actor,
+        message=(
+            f"Keys reconcile: {summary.get('mapped_tiv')} mapped, "
+            f"{not_at_risk_tiv} not at risk, {failed_tiv} failed."
+            + (" Proceeding under an approved run exception." if approved else "")
+        ),
+        metrics={
+            "reconciled": True,
+            "failed_tiv": str(failed_tiv),
+            "approved_exception": str(approval.id) if approved else "",
+        },
+    )
+    return {
+        "reconciled": True,
+        "failed_tiv": str(failed_tiv),
+        "not_at_risk_tiv": str(not_at_risk_tiv),
+        "approved_exception": str(approval.id) if approved else None,
+    }
+
+
+def _unmapped_detail(summary: Mapping[str, Any]) -> str:
+    """Why the exposure could not be mapped, in the analyst's terms."""
+    reasons = summary.get("tiv_by_reason") or {}
+    if not reasons:
+        return ""
+    lines = [f"  {value} TIV: {reason}" for reason, value in sorted(reasons.items())]
+    return "Unmapped value by reason:\n" + "\n".join(lines)
+
+
+def _validate_inputs(analysis_run, engine, actor) -> dict:
+    """Check what Oasis's own lookup did against the published exposure.
+
+    Oasis runs its own lookup while generating inputs, so by this point two
+    independent mappings of the same exposure exist: the CASS keys result from
+    the ``keys`` stage, and this one. Both are checked here.
+
+    Every published location must be accounted for -- mapped or reported as
+    failed. One that is neither has been lost between the OED and the model,
+    which is a defect rather than a business exception, so it fails rather than
+    blocking. The approval gate belongs to ``reconcile_keys``, which runs
+    before anything is submitted.
+
+    Where the two lookups disagree about which locations map, the difference is
+    recorded rather than raised. They are different implementations over
+    different model data -- CASS keys against the CASS grid, Oasis against the
+    model package's own keys server -- and a disagreement is a finding for the
+    model owner, not necessarily a reason to stop.
     """
     run = analysis_run.run
     analysis_id = int(analysis_run.oasis_analysis_id)
@@ -308,12 +487,9 @@ def _validate_inputs(analysis_run, engine, actor) -> dict:
         "key_rows": _csv_rows(report["success"]),
         "error_rows": _csv_rows(report["errors"]),
         "validation_rows": _csv_rows(report["validation"]),
+        "cass_keys_comparison": _cass_keys_comparison(analysis_run, mapped),
     }
     reconciled = located == 0 or len(accounted) == located
-
-    analysis_run.keys_summary = summary
-    analysis_run.keys_reconciled = reconciled
-    analysis_run.save(update_fields=["keys_summary", "keys_reconciled", "updated_at"])
 
     if not reconciled:
         raise AnalysisExecutionError(
@@ -333,6 +509,28 @@ def _validate_inputs(analysis_run, engine, actor) -> dict:
         metrics=summary,
     )
     return summary
+
+
+def _cass_keys_comparison(analysis_run, oasis_mapped: set[str]) -> dict:
+    """How Oasis's lookup compares with the CASS keys result.
+
+    Recorded rather than enforced. The two are different implementations over
+    different model data -- CASS keys against the CASS grid, Oasis against the
+    model package's own keys server -- so a disagreement is a finding for the
+    model owner rather than automatically a reason to stop. It is stated
+    explicitly when there was nothing to compare, because a silently absent
+    comparison reads like one that passed.
+    """
+    summary = analysis_run.keys_summary or {}
+    if summary.get("source") != "cass_keys":
+        return {"compared": False, "reason": "The CASS keys stage did not run."}
+    cass_mapped = int(summary.get("mapped_locations", 0))
+    return {
+        "compared": True,
+        "cass_mapped_locations": cass_mapped,
+        "oasis_mapped_locations": len(oasis_mapped),
+        "agree": cass_mapped == len(oasis_mapped),
+    }
 
 
 def _losses(analysis_run, engine, actor, *, poll_interval, timeout) -> dict:
@@ -433,10 +631,22 @@ def execute(
     run = analysis_run.run
     engine = adapter if adapter is not None else oasis_adapter()
 
+    #: Where a resumed run picks up. A run blocked at a gate has already done
+    #: everything before it, and redoing that would republish the OED and leave
+    #: an orphan portfolio on the engine -- and ``advance`` would refuse the
+    #: backwards move anyway.
+    resume_at = run.stage if run.run_state is RunState.BLOCKED else ""
+
     if run.run_state is RunState.DRAFT:
         run.transition(RunState.QUEUED, actor=actor)
     if run.run_state is RunState.BLOCKED:
-        run.transition(RunState.QUEUED, actor=actor)
+        run.transition(RunState.QUEUED, actor=actor, save=False)
+        # The gate no longer applies. Its history stays in the stage events and
+        # the audit trail; leaving it on the run would show a resumed analysis
+        # as though it were still waiting.
+        run.gate_summary = ""
+        run.gate_detail = ""
+        run.save()
     if run.run_state is not RunState.QUEUED:
         raise AnalysisExecutionError(
             f"A run in state {run.state} cannot be executed. "
@@ -453,6 +663,8 @@ def execute(
     #: that was the last stage to finish, sends the analyst to the wrong place.
     steps = (
         ("publish_oed", "portfolio", lambda: _publish_oed(analysis_run, engine, actor)),
+        ("keys", "keys", lambda: _keys(analysis_run, actor)),
+        ("reconcile_keys", "reconciliation", lambda: _reconcile_keys(analysis_run, actor)),
         (
             "generate_inputs",
             "inputs",
@@ -460,7 +672,11 @@ def execute(
                 analysis_run, engine, actor, poll_interval=poll_interval, timeout=timeout
             ),
         ),
-        ("validate_inputs", "keys", lambda: _validate_inputs(analysis_run, engine, actor)),
+        (
+            "validate_inputs",
+            "oasis_keys",
+            lambda: _validate_inputs(analysis_run, engine, actor),
+        ),
         (
             "losses",
             "losses",
@@ -471,6 +687,9 @@ def execute(
         ("collect", "output", lambda: _collect(analysis_run, engine, actor)),
     )
 
+    pipeline = run.pipeline
+    start = pipeline.index_of(resume_at) if resume_at else -1
+
     stage = ENGINE_STAGES[0]
     try:
         # Before anything is submitted: section 18 refuses an untested engine
@@ -479,6 +698,8 @@ def execute(
         manifest["engine"] = engine_version.as_dict()
 
         for next_stage, key, step in steps:
+            if pipeline.index_of(next_stage) < start:
+                continue
             # Carried out of the loop so the failure handler can name the stage
             # that raised rather than the last one that finished.
             stage = next_stage
@@ -487,7 +708,10 @@ def execute(
         manifest["exposure_version"] = str(analysis_run.exposure_version_id)
         manifest["model_version"] = str(analysis_run.model_version_id)
         manifest["settings_hash"] = run.settings_hash
-    except (AdapterError, AnalysisExecutionError) as exc:
+    except RunBlocked as exc:
+        _block(run, exc, stage=stage, actor=actor)
+        raise
+    except (AdapterError, AnalysisExecutionError, ModelAssetError) as exc:
         _fail(run, exc, stage=stage, actor=actor)
         raise
 
@@ -594,6 +818,41 @@ def _require_success(job, engine, analysis_id, phase, what: str) -> None:
     )
 
 
+def _block(run, exc: RunBlocked, *, stage: str, actor) -> None:
+    """Hold the run at a gate and record what a person has to decide.
+
+    A blocked run keeps its progress fraction and its evidence. It has not
+    failed and it is not retried: it resumes from this stage once the approval
+    exists, which is why nothing before this point is undone.
+    """
+    progress = run.progress
+    with transaction.atomic():
+        run.transition(
+            RunState.BLOCKED,
+            actor=actor,
+            stage=stage,
+            # Carried into the stage event as the message; the gate fields
+            # below are what the run record itself keeps.
+            failure_summary=exc.summary,
+            save=False,
+        )
+        run.progress = progress
+        run.gate_summary = exc.summary[:500]
+        run.gate_detail = exc.detail
+        run.save()
+
+    audit.record(
+        action=AuditAction.UPDATE,
+        subject_type="analysis_run",
+        subject_id=run.id,
+        actor=actor,
+        project=run.project,
+        subject_label=str(run),
+        after={"state": run.state, "stage": stage},
+        detail=exc.summary,
+    )
+
+
 def _fail(run, exc: Exception, *, stage: str, actor) -> None:
     """Record a failure against the stage that raised it.
 
@@ -616,6 +875,71 @@ def _fail(run, exc: Exception, *, stage: str, actor) -> None:
         )
         run.progress = progress
         run.save()
+
+
+def _keys_csv(records) -> bytes:
+    """The keys file, in the shape section 8 asks for."""
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=[
+            "LocID",
+            "PerilID",
+            "CoverageTypeID",
+            "AreaPerilID",
+            "VulnerabilityID",
+            "Status",
+            "Message",
+        ],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for record in records:
+        writer.writerow(record.as_row())
+    return buffer.getvalue().encode("utf-8")
+
+
+def _store_keys_file(run, role: str, payload: bytes, actor) -> str:
+    """Register one keys output against the run and return its URI.
+
+    Kept as an artifact rather than a column because section 8 requires the
+    keys and error files themselves to be retrievable, not merely counted: an
+    analyst asking which locations failed needs the rows, not a total.
+    """
+    store = get_store()
+    ref = store.put_bytes(
+        bucket("portfolio"),
+        f"analysis/{run.id}/{role}.csv",
+        payload,
+        content_type="text/csv",
+        retention=RetentionClass.DIAGNOSTIC,
+        access=AccessPolicy.PROJECT,
+    )
+    artifact, _ = Artifact.objects.update_or_create(
+        uri=ref.uri,
+        defaults={
+            "checksum": ref.checksum,
+            "size_bytes": ref.size_bytes,
+            "content_type": ref.content_type,
+            "retention": str(ref.retention),
+            "access": str(ref.access),
+            "state": ArtifactState.REGISTERED,
+            "project": run.project,
+            "role": role,
+            "original_filename": f"{role}.csv",
+            "created_by": actor,
+            "updated_by": actor,
+        },
+    )
+    ArtifactLink.objects.update_or_create(
+        artifact=artifact,
+        subject_type="analysis_run",
+        subject_id=run.id,
+        role=role,
+        direction="output",
+        defaults={"created_by": actor},
+    )
+    return ref.uri
 
 
 def _csv_rows(text: str) -> int:

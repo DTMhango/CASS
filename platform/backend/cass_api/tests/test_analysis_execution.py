@@ -15,17 +15,27 @@ untested version or an undeliverable cancellation on demand.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.artifacts.models import ArtifactLink
+from apps.audit.models import Approval
 from apps.exposure.models import ExposureVersion
+from apps.modelregistry.assets import (
+    ModelAssetError,
+    attach_grid_cells,
+    attach_vulnerability_mapping,
+)
 from apps.modelregistry.models import AreaPerilGrid, ModelVersion, VulnerabilitySet
 from apps.runs.models import AnalysisRun, Run, RunKind
 from apps.runs.services import (
     DEFAULT_ORD_OUTPUT,
+    ENGINE_STAGES,
     UNPERFORMED_STAGES,
     AnalysisExecutionError,
+    RunBlocked,
     build_analysis_settings,
     cancel,
     execute,
@@ -161,6 +171,12 @@ def run_it(analysis_run, session, **kwargs):
     )
 
 
+def run_oasis(analysis_run, session, actor):
+    """Run to completion and return the manifest."""
+    run_it(analysis_run, session, actor=actor)
+    return Run.objects.get(id=analysis_run.run_id).manifest
+
+
 # -- fixtures ---------------------------------------------------------------
 
 @pytest.fixture()
@@ -188,6 +204,30 @@ def published_exposure(api, project, earthquake_location_csv) -> ExposureVersion
     return ExposureVersion.objects.get(id=exposure_id)
 
 
+#: A grid covering the three locations of ``earthquake_location_csv``:
+#: Jakarta and Bandung in one cell, Surabaya in another.
+GRID_CELLS = (
+    b"AreaPerilID,MinLatitude,MaxLatitude,MinLongitude,MaxLongitude,CountryCode,Offshore\n"
+    b"1,-7.0,-6.0,106.0,108.0,ID,false\n"
+    b"2,-8.0,-7.0,112.0,113.0,ID,false\n"
+)
+
+#: A grid that covers Jakarta and Bandung but not Surabaya, so one location
+#: falls outside the domain and its TIV cannot be mapped.
+PARTIAL_GRID_CELLS = (
+    b"AreaPerilID,MinLatitude,MaxLatitude,MinLongitude,MaxLongitude,CountryCode,Offshore\n"
+    b"1,-7.0,-6.0,106.0,108.0,ID,false\n"
+)
+
+#: Building and contents functions with no taxonomy restriction, so the test
+#: portfolio maps without needing occupancy codes to line up.
+VULNERABILITY_MAPPING = (
+    b"VulnerabilityID,CoverageTypeID,RequiredIMT,OccupancyCodes,ConstructionCodes,Label\n"
+    b"1,1,SA(0.3),,,Generic building\n"
+    b"3,3,SA(0.3),,,Generic contents\n"
+)
+
+
 @pytest.fixture()
 def model_version(db, modeller) -> ModelVersion:
     grid = AreaPerilGrid.objects.create(
@@ -199,13 +239,17 @@ def model_version(db, modeller) -> ModelVersion:
         cell_count=0,
         created_by=modeller,
     )
+    attach_grid_cells(grid, GRID_CELLS, actor=modeller)
+
     vulnerability = VulnerabilitySet.objects.create(
         country_code="ID",
         version="2026.0.0",
         source="GEM",
-        function_count=1,
+        function_count=2,
         created_by=modeller,
     )
+    attach_vulnerability_mapping(vulnerability, VULNERABILITY_MAPPING, actor=modeller)
+
     return ModelVersion.objects.create(
         country_code="ID",
         version="0.1.0-sa",
@@ -259,15 +303,9 @@ def test_every_engine_stage_is_recorded_in_order(analysis_run, analyst):
         for event in analysis_run.run.events.order_by("created_at")
         if event.stage
     ]
-    engine_stages = [s for s in stages if s in
-                     ("publish_oed", "generate_inputs", "validate_inputs", "losses", "collect")]
-    assert engine_stages == sorted(
-        engine_stages,
-        key=["publish_oed", "generate_inputs", "validate_inputs", "losses", "collect"].index,
-    )
-    assert set(engine_stages) == {
-        "publish_oed", "generate_inputs", "validate_inputs", "losses", "collect"
-    }
+    engine_stages = [s for s in stages if s in ENGINE_STAGES]
+    assert engine_stages == sorted(engine_stages, key=list(ENGINE_STAGES).index)
+    assert set(engine_stages) == set(ENGINE_STAGES)
 
 
 def test_the_manifest_traces_the_result_to_its_versions(analysis_run, analyst):
@@ -290,7 +328,10 @@ def test_the_manifest_says_which_stages_were_not_performed(analysis_run, analyst
     manifest = Run.objects.get(id=analysis_run.run_id).manifest
 
     assert manifest["stages_not_performed"] == UNPERFORMED_STAGES
-    assert "reconcile_keys" in manifest["stages_not_performed"]
+    assert "smoke" in manifest["stages_not_performed"]
+    # keys and reconcile_keys are performed now, so they must not be listed.
+    assert "keys" not in manifest["stages_not_performed"]
+    assert "reconcile_keys" not in manifest["stages_not_performed"]
 
 
 def test_the_output_package_is_registered_as_a_linked_artifact(analysis_run, analyst):
@@ -318,13 +359,11 @@ def test_the_oed_is_uploaded_to_the_portfolio_rather_than_a_path(analysis_run, a
     assert b"PortNumber" in stream.read()
 
 
-def test_keys_reconciliation_is_recorded_against_the_published_count(analysis_run, analyst):
+def test_the_oasis_lookup_is_reconciled_against_the_published_count(analysis_run, analyst):
     session = oasis_server(lookup_rows=2, lookup_failures=1)
-    run_it(analysis_run, session, actor=analyst)
+    manifest = run_oasis(analysis_run, session, analyst)
 
-    analysis_run.refresh_from_db()
-    summary = analysis_run.keys_summary
-    assert analysis_run.keys_reconciled is True
+    summary = manifest["oasis_keys"]
     assert summary["mapped_locations"] == 2
     assert summary["failed_locations"] == 1
     assert summary["accounted_locations"] == 3
@@ -340,13 +379,9 @@ def test_many_keys_rows_for_one_location_still_reconcile_to_one_location(
     read as twenty locations, and a perfectly good run was stopped.
     """
     session = oasis_server(lookup_rows=3, lookup_failures=0)
-    run_it(analysis_run, session, actor=analyst)
-
-    analysis_run.refresh_from_db()
-    summary = analysis_run.keys_summary
+    summary = run_oasis(analysis_run, session, analyst)["oasis_keys"]
     assert summary["key_rows"] == 6
     assert summary["mapped_locations"] == 3
-    assert analysis_run.keys_reconciled is True
 
 
 def test_a_keys_file_without_a_location_column_cannot_be_reconciled(
@@ -476,16 +511,27 @@ def test_a_failed_loss_calculation_fails_the_run(analysis_run, analyst):
     assert "MemoryError" in run.failure_detail
 
 
-def test_a_lookup_that_loses_locations_stops_the_run(analysis_run, analyst):
-    """A location neither mapped nor reported failed has gone missing."""
+def test_an_oasis_lookup_that_loses_locations_stops_the_run(analysis_run, analyst):
+    """A location neither mapped nor reported failed has gone missing.
+
+    This is the Oasis-side check, so it fails rather than blocking: the CASS
+    keys gate has already passed by this point, and two lookups losing track of
+    a location between them is a defect, not a portfolio fact to approve.
+    """
     session = oasis_server(lookup_rows=1, lookup_failures=0)
     with pytest.raises(AnalysisExecutionError, match="1 of 3 published locations"):
         run_it(analysis_run, session, actor=analyst)
 
-    analysis_run.refresh_from_db()
-    assert analysis_run.keys_reconciled is False
-    assert Run.objects.get(id=analysis_run.run_id).state == RunState.FAILED
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.FAILED
+    assert run.failure_stage == "validate_inputs"
     assert "v2/analyses/7/run/" not in session.paths("POST")
+
+    # The CASS keys result stands: it reconciled, and this failure is about
+    # what Oasis did afterwards.
+    analysis_run.refresh_from_db()
+    assert analysis_run.keys_reconciled is True
+    assert analysis_run.keys_summary["source"] == "cass_keys"
 
 
 def test_a_completed_run_that_returns_no_output_is_a_failure(analysis_run, analyst):
@@ -654,7 +700,14 @@ def test_a_submitted_run_records_its_output_artifact(api, analysis_run, oasis_is
 
     artifacts = api.get(f"{API}/runs/{analysis_run.run_id}/artifacts/")
     assert artifacts.status_code == 200
-    assert [item["role"] for item in artifacts.data] == ["oasis_output"]
+    # The keys files are outputs too: section 8 wants the rows retrievable, not
+    # just a count of how many locations failed.
+    assert {item["role"] for item in artifacts.data} == {
+        "cass_keys",
+        "cass_keys_errors",
+        "oasis_output",
+    }
+    assert all(item["checksum"] for item in artifacts.data)
 
 
 def test_a_submitted_run_explains_itself_through_the_run_monitor(
@@ -733,3 +786,212 @@ def test_cancelling_through_the_api_stops_the_engine_and_completes_the_run(
     assert response.status_code == 200
     assert "v2/analyses/7/cancel_generate_inputs/" in session.paths("POST")
     assert Run.objects.get(id=run.id).state == RunState.CANCELLED
+
+
+# -- the CASS keys stage and the section 8 gate ------------------------------
+
+@pytest.fixture()
+def partial_grid(model_version, modeller):
+    """Replace the grid with one that does not reach Surabaya."""
+    attach_grid_cells(model_version.grid, PARTIAL_GRID_CELLS, actor=modeller)
+    return model_version
+
+
+def approve_exception(analysis_run, requester, approver):
+    """Attach a cleared run-exception approval to the run."""
+    approval = Approval.objects.create(
+        gate=Approval.Gate.RUN_EXCEPTION,
+        decision=Approval.Decision.APPROVED,
+        subject_type="analysis_run",
+        subject_id=analysis_run.id,
+        requested_by=requester,
+        decided_by=approver,
+        rationale="Surabaya is outside the pilot grid; proceed on the remainder.",
+    )
+    analysis_run.exception_approval = approval
+    analysis_run.save(update_fields=["exception_approval", "updated_at"])
+    return approval
+
+
+def test_cass_keys_maps_the_published_exposure_before_anything_is_submitted(
+    analysis_run, analyst
+):
+    """Section 5 gives CASS keys the mapping, not the engine."""
+    session = oasis_server()
+    run_it(analysis_run, session, actor=analyst)
+
+    analysis_run.refresh_from_db()
+    summary = analysis_run.keys_summary
+    assert summary["source"] == "cass_keys"
+    assert summary["grid"] == "id-grid-0.1.0"
+    assert summary["locations"] == 3
+    assert summary["mapped_locations"] == 3
+    assert analysis_run.keys_reconciled is True
+
+
+def test_the_keys_and_error_files_are_retrievable_not_merely_counted(
+    analysis_run, analyst
+):
+    """An analyst asking which locations failed needs the rows, not a total."""
+    session = oasis_server()
+    run_it(analysis_run, session, actor=analyst)
+
+    roles = set(
+        ArtifactLink.objects.filter(
+            subject_type="analysis_run", subject_id=analysis_run.run_id
+        ).values_list("role", flat=True)
+    )
+    assert {"cass_keys", "cass_keys_errors"} <= roles
+
+
+def test_every_unit_of_source_value_lands_in_exactly_one_bucket(analysis_run, analyst):
+    """Section 8: successful, not-at-risk and failed TIV reconcile to source."""
+    session = oasis_server()
+    run_it(analysis_run, session, actor=analyst)
+
+    summary = AnalysisRun.objects.get(id=analysis_run.id).keys_summary
+    assert Decimal(summary["source_tiv"]) == Decimal("9900000")
+    assert Decimal(summary["accounted_tiv"]) == Decimal(summary["source_tiv"])
+    assert Decimal(summary["difference"]) == 0
+
+
+def test_unmapped_value_holds_the_run_at_the_gate_rather_than_failing_it(
+    analysis_run, analyst, partial_grid
+):
+    """A location outside the grid is a portfolio fact, not a defect."""
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.BLOCKED
+    assert run.stage == "reconcile_keys"
+    assert "could not be mapped" in run.gate_summary
+    assert "outside the area-peril grid domain" in run.gate_detail
+    assert run.failure_summary == ""
+
+
+def test_a_blocked_run_has_not_failed_and_is_not_retried(
+    analysis_run, analyst, partial_grid
+):
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.may_retry is False
+    assert run.may_publish_results is False
+    assert 0 < run.progress < 1
+
+
+def test_a_blocked_run_never_reaches_the_engine_loss_stage(
+    analysis_run, analyst, partial_grid
+):
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+    assert "v2/analyses/7/generate_inputs/" not in session.paths("POST")
+    assert "v2/analyses/7/run/" not in session.paths("POST")
+
+
+def test_an_approved_exception_releases_the_gate(
+    analysis_run, analyst, reviewer, partial_grid
+):
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+
+    approve_exception(analysis_run, analyst, reviewer)
+    run_it(analysis_run, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.SUCCEEDED
+    assert run.gate_summary == ""
+
+
+def test_resuming_after_approval_does_not_republish_the_portfolio(
+    analysis_run, analyst, reviewer, partial_grid
+):
+    """Redoing publish_oed would leave an orphan portfolio on the engine."""
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+    before = session.paths("POST").count("v2/portfolios/")
+
+    approve_exception(analysis_run, analyst, reviewer)
+    run_it(analysis_run, session, actor=analyst)
+
+    assert before == 1
+    assert session.paths("POST").count("v2/portfolios/") == 1
+
+
+def test_the_manifest_records_the_approval_the_run_proceeded_under(
+    analysis_run, analyst, reviewer, partial_grid
+):
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+    approval = approve_exception(analysis_run, analyst, reviewer)
+    run_it(analysis_run, session, actor=analyst)
+
+    manifest = Run.objects.get(id=analysis_run.run_id).manifest
+    assert manifest["reconciliation"]["approved_exception"] == str(approval.id)
+
+
+def test_a_rejected_exception_does_not_release_the_gate(
+    analysis_run, analyst, reviewer, partial_grid
+):
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+
+    approval = approve_exception(analysis_run, analyst, reviewer)
+    approval.decision = Approval.Decision.REJECTED
+    approval.save(update_fields=["decision"])
+
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.BLOCKED
+
+
+def test_the_gate_is_one_definition_shared_with_the_api(
+    api, analysis_run, analyst, partial_grid
+):
+    """A screen must not show a run as clear while the service holds it."""
+    session = oasis_server()
+    with pytest.raises(RunBlocked):
+        run_it(analysis_run, session, actor=analyst)
+
+    shown = api.get(f"{API}/analysis-runs/{analysis_run.id}/").data
+    assert shown["may_proceed_past_keys"] is False
+    assert shown["run_detail"]["state"] == RunState.BLOCKED
+
+
+def test_a_model_version_with_no_grid_cells_cannot_run(
+    analysis_run, analyst, model_version
+):
+    """An empty grid maps nothing, so this must stop rather than proceed."""
+    ArtifactLink.objects.filter(
+        subject_type="area_peril_grid", subject_id=model_version.grid_id
+    ).delete()
+
+    session = oasis_server()
+    with pytest.raises(ModelAssetError, match="area peril grid cells"):
+        run_it(analysis_run, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.FAILED
+    assert run.failure_stage == "keys"
+
+
+def test_a_blocked_run_reports_itself_as_blocked_rather_than_failed_to_the_task(
+    analysis_run, partial_grid, oasis_is
+):
+    from apps.runs.tasks import execute_analysis
+
+    oasis_is(oasis_server())
+    result = execute_analysis(str(analysis_run.id))
+
+    assert result["state"] == RunState.BLOCKED
+    assert result["stage"] == "reconcile_keys"
+    assert "could not be mapped" in result["summary"]

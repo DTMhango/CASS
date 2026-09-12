@@ -23,6 +23,7 @@ import logging
 
 from celery import shared_task
 
+from apps.modelregistry.assets import ModelAssetError
 from cass_adapters.base import AdapterError
 
 from . import services
@@ -37,7 +38,18 @@ def execute_analysis(analysis_run_id: str) -> dict:
     analysis_run = AnalysisRun.objects.select_related("run").get(id=analysis_run_id)
     try:
         services.execute(analysis_run, actor=analysis_run.created_by)
-    except (AdapterError, services.AnalysisExecutionError) as exc:
+    except services.RunBlocked as exc:
+        # Not a failure. The run is waiting for someone to decide something,
+        # and the approval that releases it is a separate piece of work.
+        logger.info("analysis run %s is held at a gate: %s", analysis_run_id, exc)
+        analysis_run.run.refresh_from_db()
+        return {
+            "analysis_run": str(analysis_run_id),
+            "state": analysis_run.run.state,
+            "stage": analysis_run.run.stage,
+            "summary": analysis_run.run.gate_summary,
+        }
+    except (AdapterError, services.AnalysisExecutionError, ModelAssetError) as exc:
         # Already recorded against the run by the service; the monitor is the
         # place a person reads this, not the broker.
         logger.warning("analysis run %s failed: %s", analysis_run_id, exc)

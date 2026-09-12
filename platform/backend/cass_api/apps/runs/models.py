@@ -75,6 +75,13 @@ class Run(BaseModel):
     failure_summary = models.CharField(max_length=500, blank=True)
     failure_detail = models.TextField(blank=True)
 
+    #: Why a run is waiting at a governance gate. Kept apart from the failure
+    #: fields on purpose: a blocked run has not failed, and a monitor that
+    #: reads a gate reason out of ``failure_summary`` tells an analyst their
+    #: run broke when it is simply waiting for someone to decide something.
+    gate_summary = models.CharField(max_length=500, blank=True)
+    gate_detail = models.TextField(blank=True)
+
     retry_of = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="retries"
     )
@@ -376,8 +383,34 @@ class AnalysisRun(BaseModel):
         return f"analysis {self.run_id}"
 
     @property
+    def unmapped_tiv(self):
+        """Value the keys lookup could not map, from the recorded summary."""
+        from decimal import Decimal
+
+        raw = (self.keys_summary or {}).get("failed_tiv") or "0"
+        try:
+            return Decimal(str(raw))
+        except Exception:
+            return Decimal(0)
+
+    @property
     def may_proceed_past_keys(self) -> bool:
-        """Reconciled, or explicitly approved as a permitted exception."""
-        if self.keys_reconciled:
+        """Whether the section 8 keys gate is clear.
+
+        Two conditions, and they are not the same kind of thing.
+
+        The accounting has to balance: successful, not-at-risk and failed TIV
+        summing to the published source. Every location, coverage and sub-peril
+        is supposed to produce exactly one response, so value that has gone
+        missing is a defect in the lookup rather than a fact about the
+        portfolio. Nothing approves that away.
+
+        Beyond that, value the model could not map is a fact about the
+        portfolio, and section 8 requires a person to accept it before the
+        analysis proceeds. That is what the exception approval clears.
+        """
+        if not self.keys_reconciled:
+            return False
+        if not self.unmapped_tiv:
             return True
         return bool(self.exception_approval and self.exception_approval.is_cleared)
