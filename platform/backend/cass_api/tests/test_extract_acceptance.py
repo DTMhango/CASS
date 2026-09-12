@@ -546,9 +546,9 @@ def test_the_promoted_oed_names_no_counterparty(batch, analyst):
 @pytest.fixture()
 def pilot_models(db, modeller):
     """Both prototype country models, registered with their cells and functions."""
-    from apps.modelregistry import pilot
+    from . import fixture_model
 
-    return {model.country_code: model for model in pilot.register_all(actor=modeller)}
+    return {model.country_code: model for model in fixture_model.register_all(actor=modeller)}
 
 
 def _keys_for(version, model):

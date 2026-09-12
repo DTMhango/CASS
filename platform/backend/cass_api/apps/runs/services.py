@@ -890,6 +890,10 @@ def _keys_csv(records) -> bytes:
             "CoverageTypeID",
             "AreaPerilID",
             "VulnerabilityID",
+            # A class spanning intensity measures produces one row per measure,
+            # each carrying its share. Every other row carries 1, so the column
+            # is meaningful without having to know which case a row is.
+            "ChannelWeight",
             "Status",
             "Message",
         ],

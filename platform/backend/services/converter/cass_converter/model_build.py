@@ -72,14 +72,31 @@ BUILD_VERSION = "1.0.0"
 #: every intensity measure GEM uses and cannot be one Oasis function.
 STOREY_BANDS: tuple[str, ...] = ("unstated", "low", "mid", "high")
 
+#: Each band's extent in storeys, inclusive, or ``None`` for the band that
+#: means the schedule said nothing. ``None`` as an upper limit is unbounded.
+#:
+#: The boundaries are the conventional low-, mid- and high-rise split, which is
+#: also where GEM's published height classes cluster. They belong here rather
+#: than in the keys service because they are a property of the class set: the
+#: mapping file carries them alongside each row, so the runtime reads the
+#: bands this build used rather than a rule it has to keep in step.
+BAND_LIMITS: Mapping[str, tuple[int, int | None] | None] = {
+    "unstated": None,
+    "low": (1, 3),
+    "mid": (4, 7),
+    "high": (8, None),
+}
+
 #: The representative storey count each band resolves with, or ``None`` where
 #: the schedule said nothing. The middle of the band rather than its edge,
 #: because a band is a statement about a population and its centre is the least
-#: wrong single member.
+#: wrong single member. The open-ended top band has no middle, so 10 is a
+#: stated choice: high enough to reach GEM's tall classes, low enough not to
+#: describe a tower nobody in this book insures.
 BAND_STOREYS: Mapping[str, int | None] = {
     "unstated": None,
-    "low": 1,
-    "mid": 4,
+    "low": 2,
+    "mid": 5,
     "high": 10,
 }
 
@@ -99,7 +116,9 @@ COVERAGE_CATEGORIES: Mapping[int, LossCategory] = {
     4: LossCategory.NONSTRUCTURAL,
 }
 
-#: The columns the keys service reads back.
+#: The columns the keys service reads back. Identical to the ones the keys
+#: service's own specification builder writes, because both produce the same
+#: file and the runtime cannot tell which made the one it is reading.
 MAPPING_COLUMNS = (
     "VulnerabilityID",
     "CoverageTypeID",
@@ -108,6 +127,8 @@ MAPPING_COLUMNS = (
     "OccupancyCodes",
     "ConstructionCodes",
     "StoreyBand",
+    "MinStoreys",
+    "MaxStoreys",
     "Label",
 )
 
@@ -261,8 +282,15 @@ def build_country(
     coverage_types: Sequence[int] = (1, 2, 3, 4),
     placement: Placement = Placement.MEAN_PRESERVING,
 ) -> CountryBuild:
-    """Build one country's classes, channels and Oasis functions."""
-    policy.require_runnable()
+    """Build one country's classes, channels and Oasis functions.
+
+    Gated on the narrower vulnerability policy rather than the full conversion
+    one. A damage table does not depend on which OpenQuake occurrence becomes
+    which Oasis event, and a build under an undecided multi-IMT representation
+    is the normal case -- producing the multi-channel classes is how they get
+    counted, and the refusal to *use* one belongs at the point a risk reaches it.
+    """
+    policy.require_vulnerability_build()
 
     needed = {COVERAGE_CATEGORIES[item] for item in coverage_types}
     missing = sorted(str(item) for item in needed - set(models))
@@ -390,6 +418,7 @@ def mapping_csv(build: CountryBuild) -> bytes:
     for item in sorted(
         build.classes, key=lambda entry: (entry.coverage_type, entry.label)
     ):
+        limits = BAND_LIMITS[item.storey_band]
         for channel in item.channels:
             writer.writerow(
                 {
@@ -403,6 +432,10 @@ def mapping_csv(build: CountryBuild) -> bytes:
                         else item.construction_code
                     ),
                     "StoreyBand": item.storey_band,
+                    "MinStoreys": "" if limits is None else limits[0],
+                    "MaxStoreys": (
+                        "" if limits is None or limits[1] is None else limits[1]
+                    ),
                     "Label": item.label,
                 }
             )

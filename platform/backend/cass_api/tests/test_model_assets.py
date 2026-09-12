@@ -180,8 +180,10 @@ def test_an_entry_with_no_codes_matches_anything(vulnerability, modeller):
     attach_vulnerability_mapping(vulnerability, MAPPING, actor=modeller)
     loaded = load_vulnerability(vulnerability)
 
-    contents = loaded.find(occupancy="9999", construction="9999", coverage_type=3)
-    assert contents is not None and contents.vulnerability_id == 2
+    contents = loaded.find_channels(
+        occupancy="9999", construction="9999", coverage_type=3
+    )
+    assert len(contents) == 1 and contents[0].vulnerability_id == 2
 
 
 def test_the_supported_imts_stay_at_the_release_default(vulnerability, modeller):

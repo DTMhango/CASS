@@ -36,12 +36,12 @@ import pytest
 import cass_extract as extract
 from apps.exposure.extract import import_portfolio
 from apps.exposure.promotion import promote
-from apps.modelregistry import pilot
 from apps.modelregistry.models import PublicationState
 from apps.runs.models import AnalysisRun, Run, RunKind
 from apps.runs.services import RunBlocked, execute
 from cass_core.runs import RunState
 
+from . import fixture_model
 from .test_analysis_execution import engine_for, oasis_server
 from .test_promotion import as_template, oed_rows
 
@@ -51,7 +51,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture()
 def pilot_model(db, modeller):
     """The Indonesia prototype grid and routing table, in the registry."""
-    return pilot.register("ID", actor=modeller)
+    return fixture_model.register("ID", actor=modeller)
 
 
 @pytest.fixture()
@@ -89,7 +89,10 @@ def test_the_prototype_model_registers_with_its_cells_and_functions(pilot_model)
     """The gap the mapping work package left: a grid a run can actually load."""
     assert pilot_model.grid.cell_count == 52_831
     assert pilot_model.vulnerability_set.function_count == 16
-    assert pilot_model.imts == ["SA(0.3)", "SA(0.6)", "SA(1.0)"]
+    # The measures the functions actually demand, not the ones the release is
+    # capable of. A model version that claimed an IMT nothing in it uses would
+    # overstate what a run against it covers.
+    assert pilot_model.imts == ["SA(0.3)", "SA(0.6)"]
 
 
 def test_the_prototype_arrives_as_a_draft_that_cannot_be_used_for_a_decision(pilot_model):
@@ -121,8 +124,8 @@ def test_the_scope_statement_names_every_excluded_sub_peril(pilot_model):
 
 def test_registering_twice_does_not_produce_a_second_grid(modeller):
     """An identifier that moved would re-point every key ever issued."""
-    first = pilot.register("ID", actor=modeller)
-    second = pilot.register("ID", actor=modeller)
+    first = fixture_model.register("ID", actor=modeller)
+    second = fixture_model.register("ID", actor=modeller)
     assert first.pk == second.pk
     assert first.grid.pk == second.grid.pk
 
@@ -171,7 +174,7 @@ def test_the_default_taxonomy_reaches_the_general_commercial_function(
     execute(analysis, adapter=engine_for(oasis_server(lookup_rows=6)), poll_interval=0, actor=analyst)
 
     analysis.refresh_from_db()
-    assert analysis.keys_summary["vulnerability"] == "id-vuln-0.1.0-draft"
+    assert analysis.keys_summary["vulnerability"] == f"id-vuln-{fixture_model.VERSION}"
     assert analysis.keys_summary["grid"] == "id-grid-0.1.0-draft"
 
 
@@ -218,7 +221,7 @@ def test_the_manifest_traces_the_result_to_the_prototype_it_used(
     # The draft assets by name, so a reader does not have to resolve a uuid to
     # find out that the grid and the routing table were prototypes.
     assert manifest["keys"]["grid"] == "id-grid-0.1.0-draft"
-    assert manifest["keys"]["vulnerability"] == "id-vuln-0.1.0-draft"
+    assert manifest["keys"]["vulnerability"] == f"id-vuln-{fixture_model.VERSION}"
 
 
 # -- and the gate still holds ---------------------------------------------------------------

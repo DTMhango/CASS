@@ -12,6 +12,16 @@ Build plan section 8 sets the contract precisely, and it is unusually strict:
 
 Section 15 names the failure this prevents: keys failures or not-at-risk values
 being hidden, so exposure is silently omitted from loss.
+
+**Classes and channels.** The unit this resolves to is a *class* -- a
+combination of occupancy, construction and height band that a schedule can
+distinguish -- and not a single row. Most classes are answered by one function.
+A class reaching structures that respond at different spectral periods is
+answered by several, one per measure, and each carries the share of the class
+those structures hold. Returning the whole class rather than the first matching
+row is what lets such a risk be answered at all; whether it *may* be depends on
+the multi-IMT representation the set was built under, and a class that spans
+measures under an undecided one is refused rather than approximated.
 """
 
 from __future__ import annotations
@@ -22,9 +32,20 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from decimal import ROUND_FLOOR, Decimal
 from typing import Any
 
+from cass_core.policy import MULTI_CHANNEL_REPRESENTATIONS, IMTRepresentation
 from cass_oed.schema import COVERAGE_TYPES, MODELLED_SUBPERILS, expand_perils
 
 KEYS_SCHEMA_VERSION = "1.0.0"
+
+#: The band name meaning "the schedule stated no storey count". Distinct from
+#: an entry carrying no band at all: that one answers whatever a location says,
+#: this one answers only silence.
+UNSTATED_BAND = "unstated"
+
+#: How far one class's channel weights may sum from 1 before the mapping is
+#: refused. A class whose channels summed to 0.8 would drop a fifth of the
+#: risk's damage with nothing reporting it.
+CHANNEL_WEIGHT_TOLERANCE = 1e-04
 
 
 class KeyStatus(enum.StrEnum):
@@ -55,6 +76,16 @@ class KeyStatus(enum.StrEnum):
 
 class LookupError_(Exception):
     """Raised when the lookup cannot run at all."""
+
+
+class MappingError(LookupError_):
+    """Raised when a vulnerability mapping is not usable as a routing table.
+
+    Separate from a location that fails to route. This is the file being wrong
+    -- a class whose channels do not sum to one, two classes that answer the
+    same risk equally well -- and it is refused when the mapping is built, not
+    when a risk happens to reach it.
+    """
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -133,7 +164,15 @@ class AreaPerilGrid:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VulnerabilityEntry:
-    """One row of the taxonomy mapping."""
+    """One row of the taxonomy mapping: one function, for one class of risk.
+
+    A *class* is what a schedule can distinguish -- occupancy, construction and
+    height band -- and it is the unit the lookup resolves to. Most classes are
+    one function, and then a class and an entry are the same thing. Where a
+    class reaches structures responding at different spectral periods it is
+    several, and each is a **channel**: one intensity measure, carrying the
+    share of the class's weight the structures demanding it hold.
+    """
 
     vulnerability_id: int
     coverage_type: int
@@ -143,6 +182,92 @@ class VulnerabilityEntry:
     occupancy_codes: frozenset[str] = frozenset()
     construction_codes: frozenset[str] = frozenset()
     label: str = ""
+    #: The height band this entry answers. Empty means the mapping does not
+    #: distinguish height at all, so the entry answers whatever a location says.
+    storey_band: str = ""
+    #: The band's extent in storeys, inclusive. ``None`` at either end is
+    #: unbounded, so a top band of ``8`` to ``None`` is "eight or more".
+    min_storeys: int | None = None
+    max_storeys: int | None = None
+    #: This channel's share of its class; 1 where the class is one function.
+    channel_weight: float = 1.0
+
+    @property
+    def class_key(self) -> tuple[int, frozenset[str], frozenset[str], str]:
+        """What this entry answers *for*, ignoring which channel of it this is."""
+        return (
+            self.coverage_type,
+            self.occupancy_codes,
+            self.construction_codes,
+            self.storey_band,
+        )
+
+    @property
+    def specificity(self) -> int:
+        """How narrowly this entry is stated.
+
+        Occupancy outranks construction, which outranks height, so an entry
+        naming more attributes always beats one naming fewer and the existing
+        preference for occupancy is unchanged. Height is the finest tiebreak
+        rather than the coarsest because a mapping stating occupancy and
+        construction says more about a building than one knowing only how tall
+        it is.
+
+        The weights are powers of two on purpose. That makes the score a
+        faithful record of *which* attributes were stated rather than merely
+        how many, so two entries scoring the same necessarily state the same
+        set of them -- which is what lets the ambiguity check below compare
+        like with like.
+        """
+        return (
+            (4 if self.occupancy_codes else 0)
+            + (2 if self.construction_codes else 0)
+            + (1 if self.storey_band else 0)
+        )
+
+    def matches_storeys(self, storeys: int | None) -> bool:
+        """Whether this entry answers a location of this height.
+
+        Three cases, and conflating any two loses information. No band means
+        the mapping does not distinguish height, so the entry answers every
+        location. The ``unstated`` band answers only a location that gave no
+        storey count -- falling back to it for one that did would discard a
+        field the schedule took the trouble to fill in, and the whole reason
+        for collecting storeys is that it narrows the mixture. Any other band
+        answers the heights inside it.
+        """
+        if not self.storey_band:
+            return True
+        if self.storey_band == UNSTATED_BAND:
+            return storeys is None
+        if storeys is None:
+            return False
+        if self.min_storeys is not None and storeys < self.min_storeys:
+            return False
+        return self.max_storeys is None or storeys <= self.max_storeys
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VulnerabilityClass:
+    """One class of risk and every channel that answers it."""
+
+    coverage_type: int
+    occupancy_codes: frozenset[str]
+    construction_codes: frozenset[str]
+    storey_band: str
+    specificity: int
+    channels: tuple[VulnerabilityEntry, ...]
+
+    @property
+    def is_multi_channel(self) -> bool:
+        return len(self.channels) > 1
+
+    @property
+    def intensity_measures(self) -> tuple[str, ...]:
+        return tuple(item.required_imt for item in self.channels)
+
+    def matches_storeys(self, storeys: int | None) -> bool:
+        return self.channels[0].matches_storeys(storeys)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -155,33 +280,184 @@ class VulnerabilityMapping:
     #: IMTs the converter can currently produce. A function demanding anything
     #: else is reported as unsupported rather than silently rerouted.
     supported_imts: frozenset[str] = frozenset({"SA(0.3)", "SA(0.6)", "SA(1.0)"})
+    #: Which multi-IMT representation this set was built under.
+    #:
+    #: ``UNDECIDED`` is the honest default and it is not a blanket failure: a
+    #: class with one channel needs no representation and routes normally. A
+    #: class with several cannot be answered until somebody chooses, so it is
+    #: refused rather than approximated -- and the coverage report says how
+    #: much value that costs, which is the number the decision needs.
+    imt_representation: IMTRepresentation = IMTRepresentation.UNDECIDED
 
-    def find(
-        self, occupancy: str, construction: str, coverage_type: int
-    ) -> VulnerabilityEntry | None:
-        """Resolve a taxonomy to exactly one function.
+    #: Entries grouped into the classes they answer, built once on construction
+    #: because that is also where the mapping is validated.
+    _classes: tuple[VulnerabilityClass, ...] = dataclasses.field(
+        default=(), init=False, repr=False, compare=False, hash=False
+    )
 
-        Where both occupancy and construction match an entry it wins over an
-        occupancy-only match, so a more specific mapping is preferred without
-        the caller having to order the table.
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_classes", _group_into_classes(self))
+        _refuse_ambiguous_classes(self.country_code, self._classes)
+
+    @property
+    def classes(self) -> tuple[VulnerabilityClass, ...]:
+        return self._classes
+
+    @property
+    def multi_channel_classes(self) -> tuple[VulnerabilityClass, ...]:
+        """Classes that cannot be answered without the section 6 decision."""
+        return tuple(item for item in self._classes if item.is_multi_channel)
+
+    @property
+    def resolves_multi_channel(self) -> bool:
+        """Whether this mapping's representation can answer such a class."""
+        return self.imt_representation in MULTI_CHANNEL_REPRESENTATIONS
+
+    def find_channels(
+        self,
+        occupancy: str,
+        construction: str,
+        coverage_type: int,
+        storeys: int | None = None,
+    ) -> tuple[VulnerabilityEntry, ...]:
+        """Every function this taxonomy reaches, as the channels of one class.
+
+        Resolution is to a class, not to a row. Where both occupancy and
+        construction match, that class wins over an occupancy-only one, so a
+        more specific mapping is preferred without the caller having to order
+        the table. Returning the whole class is the change that matters: a risk
+        reaching several intensity measures is answered with all of them,
+        rather than with whichever row happened to sort first.
         """
-        best: VulnerabilityEntry | None = None
-        best_score = -1
-        for entry in self.entries:
-            if entry.coverage_type != coverage_type:
+        best: VulnerabilityClass | None = None
+        for item in self._classes:
+            if item.coverage_type != coverage_type:
                 continue
-            score = 0
-            if entry.occupancy_codes:
-                if occupancy not in entry.occupancy_codes:
-                    continue
-                score += 2
-            if entry.construction_codes:
-                if construction not in entry.construction_codes:
-                    continue
-                score += 1
-            if score > best_score:
-                best, best_score = entry, score
-        return best
+            if item.occupancy_codes and occupancy not in item.occupancy_codes:
+                continue
+            if item.construction_codes and construction not in item.construction_codes:
+                continue
+            if not item.matches_storeys(storeys):
+                continue
+            if best is None or item.specificity > best.specificity:
+                best = item
+        return best.channels if best is not None else ()
+
+
+def _group_into_classes(
+    mapping: VulnerabilityMapping,
+) -> tuple[VulnerabilityClass, ...]:
+    """Gather entries into classes, refusing the ones that cannot be one.
+
+    Two things are checked here rather than at lookup time, because a mapping
+    that fails either is wrong for every risk and not just for the one that
+    happened to reach it: a class must not name the same intensity measure
+    twice, and its channel weights must account for the whole class.
+    """
+    grouped: dict[tuple[Any, ...], list[VulnerabilityEntry]] = {}
+    for entry in mapping.entries:
+        grouped.setdefault(entry.class_key, []).append(entry)
+
+    classes: list[VulnerabilityClass] = []
+    for (coverage_type, occupancy, construction, band), members in grouped.items():
+        measures = [item.required_imt for item in members]
+        if len(set(measures)) != len(measures):
+            raise MappingError(
+                f"In the {mapping.country_code} mapping, the class for coverage "
+                f"{coverage_type} occupancy {sorted(occupancy) or 'any'} names "
+                f"{sorted(measures)} -- the same intensity measure twice. Channels "
+                "are distinguished by their measure, so which function a risk "
+                "reached would depend on row order."
+            )
+        total = sum(item.channel_weight for item in members)
+        if abs(total - 1.0) > CHANNEL_WEIGHT_TOLERANCE:
+            raise MappingError(
+                f"In the {mapping.country_code} mapping, the channel weights for "
+                f"coverage {coverage_type} occupancy {sorted(occupancy) or 'any'} "
+                f"sum to {total} rather than 1. The difference is damage that would "
+                "be dropped or double-counted with nothing reporting it."
+            )
+        classes.append(
+            VulnerabilityClass(
+                coverage_type=coverage_type,
+                occupancy_codes=occupancy,
+                construction_codes=construction,
+                storey_band=band,
+                specificity=members[0].specificity,
+                channels=tuple(
+                    sorted(members, key=lambda item: item.vulnerability_id)
+                ),
+            )
+        )
+    return tuple(classes)
+
+
+def _refuse_ambiguous_classes(
+    country_code: str, classes: Sequence[VulnerabilityClass]
+) -> None:
+    """Refuse two classes that could answer the same risk equally well.
+
+    The counterpart of the check the specification builder runs, applied to the
+    mapping itself so that a file produced by the converter -- which never goes
+    through a specification -- is held to the same rule. Equal specificity is
+    the condition that matters: a generic class and a specific one both
+    matching is fine and intended, because the specific one wins. Two at the
+    same score is not, because the answer would depend on row order.
+    """
+    for position, first in enumerate(classes):
+        for second in classes[position + 1 :]:
+            if first.coverage_type != second.coverage_type:
+                continue
+            if first.specificity != second.specificity:
+                continue
+            if not _codes_overlap(first.occupancy_codes, second.occupancy_codes):
+                continue
+            if not _codes_overlap(
+                first.construction_codes, second.construction_codes
+            ):
+                continue
+            if not _bands_overlap(first, second):
+                continue
+            raise MappingError(
+                f"In the {country_code} mapping, two classes answer the same risk "
+                f"for coverage {first.coverage_type} at the same specificity: "
+                f"{first.channels[0].label!r} and {second.channels[0].label!r}. "
+                "Which one a location reached would depend on table order, so the "
+                "loss would not be reproducible. Narrow one of them."
+            )
+
+
+def _codes_overlap(first: frozenset[str], second: frozenset[str]) -> bool:
+    """Whether two code sets can match the same value; empty means any."""
+    return not first or not second or bool(first & second)
+
+
+def _bands_overlap(first: VulnerabilityClass, second: VulnerabilityClass) -> bool:
+    """Whether two height bands can both answer the same location.
+
+    Only reached for classes of equal specificity, and because the specificity
+    weights are powers of two that means either both state a band or neither
+    does -- so there is no case here where a banded class meets an unbanded one.
+    """
+    if not first.storey_band or not second.storey_band:
+        return True
+    if first.storey_band == second.storey_band:
+        return True
+    if UNSTATED_BAND in (first.storey_band, second.storey_band):
+        # One answers silence and the other answers a stated height. No single
+        # location is both.
+        return False
+    return _ranges_overlap(first.channels[0], second.channels[0])
+
+
+def _ranges_overlap(first: VulnerabilityEntry, second: VulnerabilityEntry) -> bool:
+    low = max(first.min_storeys or 0, second.min_storeys or 0)
+    highs = [
+        item
+        for item in (first.max_storeys, second.max_storeys)
+        if item is not None
+    ]
+    return not highs or low <= min(highs)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -210,6 +486,24 @@ class KeyRecord:
     #: readable against the source OED rather than needing the composite split.
     account_id: str = ""
     location_number: str = ""
+    #: Which channel of its class this row is, and how many there are. A class
+    #: answered by one function produces ``1`` of ``1``; one spanning intensity
+    #: measures produces a row per measure, and the weight is the share of the
+    #: class each carries.
+    channel_index: int = 1
+    channel_count: int = 1
+    channel_weight: float = 1.0
+
+    @property
+    def carries_value(self) -> bool:
+        """Whether this row is the one the coverage's TIV is counted on.
+
+        A coverage produces a row per sub-peril and, where the class spans
+        intensity measures, a row per channel as well. All of them describe the
+        same money, so exactly one is counted or the reconciliation would
+        report several times the value the schedule holds.
+        """
+        return self.channel_index == 1
 
     def as_row(self) -> dict[str, Any]:
         """The shape written to keys.csv."""
@@ -223,6 +517,7 @@ class KeyRecord:
             "VulnerabilityID": (
                 self.vulnerability_id if self.vulnerability_id is not None else ""
             ),
+            "ChannelWeight": f"{self.channel_weight:.6f}",
             "Status": str(self.status),
             "Message": self.message,
         }
@@ -319,6 +614,11 @@ class LookupResult:
     grid_reference: str
     vulnerability_reference: str
 
+    #: How this run's mapping represents a class spanning intensity measures.
+    #: Recorded on the result so a keys file can be read years later without
+    #: having to find the registry record that produced it.
+    imt_representation: str = str(IMTRepresentation.UNDECIDED)
+
     @property
     def failures(self) -> list[KeyRecord]:
         """The errors file of section 8."""
@@ -328,13 +628,20 @@ class LookupResult:
     def successes(self) -> list[KeyRecord]:
         return [item for item in self.records if item.status is KeyStatus.SUCCESS]
 
+    @property
+    def multi_channel_successes(self) -> list[KeyRecord]:
+        """Successful rows belonging to a class that spans intensity measures."""
+        return [item for item in self.successes if item.channel_count > 1]
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "grid": self.grid_reference,
             "vulnerability": self.vulnerability_reference,
+            "imt_representation": self.imt_representation,
             "record_count": len(self.records),
             "success_count": len(self.successes),
             "failure_count": len(self.failures),
+            "multi_channel_success_count": len(self.multi_channel_successes),
             "coverage_report": self.report.as_dict(),
         }
 
@@ -391,6 +698,24 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
+def read_storeys(value: Any) -> int | None:
+    """The reported storey count, or None where the schedule did not say.
+
+    A value that will not read as a whole number is treated as not stated.
+    ``NumberOfStoreys`` is validated as an integer on the way into OED, so
+    anything reaching here that is not one came from a source that bypassed
+    that -- and the safe reading of an uninterpretable height is that the
+    height is unknown, which widens the mixture rather than narrowing it to
+    the wrong band.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def lookup(
     locations: Iterable[Mapping[str, Any]],
     *,
@@ -405,6 +730,12 @@ def lookup(
     ``KeyRecord``. There is no path that skips one: a record with no value is
     ``notatrisk``, an uninterpretable record is ``fail``, and anything mapped
     is ``success``. That is what makes the TIV reconciliation meaningful.
+
+    A combination can now produce *more* than one record, where the class it
+    resolves to spans intensity measures and the mapping's representation can
+    carry that. The reconciliation is unaffected because value is attributed on
+    the first channel of the first sub-peril only -- the other rows describe the
+    same money seen through a different measure, not additional exposure.
     """
     # An omitted list means "use the release default"; an empty one means the
     # caller believes nothing is modelled, which is a configuration error
@@ -425,6 +756,7 @@ def lookup(
         longitude = _decimal(row.get("Longitude"))
         occupancy = str(row.get("OccupancyCode") or "").strip()
         construction = str(row.get("ConstructionCode") or "").strip()
+        storeys = read_storeys(row.get("NumberOfStoreys"))
         covered = set(expand_perils(str(row.get("LocPerilsCovered") or "")))
 
         cell = (
@@ -438,7 +770,7 @@ def lookup(
             report.source_tiv += tiv
 
             for peril in subperils:
-                record = _resolve(
+                resolved = _resolve(
                     location_id=location_id,
                     account_id=account_id,
                     location_number=location_number,
@@ -451,20 +783,23 @@ def lookup(
                     cell=cell,
                     occupancy=occupancy,
                     construction=construction,
+                    storeys=storeys,
                     vulnerability=vulnerability,
                 )
-                records.append(record)
-                # Value is attributed once per coverage, on the sub-peril that
-                # carries it, so the reconciliation totals cannot double-count
-                # a location covered for several sub-perils.
+                records.extend(resolved)
+                # Value is attributed once per coverage, on the first sub-peril
+                # and the first channel, so the reconciliation totals cannot
+                # double-count a location covered for several sub-perils or a
+                # class answered through several intensity measures.
                 if peril == subperils[0]:
-                    report.add(record)
+                    report.add(resolved[0])
 
     return LookupResult(
         records=records,
         report=report,
         grid_reference=grid.reference,
         vulnerability_reference=f"{vulnerability.country_code.lower()}-vuln-{vulnerability.version}",
+        imt_representation=str(vulnerability.imt_representation),
     )
 
 
@@ -482,9 +817,15 @@ def _resolve(
     cell: GridCell | None,
     occupancy: str,
     construction: str,
+    storeys: int | None,
     vulnerability: VulnerabilityMapping,
-) -> KeyRecord:
-    """Decide one location, coverage and sub-peril combination."""
+) -> list[KeyRecord]:
+    """Decide one location, coverage and sub-peril combination.
+
+    Returns a list because a class spanning intensity measures is answered by
+    one row per measure. Every path returns at least one record, and the first
+    one returned is the one the coverage's value is counted on.
+    """
 
     def record(status: KeyStatus, message: str = "", **extra: Any) -> KeyRecord:
         return KeyRecord(
@@ -500,65 +841,118 @@ def _resolve(
         )
 
     if not location_id:
-        return record(KeyStatus.FAIL, "The location has no identifier.")
+        return [record(KeyStatus.FAIL, "The location has no identifier.")]
 
     # No value means no loss. This is a deliberate exclusion, not a failure,
     # and is reported separately so the two are never conflated.
     if tiv <= 0:
-        return record(KeyStatus.NOTATRISK, "The coverage carries no insured value.")
+        return [record(KeyStatus.NOTATRISK, "The coverage carries no insured value.")]
 
     if peril not in covered:
-        return record(
-            KeyStatus.NOTATRISK,
-            f"The location is not covered for {peril}.",
-        )
+        return [
+            record(
+                KeyStatus.NOTATRISK,
+                f"The location is not covered for {peril}.",
+            )
+        ]
 
     if latitude is None or longitude is None:
-        return record(KeyStatus.FAIL_AP, "The location has no usable coordinates.")
+        return [record(KeyStatus.FAIL_AP, "The location has no usable coordinates.")]
 
     if cell is None:
-        return record(
-            KeyStatus.FAIL_AP,
-            "The location falls outside the area-peril grid domain.",
-        )
+        return [
+            record(
+                KeyStatus.FAIL_AP,
+                "The location falls outside the area-peril grid domain.",
+            )
+        ]
 
     if cell.offshore:
-        return record(
-            KeyStatus.FAIL_AP,
-            "The location falls in an offshore grid cell; confirm the coordinates.",
-            area_peril_id=cell.area_peril_id,
-        )
+        return [
+            record(
+                KeyStatus.FAIL_AP,
+                "The location falls in an offshore grid cell; confirm the coordinates.",
+                area_peril_id=cell.area_peril_id,
+            )
+        ]
 
-    entry = vulnerability.find(occupancy, construction, coverage_type)
-    if entry is None:
-        return record(
-            KeyStatus.FAIL_V,
-            (
-                f"No vulnerability function covers occupancy {occupancy or 'unknown'} "
-                f"and construction {construction or 'unknown'} for this coverage."
-            ),
-            area_peril_id=cell.area_peril_id,
-        )
+    channels = vulnerability.find_channels(
+        occupancy, construction, coverage_type, storeys
+    )
+    if not channels:
+        height = "unstated" if storeys is None else f"{storeys} storeys"
+        return [
+            record(
+                KeyStatus.FAIL_V,
+                (
+                    f"No vulnerability function covers occupancy "
+                    f"{occupancy or 'unknown'}, construction "
+                    f"{construction or 'unknown'} and height {height} for this "
+                    "coverage."
+                ),
+                area_peril_id=cell.area_peril_id,
+            )
+        ]
 
     # Section 6: a function must be routed to the IMT it demands. Producing a
     # key against an IMT the converter cannot supply would hide the gap the
     # SA-only prototype is supposed to report.
-    if entry.required_imt not in vulnerability.supported_imts:
-        return record(
-            KeyStatus.FAIL_V,
-            (
-                f"Vulnerability {entry.vulnerability_id} requires {entry.required_imt}, "
-                "which this model release does not produce."
-            ),
-            area_peril_id=cell.area_peril_id,
-            vulnerability_id=entry.vulnerability_id,
-            imt=entry.required_imt,
-        )
-
-    return record(
-        KeyStatus.SUCCESS,
-        "",
-        area_peril_id=cell.area_peril_id,
-        vulnerability_id=entry.vulnerability_id,
-        imt=entry.required_imt,
+    unsupported = sorted(
+        {
+            item.required_imt
+            for item in channels
+            if item.required_imt not in vulnerability.supported_imts
+        }
     )
+    if unsupported:
+        return [
+            record(
+                KeyStatus.FAIL_V,
+                (
+                    f"This class requires {', '.join(unsupported)}, which this model "
+                    "release does not produce."
+                ),
+                area_peril_id=cell.area_peril_id,
+                vulnerability_id=channels[0].vulnerability_id,
+                imt=channels[0].required_imt,
+            )
+        ]
+
+    # A class reaching one intensity measure needs no representation and is
+    # answered whatever the policy says. One reaching several cannot be, and
+    # the refusal is the point: choosing silently is the failure section 15
+    # names, and the value that lands here is what makes the decision urgent.
+    if len(channels) > 1 and not vulnerability.resolves_multi_channel:
+        measures = ", ".join(item.required_imt for item in channels)
+        reason = (
+            "no multi-IMT representation has been approved"
+            if vulnerability.imt_representation is IMTRepresentation.UNDECIDED
+            else (
+                f"the approved representation ({vulnerability.imt_representation}) "
+                "resolves such a class outside the keys contract"
+            )
+        )
+        return [
+            record(
+                KeyStatus.FAIL_V,
+                (
+                    f"This class responds at {measures} and cannot be one function; "
+                    f"{reason}."
+                ),
+                area_peril_id=cell.area_peril_id,
+            )
+        ]
+
+    return [
+        record(
+            KeyStatus.SUCCESS,
+            "",
+            area_peril_id=cell.area_peril_id,
+            vulnerability_id=item.vulnerability_id,
+            imt=item.required_imt,
+            channel_index=position,
+            channel_count=len(channels),
+            channel_weight=item.channel_weight,
+        )
+        for position, item in enumerate(channels, start=1)
+    ]

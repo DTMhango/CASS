@@ -25,8 +25,8 @@ import cass_extract as extract
 from apps.exposure import scenarios
 from apps.exposure.extract import import_portfolio
 from apps.exposure.promotion import prepare, promote
-from apps.modelregistry import pilot
 
+from . import fixture_model
 from .conftest import API
 from .test_promotion import as_template, oed_rows
 
@@ -46,7 +46,7 @@ def batch(project, analyst):
 
 @pytest.fixture()
 def pilot_model(db, modeller):
-    return pilot.register("ID", actor=modeller)
+    return fixture_model.register("ID", actor=modeller)
 
 
 @pytest.fixture()

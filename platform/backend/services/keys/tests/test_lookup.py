@@ -231,6 +231,7 @@ def test_keys_row_matches_the_oasis_column_contract(grid, vulnerability):
         "CoverageTypeID",
         "AreaPerilID",
         "VulnerabilityID",
+        "ChannelWeight",
         "Status",
         "Message",
     }
@@ -321,5 +322,5 @@ def test_more_specific_taxonomy_mapping_wins():
                                construction_codes=frozenset({"CR"})),
         ),
     )
-    assert mapping.find("1100", "CR", 1).vulnerability_id == 2
-    assert mapping.find("1100", "MUR", 1).vulnerability_id == 1
+    assert mapping.find_channels("1100", "CR", 1)[0].vulnerability_id == 2
+    assert mapping.find_channels("1100", "MUR", 1)[0].vulnerability_id == 1

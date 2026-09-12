@@ -13,6 +13,7 @@ from __future__ import annotations
 from django.db import models
 
 from apps.common.models import BaseModel, FreezableModel
+from cass_core.policy import IMTRepresentation
 
 
 class Peril(models.TextChoices):
@@ -152,6 +153,23 @@ class VulnerabilitySet(BaseModel, FreezableModel):
     imts_used = models.JSONField(
         default=list, help_text="Distinct intensity measures the functions demand."
     )
+    imt_representation = models.CharField(
+        max_length=32,
+        choices=[(item.value, item.value) for item in IMTRepresentation],
+        default=IMTRepresentation.UNDECIDED,
+        help_text=(
+            "Which section 6 multi-IMT representation this set was built under. "
+            "A class spanning intensity measures is refused under 'undecided', "
+            "so this is a gate rather than a label."
+        ),
+    )
+    multi_channel_class_count = models.IntegerField(
+        default=0,
+        help_text=(
+            "Classes that reach more than one intensity measure. Unroutable "
+            "while the representation is undecided."
+        ),
+    )
     coverage_components = models.JSONField(
         default=list,
         help_text="Structural, non-structural, contents or business interruption.",
@@ -177,6 +195,19 @@ class VulnerabilitySet(BaseModel, FreezableModel):
     def unsupported_imts(self) -> list[str]:
         """IMTs these functions demand that the converter cannot yet produce."""
         return sorted(set(self.imts_used) - SUPPORTED_IMTS)
+
+    @property
+    def awaits_imt_representation(self) -> bool:
+        """Whether part of this set cannot be routed until section 6 is decided.
+
+        A set with no multi-channel class does not care what the representation
+        is, so an undecided one is not a blocker for it. A set that has them is
+        carrying functions no risk can currently reach.
+        """
+        return (
+            self.multi_channel_class_count > 0
+            and self.imt_representation == IMTRepresentation.UNDECIDED
+        )
 
 
 class ModelVersion(BaseModel, FreezableModel):
@@ -275,6 +306,13 @@ class ModelVersion(BaseModel, FreezableModel):
                 "Vulnerability functions demand "
                 + ", ".join(unsupported)
                 + ", which the converter does not produce."
+            )
+        if self.vulnerability_set.awaits_imt_representation:
+            blockers.append(
+                f"{self.vulnerability_set.multi_channel_class_count} vulnerability "
+                "classes respond at more than one intensity measure, and no "
+                "multi-IMT representation has been approved. Risks reaching them "
+                "are refused rather than approximated."
             )
         if self.grid.publication_state != PublicationState.PUBLISHED:
             blockers.append("The area-peril grid version is not published.")

@@ -1,17 +1,22 @@
-"""Registering the prototype grid and vulnerability specifications.
+"""Registering the prototype grid, and assembling a model version around it.
 
-``cass_keys`` can generate a grid and a routing table from a written
-specification. Until they are registry records with their cell and mapping
-files in the artifact store, no run can reach them: section 5 keeps the arrays
-out of Django and ``assets`` is the only door.
+``cass_keys`` can generate a grid from a written specification. Until it is a
+registry record with its cell file in the artifact store, no run can reach it:
+section 5 keeps the arrays out of Django and ``assets`` is the only door.
 
 So this is the bridge, and its job is as much bookkeeping as plumbing. A
 specification's open questions become the registry record's notes, its draft
 version becomes ``DRAFT`` publication state, and the model version is marked a
-research prototype with the licence explicitly not cleared. A prototype that
-arrived in the registry looking like an approved asset would be worse than no
-prototype at all -- the registry is where an analyst goes to find out what a
-result rests on.
+research prototype. A prototype that arrived in the registry looking like an
+approved asset would be worse than no prototype at all -- the registry is where
+an analyst goes to find out what a result rests on.
+
+**No vulnerability set is created here.** There used to be one: a hand-written
+routing table naming four functions, which let the platform be exercised end to
+end before any damage relationship existed. It has been retired, because one
+now does. A vulnerability set is built from the published GEM model by
+``modelregistry.gem``, and a model version cannot be registered without one --
+so the platform can no longer be pointed at a placeholder by accident.
 
 Nothing here approves anything. Everything registered is a draft, and
 ``ModelVersion.publication_blockers`` will say so for as long as that is true.
@@ -23,16 +28,13 @@ from typing import Any
 
 from django.db import transaction
 
-from cass_keys import grids, pilot_grids, pilot_vulnerability
-from cass_keys import vulnerability as vulnerability_specs
+from cass_keys import grids, pilot_grids
 
-from .assets import attach_grid_cells, attach_vulnerability_mapping
+from .assets import attach_grid_cells
 from .models import AreaPerilGrid, ModelVersion, Peril, PublicationState, VulnerabilitySet
 
-#: Countries with a prototype specification of both kinds.
-PILOT_COUNTRIES = tuple(
-    sorted(set(pilot_grids.PILOT_GRIDS) & set(pilot_vulnerability.PILOT_VULNERABILITY))
-)
+#: Countries with a prototype grid specification.
+PILOT_COUNTRIES = tuple(sorted(pilot_grids.PILOT_GRIDS))
 
 #: Suffix marking a model version built from prototype specifications. Section 6
 #: limits the first converter to the SA family, and these route only to it.
@@ -44,26 +46,49 @@ class PilotRegistrationError(Exception):
 
 
 @transaction.atomic
-def register(country_code: str, *, actor=None) -> ModelVersion:
-    """Register one country's prototype grid, routing table and model version.
+def register_grid(country_code: str, *, actor=None) -> AreaPerilGrid:
+    """Register one country's prototype area-peril grid.
 
-    Idempotent by version. Re-registering replaces the stored files and leaves
-    the registry records in place, so running this twice does not produce two
-    grids whose identifiers mean different things.
+    Idempotent by version. Re-registering replaces the stored cell file and
+    leaves the registry record in place, so running this twice does not produce
+    two grids whose identifiers mean different things.
     """
     code = country_code.upper()
     try:
+        specification = pilot_grids.specification(code)
+    except KeyError as exc:
+        raise PilotRegistrationError(str(exc)) from None
+    return _register_grid(specification, grids.build(specification), actor=actor)
+
+
+@transaction.atomic
+def register_model_version(
+    country_code: str,
+    *,
+    vulnerability_set: VulnerabilitySet,
+    vulnerability_limitations: str = "",
+    actor=None,
+) -> ModelVersion:
+    """Assemble a model version from the prototype grid and a vulnerability set.
+
+    The vulnerability set is a required argument rather than something this
+    builds, and that is the point of the signature. A model version is the
+    published calculation capability; there is no honest default for what its
+    damage relationships are, so the caller has to have obtained one.
+    """
+    code = country_code.upper()
+    if vulnerability_set.country_code.upper() != code:
+        raise PilotRegistrationError(
+            f"The vulnerability set is for {vulnerability_set.country_code} and the "
+            f"grid for {code}. A model version pairing them would apply one "
+            "country's buildings to another's ground motion."
+        )
+    try:
         grid_spec = pilot_grids.specification(code)
-        vulnerability_spec = pilot_vulnerability.specification(code)
     except KeyError as exc:
         raise PilotRegistrationError(str(exc)) from None
 
-    cells = grids.build(grid_spec)
-    grid = _register_grid(grid_spec, cells, actor=actor)
-
-    mapping = vulnerability_specs.build(vulnerability_spec)
-    vulnerability_set = _register_vulnerability(vulnerability_spec, mapping, actor=actor)
-
+    grid = register_grid(code, actor=actor)
     model, _ = ModelVersion.objects.update_or_create(
         country_code=code,
         peril=Peril.EARTHQUAKE,
@@ -72,10 +97,10 @@ def register(country_code: str, *, actor=None) -> ModelVersion:
             "label": f"{grid_spec.label.split(' earthquake')[0]} earthquake, SA-only prototype",
             "grid": grid,
             "vulnerability_set": vulnerability_set,
-            "imts": sorted(vulnerability_spec.supported_imts),
+            "imts": sorted(vulnerability_set.imts_used),
             "oed_schema_version": "4.0.0",
             "peril_scope": _peril_scope(),
-            "known_limitations": _limitations(grid_spec, vulnerability_spec),
+            "known_limitations": _limitations(grid_spec, vulnerability_limitations),
             "unsupported_taxonomy_report": {
                 "note": (
                     "OED unknown occupancy (1000) reaches no function by design, so "
@@ -90,11 +115,6 @@ def register(country_code: str, *, actor=None) -> ModelVersion:
         },
     )
     return model
-
-
-def register_all(*, actor=None) -> list[ModelVersion]:
-    """Register every country that has both prototype specifications."""
-    return [register(code, actor=actor) for code in PILOT_COUNTRIES]
 
 
 def _register_grid(specification, cells, *, actor) -> AreaPerilGrid:
@@ -133,41 +153,6 @@ def _register_grid(specification, cells, *, actor) -> AreaPerilGrid:
         actor=actor,
     )
     return grid
-
-
-def _register_vulnerability(specification, mapping, *, actor) -> VulnerabilitySet:
-    vulnerability_set, _ = VulnerabilitySet.objects.update_or_create(
-        country_code=specification.country_code,
-        version=specification.version,
-        defaults={
-            "source": specification.source,
-            "taxonomy_generation": "OED 4.0.0 occupancy and construction codes",
-            "licence": "",
-            # Not a formality. Section 10 puts a data-rights gate before use and
-            # the GEM public models are CC BY-NC-SA with commercial use
-            # unconfirmed, so nothing here may be presumed cleared.
-            "licence_cleared": False,
-            "licence_note": (
-                "No licensed vulnerability source is attached. These identifiers "
-                "route a taxonomy to a function; no damage relationship stands "
-                "behind them yet."
-            ),
-            "function_count": len(mapping.entries),
-            "imts_used": sorted({entry.required_imt for entry in mapping.entries}),
-            "coverage_components": sorted(
-                {str(entry.coverage_type) for entry in mapping.entries}
-            ),
-            "publication_state": PublicationState.DRAFT,
-            "updated_by": actor,
-        },
-    )
-    attach_vulnerability_mapping(
-        vulnerability_set,
-        vulnerability_specs.to_csv(mapping),
-        filename=f"{specification.country_code.lower()}-vuln-{specification.version}.csv",
-        actor=actor,
-    )
-    return vulnerability_set
 
 
 def _refinement_rule(specification) -> str:
@@ -209,17 +194,18 @@ def _peril_scope() -> dict[str, Any]:
     }
 
 
-def _limitations(grid_specification, vulnerability_specification) -> str:
+def _limitations(grid_specification, vulnerability_limitations: str) -> str:
     return "\n".join(
         [
-            "Built from prototype specifications for the phase 3 engine slice. Not a "
-            "country model and not usable for a decision.",
+            "Built on a prototype area-peril grid. Not a country model and not "
+            "usable for a decision.",
             "",
             "Grid:",
             *(f"- {item}" for item in grid_specification.open_questions),
             "",
             "Vulnerability:",
-            *(f"- {item}" for item in vulnerability_specification.open_questions),
+            vulnerability_limitations
+            or "- No limitations were recorded with the vulnerability set.",
         ]
     )
 

@@ -239,8 +239,10 @@ def test_a_missing_loss_category_is_refused(enrichment, prior, bins, policy):
         )
 
 
-def test_an_unapproved_policy_refuses_to_build(enrichment, models, prior, bins):
-    with pytest.raises(Exception, match="has not been approved"):
+def test_a_policy_declaring_no_intensity_measures_refuses_to_build(
+    enrichment, models, prior, bins
+):
+    with pytest.raises(Exception, match="cannot build a vulnerability set"):
         build_country(
             enrichment=enrichment,
             models=models,
@@ -248,6 +250,49 @@ def test_an_unapproved_policy_refuses_to_build(enrichment, models, prior, bins):
             intensity_bins=bins["intensity"],
             damage_bins=bins["damage"],
             policy=ConversionPolicy(),
+        )
+
+
+def test_an_undecided_multi_imt_representation_still_builds(
+    enrichment, models, prior, bins
+):
+    """Producing the multi-channel classes is how they get counted.
+
+    The full conversion gate refuses an undecided representation, and rightly.
+    A vulnerability build is not a conversion of hazard: blocking it here would
+    mean nobody could measure how much of the book needs the decision, which is
+    the evidence the decision is waiting on.
+    """
+    undecided = ConversionPolicy(imts=IMTS)
+    assert undecided.blockers()
+    assert undecided.vulnerability_blockers() == []
+
+    built = build_country(
+        enrichment=enrichment,
+        models=models,
+        prior=prior,
+        intensity_bins=bins["intensity"],
+        damage_bins=bins["damage"],
+        policy=undecided,
+        coverage_types=(1,),
+    )
+    assert built.classes
+
+
+def test_one_common_intensity_measure_is_refused_even_for_a_vulnerability_build(
+    enrichment, models, prior, bins
+):
+    """Section 6: it needs its own derivation, validation and approval."""
+    with pytest.raises(Exception, match="common intensity"):
+        build_country(
+            enrichment=enrichment,
+            models=models,
+            prior=prior,
+            intensity_bins=bins["intensity"],
+            damage_bins=bins["damage"],
+            policy=ConversionPolicy(
+                imts=IMTS, imt_representation=IMTRepresentation.COMMON_IMT
+            ),
         )
 
 

@@ -23,57 +23,25 @@ expensive kind of bug: one that produces plausible numbers.
 from __future__ import annotations
 
 import dataclasses
-import enum
 from typing import Any
+
+from cass_core.policy import EventIdentity, IMTRepresentation
+
+#: Re-exported so a reader of this module sees the whole vocabulary it
+#: gates on. The definitions live in ``cass_core`` because the keys service
+#: reads the multi-IMT choice too.
+__all__ = [
+    "SELF_APPROVING",
+    "UNAPPROVED",
+    "ConversionPolicy",
+    "EventIdentity",
+    "IMTRepresentation",
+    "PolicyNotApproved",
+]
 
 
 class PolicyNotApproved(Exception):
     """Raised when a conversion is attempted under an unapproved policy."""
-
-
-class EventIdentity(enum.StrEnum):
-    """Candidate mappings from OpenQuake output to an Oasis event.
-
-    Section 6 describes two defensible designs and requires a formal
-    specification with worked examples before code depends on one.
-    """
-
-    OCCURRENCE_PER_EVENT = "occurrence_per_event"
-    """Each simulated occurrence becomes a separate Oasis event."""
-
-    RUPTURE_BINNED = "rupture_binned"
-    """Repeated ground-motion samples are aggregated into intensity-bin
-    probabilities for a rupture-level event."""
-
-    UNDECIDED = "undecided"
-    """No policy has been approved. This is the default state, and it is not
-    runnable."""
-
-
-class IMTRepresentation(enum.StrEnum):
-    """Candidate multi-IMT representations, from the section 6 gate."""
-
-    CORRELATED_CHANNELS = "correlated_channels"
-    """Correlated Oasis sub-peril or intensity-measure channels that retain a
-    common event identity and route each vulnerability class to its IMT."""
-
-    CUSTOM_GUL = "custom_gul"
-    """A CASS ground-up-loss component consuming multi-IMT OpenQuake output
-    directly, preserving the Oasis financial-module boundary."""
-
-    OQ_LOSS_HANDOFF = "oq_loss_handoff"
-    """OpenQuake damage or ground-up loss, then an event-loss interface to the
-    Oasis financial calculations. Retained as a fallback."""
-
-    COMMON_IMT = "common_imt"
-    """Convert every function to one intensity measure.
-
-    Explicitly not an accepted default. Section 6: this "would require a
-    separate scientific derivation, validation and approval". It is listed so
-    that choosing it is a recorded decision rather than an accident.
-    """
-
-    UNDECIDED = "undecided"
 
 
 #: Policies that may be used without a specific scientific approval reference.
@@ -135,9 +103,42 @@ class ConversionPolicy:
             )
         return problems
 
+    def vulnerability_blockers(self) -> list[str]:
+        """Reasons a *vulnerability* build in particular may not proceed.
+
+        A narrower gate than the full one, because a vulnerability set is not a
+        conversion of hazard. Which OpenQuake occurrence becomes which Oasis
+        event, and over what investigation time, says nothing about how a
+        building responds to shaking -- so demanding those approvals before a
+        damage table can be built would block work that does not depend on
+        them, and blocking work for no reason is how a gate stops being taken
+        seriously.
+
+        What does bear on it: the intensity measures must be declared, because
+        a function is built against one. The multi-IMT representation
+        deliberately does *not* appear. A build under an undecided one is
+        expected and useful -- it is how the classes that need the decision get
+        counted -- and the refusal happens later, when a risk actually reaches
+        such a class and the keys service has to answer for it.
+        """
+        problems: list[str] = []
+        if not self.imts:
+            problems.append("No intensity measures were declared for this conversion.")
+        if self.imt_representation is IMTRepresentation.COMMON_IMT:
+            problems.append(
+                "Converting every vulnerability function to one common intensity "
+                "measure is not an accepted default. It needs its own scientific "
+                "derivation, validation and approval."
+            )
+        return problems
+
     @property
     def is_runnable(self) -> bool:
         return not self.blockers()
+
+    @property
+    def builds_vulnerability(self) -> bool:
+        return not self.vulnerability_blockers()
 
     def require_runnable(self) -> None:
         """Refuse to proceed under an unapproved policy."""
@@ -145,6 +146,15 @@ class ConversionPolicy:
         if problems:
             raise PolicyNotApproved(
                 "This conversion policy has not been approved:\n- "
+                + "\n- ".join(problems)
+            )
+
+    def require_vulnerability_build(self) -> None:
+        """Refuse a vulnerability build the policy does not support."""
+        problems = self.vulnerability_blockers()
+        if problems:
+            raise PolicyNotApproved(
+                "This policy cannot build a vulnerability set:\n- "
                 + "\n- ".join(problems)
             )
 
@@ -159,6 +169,8 @@ class ConversionPolicy:
             "notes": self.notes,
             "runnable": self.is_runnable,
             "blockers": self.blockers(),
+            "builds_vulnerability": self.builds_vulnerability,
+            "vulnerability_blockers": self.vulnerability_blockers(),
         }
 
 
