@@ -23,6 +23,7 @@ from apps.exposure.models import ExposureVersion
 from apps.modelregistry.models import AreaPerilGrid, ModelVersion, VulnerabilitySet
 from apps.runs.models import AnalysisRun, Run, RunKind
 from apps.runs.services import (
+    DEFAULT_ORD_OUTPUT,
     UNPERFORMED_STAGES,
     AnalysisExecutionError,
     build_analysis_settings,
@@ -96,12 +97,23 @@ def oasis_server(
     lookup_failures=0,
     output=b"ORD-package",
 ):
-    """A server that carries one analysis all the way through."""
-    success_csv = "LocID,AreaPerilID,VulnerabilityID\n" + "".join(
-        f"{n},{n},{n}\n" for n in range(1, lookup_rows + 1)
+    """A server that carries one analysis all the way through.
+
+    The keys files carry the real column set and, like a real lookup, one row
+    per location per peril per coverage type. ``lookup_rows`` counts locations,
+    not rows.
+    """
+    success_csv = (
+        "loc_id,PortNumber,AccNumber,LocNumber,peril_id,coverage_type_id,tiv\n"
+        + "".join(
+            f"{n},1,ACC-1,LOC-{n},{peril},1,100000.0\n"
+            for n in range(1, lookup_rows + 1)
+            for peril in ("QEQ", "QSL")
+        )
     )
-    errors_csv = "LocID,Message\n" + "".join(
-        f"{n},no area peril\n" for n in range(1, lookup_failures + 1)
+    errors_csv = "loc_id,PortNumber,AccNumber,LocNumber,peril_id,message\n" + "".join(
+        f"{n},1,ACC-1,LOC-{n},QEQ,no area peril\n"
+        for n in range(lookup_rows + 1, lookup_rows + lookup_failures + 1)
     )
     return FakeSession(
         {
@@ -311,10 +323,44 @@ def test_keys_reconciliation_is_recorded_against_the_published_count(analysis_ru
     run_it(analysis_run, session, actor=analyst)
 
     analysis_run.refresh_from_db()
+    summary = analysis_run.keys_summary
     assert analysis_run.keys_reconciled is True
-    assert analysis_run.keys_summary["successes"] == 2
-    assert analysis_run.keys_summary["failures"] == 1
-    assert analysis_run.keys_summary["published_locations"] == 3
+    assert summary["mapped_locations"] == 2
+    assert summary["failed_locations"] == 1
+    assert summary["accounted_locations"] == 3
+    assert summary["published_locations"] == 3
+
+
+def test_many_keys_rows_for_one_location_still_reconcile_to_one_location(
+    analysis_run, analyst
+):
+    """Oasis writes a row per location per peril per coverage type.
+
+    The first live PiWind run failed here: twenty rows for ten locations were
+    read as twenty locations, and a perfectly good run was stopped.
+    """
+    session = oasis_server(lookup_rows=3, lookup_failures=0)
+    run_it(analysis_run, session, actor=analyst)
+
+    analysis_run.refresh_from_db()
+    summary = analysis_run.keys_summary
+    assert summary["key_rows"] == 6
+    assert summary["mapped_locations"] == 3
+    assert analysis_run.keys_reconciled is True
+
+
+def test_a_keys_file_without_a_location_column_cannot_be_reconciled(
+    analysis_run, analyst
+):
+    """Section 8 does not allow proceeding on a mapping nobody could check."""
+    session = oasis_server()
+    session.route(
+        "GET",
+        "v2/analyses/7/lookup_success_file/",
+        FakeResponse(200, text="areaperil_id,vulnerability_id\n1,1\n"),
+    )
+    with pytest.raises(AnalysisExecutionError, match="no location identifier column"):
+        run_it(analysis_run, session, actor=analyst)
 
 
 # -- settings ---------------------------------------------------------------
@@ -325,6 +371,31 @@ def test_settings_ask_only_for_the_perspectives_that_were_requested(analysis_run
     assert document["gul_output"] is True
     assert document["il_output"] is False
     assert document["ri_output"] is False
+    assert "il_summaries" not in document
+    assert "ri_summaries" not in document
+
+
+def test_a_requested_perspective_gets_a_summary_block_and_not_just_a_flag(analysis_run):
+    """A bare flag is accepted by Oasis and produces an empty result package."""
+    document = build_analysis_settings(analysis_run)
+    assert document["gul_summaries"] == [{"id": 1, "ord_output": DEFAULT_ORD_OUTPUT}]
+
+
+def test_each_requested_perspective_is_carried_into_the_settings(analysis_run):
+    analysis_run.perspectives = ["ground_up", "insured", "reinsurance"]
+    document = build_analysis_settings(analysis_run)
+    assert [document["gul_output"], document["il_output"], document["ri_output"]] == [
+        True, True, True
+    ]
+    assert {"gul_summaries", "il_summaries", "ri_summaries"} <= set(document)
+
+
+def test_the_default_output_set_is_not_every_output_oasis_can_produce(analysis_run):
+    """Section 11: the PiWind all-output run peaked near 21.6 GB."""
+    ord_output = build_analysis_settings(analysis_run)["gul_summaries"][0]["ord_output"]
+    assert ord_output["elt_moment"] is True
+    assert "plt_sample" not in ord_output
+    assert "psept_aep" not in ord_output
 
 
 def test_an_explicitly_configured_settings_document_is_used_as_given(analysis_run):

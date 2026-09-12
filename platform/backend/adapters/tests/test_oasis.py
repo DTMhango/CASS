@@ -808,3 +808,33 @@ def test_a_response_that_is_not_json_does_not_crash_the_caller():
     session = server()
     session.route("GET", "v2/analyses/7/", FakeResponse(200, text="<html>gateway</html>"))
     assert adapter(session).analysis(7) == {}
+
+
+def test_server_info_is_fetched_with_credentials_when_the_server_demands_them():
+    """A real 2.5.x deployment refuses server_info to an anonymous caller.
+
+    A compatibility check that reported "engine unreachable" because nobody had
+    signed in would send an operator hunting a network fault that is not there.
+    """
+    session = server()
+    session.route(
+        "GET",
+        "server_info/",
+        [
+            FakeResponse(403, text="Authentication credentials were not provided."),
+            FakeResponse(
+                200, {"version": "2.5.7", "config": {"API_AUTH_TYPE": "simple_jwt"}}
+            ),
+        ],
+    )
+    engine = adapter(session)
+    assert engine.version().version == "2.5.7"
+    assert "access_token/" in session.paths("POST")
+
+
+def test_an_unfamiliar_authentication_type_still_signs_in():
+    """2.5.7 reports simple_jwt; only 'disabled' means do not sign in."""
+    session = server(auth="simple_jwt")
+    engine = adapter(session)
+    engine.authenticate()
+    assert "access_token/" in session.paths("POST")

@@ -1,0 +1,26 @@
+# Integration-testing overlay.
+#
+# Section 17 asks for the successful PiWind command-line test to become an
+# automated integration test. That test runs pytest on the host against a real
+# Oasis Platform, so the engine has to be reachable from the host -- which the
+# production compose deliberately does not allow: an engine API is reached
+# through the CASS API, never directly, and publishing its port would make the
+# boundary in section 4 an honour system.
+#
+# Keeping the publication here rather than in the production file means the
+# exception is visible, is named for what it is, and cannot be inherited by a
+# deployment that merely forgot to remove it.
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.integration.yml \
+#                  --env-file .env --profile engines up -d
+#
+# Then run the live suite with CASS_OASIS_LIVE_URL pointing at the published
+# port. Without that variable the live tests skip, so an ordinary test run
+# needs no engines at all.
+
+services:
+  oasis-api:
+    ports:
+      - "${OASIS_API_PORT:-8100}:8000"

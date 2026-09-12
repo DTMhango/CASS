@@ -92,6 +92,38 @@ make schema         # regenerate the OpenAPI contract, failing on any warning
 CI runs the same targets, builds all four container images, scans them, and
 validates the compose file in both profiles.
 
+### The live PiWind baseline
+
+Tests marked `integration` need a real engine and are deselected by default, so
+an ordinary run needs no containers. One suite is marked that way: the official
+PiWind portfolio driven through CASS against a live Oasis Platform, which is
+where the two halves of the boundary — what CASS sends and what Oasis actually
+accepts — are checked against each other.
+
+It needs the PiWind model root mounted and the worker identified as that model:
+
+```bash
+export CASS_MODEL_DATA_PATH=/path/to/OasisPiWind
+export OASIS_MODEL_SUPPLIER_ID=OasisLMF OASIS_MODEL_ID=PiWind OASIS_MODEL_VERSION_ID=1
+docker compose -f deploy/docker-compose.yml \
+               -f deploy/docker-compose.integration.yml \
+               --env-file .env --profile engines up -d \
+               oasis-api oasis-celery oasis-worker
+
+cd backend
+CASS_OASIS_LIVE_URL=http://localhost:8100/api \
+CASS_OASIS_LIVE_PASSWORD="$OASIS_ADMIN_PASS" \
+  .venv/bin/python -m pytest -m integration cass_api/tests/test_piwind_live.py
+```
+
+The model root is the directory holding `model_data/`, `keys_data/`,
+`meta-data/` and `oasislmf.json` — the layout the worker's `conf.ini` expects at
+`/home/worker/model`. The integration overlay publishes the Oasis port to the
+host; the production compose deliberately does not, because an engine API is
+reached through the CASS API and never directly.
+
+`make up-engines` starts the same services without publishing that port.
+
 ## What is built
 
 **The M1 journey works end to end.** An analyst signs in, creates a project,

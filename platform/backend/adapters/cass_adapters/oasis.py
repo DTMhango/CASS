@@ -437,10 +437,15 @@ class OasisAdapter(EngineAdapter):
 
     # -- the base contract -------------------------------------------------
     def version(self) -> EngineVersion:
-        """Ask the server what it is."""
-        body = _json_or_empty(
-            self._send("GET", self._root("server_info/"), authenticate=False)
-        )
+        """Ask the server what it is.
+
+        ``server_info`` needs credentials on a real 2.5.x deployment, unlike
+        ``healthcheck``. The request therefore goes through the authenticated
+        path, which signs in first if no token is held yet: a compatibility
+        check that reported "engine unreachable" because nobody had signed in
+        would send an operator hunting for a network fault that is not there.
+        """
+        body = _json_or_empty(self._send("GET", self._root("server_info/")))
         config = body.get("config") or {}
         reported = (
             body.get("version")

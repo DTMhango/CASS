@@ -164,7 +164,9 @@ CASS_DEFAULT_EXECUTION_PROFILE = env("CASS_DEFAULT_EXECUTION_PROFILE", "standard
 # -- engine adapters --------------------------------------------------------
 
 CASS_OPENQUAKE_URL = env("CASS_OPENQUAKE_URL", "http://openquake:8800")
-CASS_OASIS_API_URL = env("CASS_OASIS_API_URL", "http://oasis-api:8000")
+#: The Oasis Platform serves its API under an /api prefix, so the base URL
+#: carries it. Pointing at the bare host answers 404 to every call.
+CASS_OASIS_API_URL = env("CASS_OASIS_API_URL", "http://oasis-api:8000/api")
 CASS_KEYS_SERVICE_URL = env("CASS_KEYS_SERVICE_URL", "http://keys:8010")
 CASS_CONVERTER_URL = env("CASS_CONVERTER_URL", "http://converter:8020")
 

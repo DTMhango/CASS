@@ -42,6 +42,7 @@ holding a queue slot.
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 
@@ -98,13 +99,49 @@ class AnalysisExecutionError(Exception):
 
 # -- settings ---------------------------------------------------------------
 
-def build_analysis_settings(analysis_run: AnalysisRun) -> dict:
+#: The ORD outputs CASS asks for by default.
+#:
+#: Deliberately not every output Oasis can produce. Section 11 records that the
+#: PiWind run reached roughly 21.6 GB at peak under an all-output configuration
+#: and requires compute profiles to be declared rather than inherited from
+#: maximum parallelism. These four answer the questions a portfolio result has
+#: to answer -- what each event costs, what the exceedance curves look like, and
+#: what the average annual loss is -- and a run that needs more says so
+#: explicitly in its own settings document.
+DEFAULT_ORD_OUTPUT: dict[str, bool] = {
+    "elt_moment": True,
+    "alt_period": True,
+    "ept_mean_sample_aep": True,
+    "ept_mean_sample_oep": True,
+    "return_period_file": True,
+}
+
+#: Which settings keys carry each perspective.
+_PERSPECTIVE_KEYS: dict[str, tuple[str, str]] = {
+    str(Perspective.GROUND_UP): ("gul_output", "gul_summaries"),
+    str(Perspective.INSURED): ("il_output", "il_summaries"),
+    str(Perspective.REINSURANCE): ("ri_output", "ri_summaries"),
+}
+
+
+def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
     """The analysis settings document Oasis is given.
 
     An explicitly configured document wins. Otherwise one is derived from the
     requested perspectives, because section 8 forbids generating a placeholder
     financial file to imply a perspective the source data does not support: if
     insured loss was not requested, the settings must not ask for it.
+
+    Each requested perspective needs both its output flag and a summary block.
+    A flag on its own is accepted by Oasis and produces nothing, which is worse
+    than a refusal: the run succeeds and the result package is empty.
+
+    ``model_supplier_id``, ``model_name_id`` and ``model_settings`` are required
+    by the server's settings schema. The first two name the resolved Oasis
+    model, so the document cannot drift from the model the analysis is bound
+    to. ``model_settings`` is left empty on purpose: event set and occurrence
+    choices belong to the model's own defaults, and filling them in here would
+    put a CASS guess inside a model's configuration.
     """
     if analysis_run.analysis_settings:
         return dict(analysis_run.analysis_settings)
@@ -113,15 +150,22 @@ def build_analysis_settings(analysis_run: AnalysisRun) -> dict:
     if not requested:
         requested = {str(Perspective.GROUND_UP)}
 
+    supplier, model_name, _ = oasis_model_triple()
     settings_document: dict = {
+        "version": "3",
         "analysis_tag": str(analysis_run.run_id),
         "model_version_id": str(analysis_run.model_version_id),
-        "gul_output": str(Perspective.GROUND_UP) in requested,
-        "il_output": str(Perspective.INSURED) in requested,
-        "ri_output": str(Perspective.REINSURANCE) in requested,
+        "model_supplier_id": model.supplier_id if model is not None else supplier,
+        "model_name_id": model.model_id if model is not None else model_name,
+        "model_settings": {},
     }
-    if analysis_run.run_currency:
-        settings_document["model_settings"] = {"currency": analysis_run.run_currency}
+    for perspective, (flag, summaries) in _PERSPECTIVE_KEYS.items():
+        wanted = perspective in requested
+        settings_document[flag] = wanted
+        if wanted:
+            settings_document[summaries] = [
+                {"id": 1, "ord_output": dict(DEFAULT_ORD_OUTPUT)}
+            ]
     return settings_document
 
 
@@ -207,7 +251,7 @@ def _generate_inputs(analysis_run, engine, actor, *, poll_interval, timeout) -> 
     analysis_id = engine.create_analysis(
         f"cass-{run.id}", int(analysis_run.oasis_portfolio_id), model.id
     )
-    document = build_analysis_settings(analysis_run)
+    document = build_analysis_settings(analysis_run, model)
     engine.upload_settings(analysis_id, document)
 
     analysis_run.oasis_analysis_id = str(analysis_id)
@@ -246,17 +290,26 @@ def _validate_inputs(analysis_run, engine, actor) -> dict:
     analysis_id = int(analysis_run.oasis_analysis_id)
     report = engine.keys_report(analysis_id)
 
+    mapped = _keys_locations(report["success"], "successful")
+    failed = _keys_locations(report["errors"], "failed")
+    accounted = mapped | failed
+    located = _location_count(analysis_run)
+
     summary = {
         "source": "oasis_lookup",
-        "successes": _csv_rows(report["success"]),
-        "failures": _csv_rows(report["errors"]),
+        "mapped_locations": len(mapped),
+        "failed_locations": len(failed),
+        "accounted_locations": len(accounted),
+        "published_locations": located,
+        # Row counts are one per location per peril per coverage type. They are
+        # kept as evidence of how much the model matched, but they are not the
+        # reconciliation: comparing them to a location count is what a keys
+        # file that maps two perils per site would fail for no reason.
+        "key_rows": _csv_rows(report["success"]),
+        "error_rows": _csv_rows(report["errors"]),
         "validation_rows": _csv_rows(report["validation"]),
     }
-    located = _location_count(analysis_run)
-    summary["published_locations"] = located
-    accounted = summary["successes"] + summary["failures"]
-    summary["accounted"] = accounted
-    reconciled = located == 0 or accounted == located
+    reconciled = located == 0 or len(accounted) == located
 
     analysis_run.keys_summary = summary
     analysis_run.keys_reconciled = reconciled
@@ -265,7 +318,7 @@ def _validate_inputs(analysis_run, engine, actor) -> dict:
     if not reconciled:
         raise AnalysisExecutionError(
             "Oasis's lookup accounted for "
-            f"{accounted} of {located} published locations. "
+            f"{len(accounted)} of {located} published locations. "
             "A location that is neither mapped nor reported as failed has been lost "
             "between the published OED and the model, so the run cannot continue."
         )
@@ -274,8 +327,8 @@ def _validate_inputs(analysis_run, engine, actor) -> dict:
         "validate_inputs",
         actor=actor,
         message=(
-            f"Oasis mapped {summary['successes']} locations and reported "
-            f"{summary['failures']} as unmappable."
+            f"Oasis mapped {len(mapped)} locations and reported "
+            f"{len(failed)} as unmappable."
         ),
         metrics=summary,
     )
@@ -569,6 +622,52 @@ def _csv_rows(text: str) -> int:
     """Count data rows in a CSV payload, ignoring the header and blank lines."""
     lines = [line for line in (text or "").splitlines() if line.strip()]
     return max(0, len(lines) - 1) if lines else 0
+
+
+#: Columns an Oasis keys file may use for the location identity, best first.
+#: ``LocNumber`` is the OED identifier and the one the published exposure
+#: shares; ``loc_id`` is Oasis's own sequential index and only a fallback.
+_LOCATION_COLUMNS = ("locnumber", "loc_id", "locid")
+
+
+def _keys_locations(text: str, what: str) -> set[str]:
+    """The distinct locations a keys file accounts for.
+
+    Oasis writes one row per location per peril per coverage type, so ten
+    locations covering two perils produce twenty rows. Counting rows and
+    comparing them to a location count fails a perfectly good run, which is
+    exactly what the first live PiWind run did.
+
+    A file whose header carries no recognisable location column cannot be
+    reconciled at all, and section 8 does not allow proceeding on an
+    unreconciled mapping, so that is raised rather than treated as empty.
+    """
+    if not (text or "").strip():
+        return set()
+
+    reader = csv.reader(io.StringIO(text))
+    try:
+        header = next(reader)
+    except StopIteration:
+        return set()
+
+    columns = {name.strip().lower(): position for position, name in enumerate(header)}
+    for candidate in _LOCATION_COLUMNS:
+        if candidate in columns:
+            index = columns[candidate]
+            break
+    else:
+        raise AnalysisExecutionError(
+            f"Oasis's {what} keys output has no location identifier column, so the "
+            "mapping cannot be reconciled against the published exposure. "
+            f"Columns present: {', '.join(header)}."
+        )
+
+    return {
+        row[index].strip()
+        for row in reader
+        if len(row) > index and row[index].strip()
+    }
 
 
 def _location_count(analysis_run) -> int:

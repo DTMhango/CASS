@@ -26,6 +26,28 @@ x-artifact-env: &artifact-env
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-cass-local}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-cass-local-secret}
 
+# Oasis reads configuration from OASIS_<SECTION>_<KEY>. Both the API server and
+# the worker need the [celery] result backend: the worker's startup script waits
+# on db_host:db_port before it will start at all.
+x-oasis-celery-env: &oasis-celery-env
+  OASIS_CELERY_BROKER_URL: redis://redis:6379/2
+  OASIS_CELERY_DB_ENGINE: db+postgresql
+  OASIS_CELERY_DB_HOST: postgres
+  OASIS_CELERY_DB_PORT: 5432
+  OASIS_CELERY_DB_NAME: ${OASIS_CELERY_DB_NAME:-celery}
+  OASIS_CELERY_DB_USER: ${POSTGRES_USER:-cass}
+  OASIS_CELERY_DB_PASS: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+
+# The [server] database keys. The API server and its celery worker must agree
+# on these exactly -- they are two processes over one database.
+x-oasis-server-env: &oasis-server-env
+  OASIS_SERVER_DB_ENGINE: django.db.backends.postgresql
+  OASIS_SERVER_DB_HOST: postgres
+  OASIS_SERVER_DB_PORT: 5432
+  OASIS_SERVER_DB_NAME: ${OASIS_SERVER_DB_NAME:-oasis}
+  OASIS_SERVER_DB_USER: ${POSTGRES_USER:-cass}
+  OASIS_SERVER_DB_PASS: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+
 x-django-env: &django-env
   DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-cass.settings.dev}
   CASS_SECRET_KEY: ${CASS_SECRET_KEY:?set CASS_SECRET_KEY in .env}
@@ -38,7 +60,7 @@ x-django-env: &django-env
   CASS_BROKER_URL: redis://redis:6379/0
   CASS_RESULT_BACKEND: redis://redis:6379/1
   CASS_OPENQUAKE_URL: http://openquake:8800
-  CASS_OASIS_API_URL: http://oasis-api:8000
+  CASS_OASIS_API_URL: http://oasis-api:8000/api
   CASS_OASIS_USERNAME: ${OASIS_ADMIN_USER:-admin}
   CASS_OASIS_PASSWORD: ${OASIS_ADMIN_PASS:?set OASIS_ADMIN_PASS in .env}
   CASS_OASIS_MODEL_SUPPLIER_ID: ${OASIS_MODEL_SUPPLIER_ID:-KRE}
@@ -59,6 +81,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Creates the Oasis server and celery-result databases on a fresh volume.
+      # Postgres only runs these on first initialisation, which is the right
+      # semantics: they are part of standing an installation up, not of every
+      # restart.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cass} -d ${POSTGRES_DB:-cass}"]
       interval: 5s
@@ -232,10 +259,13 @@ services:
   oasis-api:
     image: coreoasis/api_server:2.5.7
     environment:
+      <<: [*oasis-celery-env, *oasis-server-env]
       OASIS_ADMIN_USER: ${OASIS_ADMIN_USER:-admin}
       OASIS_ADMIN_PASS: ${OASIS_ADMIN_PASS:?set OASIS_ADMIN_PASS in .env}
-      OASIS_SERVER_DB_HOST: postgres
-      OASIS_CELERY_BROKER_URL: redis://redis:6379/2
+      # The server's startup script only migrates its database when this is
+      # true. Without it the container comes up against an empty schema and
+      # fails creating the administrator, with "auth_user does not exist".
+      STARTUP_RUN_MIGRATIONS: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -250,16 +280,62 @@ services:
   oasis-worker:
     image: coreoasis/model_worker:2.5.7
     environment:
+      <<: *oasis-celery-env
+      # The queue the worker consumes is named from this triple, and the API
+      # publishes to the same name, so a mismatch here is a job that is
+      # accepted and never picked up.
       OASIS_MODEL_SUPPLIER_ID: ${OASIS_MODEL_SUPPLIER_ID:-KRE}
       OASIS_MODEL_ID: ${OASIS_MODEL_ID:-EQ}
       OASIS_MODEL_VERSION_ID: ${OASIS_MODEL_VERSION_ID:-1}
-      OASIS_CELERY_BROKER_URL: redis://redis:6379/2
+      # v1 is the single-server task set: the worker takes a job off its own
+      # queue and runs it through. That matches the deployment section 2
+      # specifies -- KRE servers or an approved local Docker installation.
+      #
+      # v2 is the distributed, chunked task set. It needs an orchestration
+      # worker consuming the API's own celery-v2 queues, which this compose
+      # does not run: set it and analyses queue forever with no sub-tasks.
+      # The worker refuses to start if this is unset entirely.
+      OASIS_RUN_MODE: ${OASIS_RUN_MODE:-v1}
     depends_on:
       oasis-api:
         condition: service_started
     volumes:
       - oasis-data:/shared-fs
-      - ${CASS_MODEL_DATA_PATH:-./model_data}:/home/worker/model_data:ro
+      # The worker's conf.ini sets MODEL_DATA_DIRECTORY=/home/worker/model and
+      # reads meta-data/model_settings.json beneath it, so the mount is the
+      # model root -- model_data/, keys_data/, meta-data/ and oasislmf.json --
+      # not the model_data directory alone.
+      - ${CASS_MODEL_DATA_PATH:-./model_data}:/home/worker/model:ro
+    profiles: ["engines"]
+
+  # The API server's celery worker, and the service this stack was missing.
+  #
+  # Gunicorn serves requests; it does not consume a queue. Without this, a
+  # model worker takes a job, finishes it, and nothing ever records the result:
+  # the worker log says input generation completed while the analysis sits at
+  # INPUTS_GENERATION_QUEUED forever. It is also what consumes a model worker's
+  # registration broadcast, so without it a model never appears in the API and
+  # the first analysis is refused with "'run_mode' must not be null" -- which
+  # reads as a bad request rather than as a missing service.
+  #
+  # It reuses the API image so the startup script's database waits apply, with
+  # migrations left to the API server so two processes do not race one schema.
+  oasis-celery:
+    image: coreoasis/api_server:2.5.7
+    environment:
+      <<: [*oasis-celery-env, *oasis-server-env]
+    command:
+      - celery
+      - --app
+      - src.server.oasisapi.celery_app_v1:v1
+      - worker
+      - --loglevel=INFO
+      - --queues=celery
+    depends_on:
+      oasis-api:
+        condition: service_started
+    volumes:
+      - oasis-data:/shared-fs
     profiles: ["engines"]
 
 volumes:
