@@ -31,7 +31,7 @@ from .cohorts import (
     assign,
     assign_all,
     business_complete,
-    profile,
+    cohort_profile,
 )
 from .components import (
     BUILDING_ONLY,
@@ -174,7 +174,7 @@ __all__ = [
     "uniform",
     "country_code",
     "masked",
-    "profile",
+    "cohort_profile",
     "read_rows",
     "read_workbook",
 ]

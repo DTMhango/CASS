@@ -30,9 +30,9 @@ from cass_extract import (
     assign_all,
     build_join_report,
     business_complete,
+    cohort_profile,
     country_code,
     masked,
-    profile,
     read_workbook,
 )
 from cass_extract.schema import is_not_applicable
@@ -444,7 +444,7 @@ def test_every_source_row_keeps_an_assignment(rows):
 
 def test_the_cohort_profile_counts_by_country_and_class(rows):
     _, locations = rows
-    summary = profile(locations, assign_all(locations))
+    summary = cohort_profile(locations, assign_all(locations))
 
     assert summary.counts[str(Cohort.A)] == 9
     assert summary.counts[str(Cohort.B)] == 1

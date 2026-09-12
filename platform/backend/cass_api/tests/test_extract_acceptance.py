@@ -775,3 +775,162 @@ def test_the_sensitivity_moves_the_amount_it_claims_to(batch, analyst, pilot_mod
     # Within a cent per business: the shares are exact rationals but the
     # amounts are whole cents, so a residual can land either way.
     assert abs(gross - expected) <= Decimal("0.01") * len(material)
+
+
+# -- migrating the pilot portfolio to the CASS intake template ---------------------------
+
+@needs_extract
+def test_the_migration_preserves_every_acceptance_figure(batch):
+    """The retirement is only safe if the numbers survive it.
+
+    Each of these appears in section 7 of the integration brief, and each is
+    reproduced here from the migrated template rather than from the workbook,
+    so the two formats are proved to describe the same portfolio.
+    """
+    from decimal import Decimal
+
+    from cass_extract import legacy
+
+    _, result = legacy.migrate(EXTRACT_PATH, project_reference="idn-fac-2026")
+    report = result.as_dict()
+
+    assert report["risks"] == 224
+    assert report["policies"] == 1353
+    assert Decimal(report["source_tiv"]) == Decimal("3327746598.60")
+    assert Decimal(report["geocoded_tiv"]) == Decimal("822816504.04")
+    assert Decimal(report["value_left_to_allocate"]) == Decimal("55176423.17")
+    assert report["multi_site_businesses"] == 10
+    assert report["risks_awaiting_allocation"] == 21
+
+
+@needs_extract
+def test_the_migrated_template_reads_back_cleanly(batch):
+    """One finding, and it is the state of the book rather than a defect."""
+    import io
+
+    from cass_extract import intake, legacy
+
+    payload, _ = legacy.migrate(EXTRACT_PATH, project_reference="idn-fac-2026")
+    read = intake.read_workbook(io.BytesIO(payload))
+
+    assert read.is_readable is True
+    assert len(read.risks.rows) == 224
+    assert len(read.policies.rows) == 1353
+    assert [item.code for item in read.findings] == ["policy_without_risks"]
+    assert read.findings[0].value == "1138"
+
+
+@needs_extract
+def test_the_allocation_question_becomes_visible_in_the_data(batch):
+    """The point of the new shape, on the real book.
+
+    Under the old format every one of the 213 geocoded policies carried an
+    allocation assumption whether it needed one or not. Under this one, 203
+    businesses state what their site is worth and only the 21 risks of the ten
+    multi-site businesses await a division -- which is exactly the population
+    the step 6 materiality report identified.
+    """
+    import io
+
+    from cass_extract import intake, legacy
+
+    payload, _ = legacy.migrate(EXTRACT_PATH, project_reference="idn-fac-2026")
+    read = intake.read_workbook(io.BytesIO(payload))
+
+    assert dict(intake.coverage_evidence(read)) == {
+        "risks": 224,
+        "coverages_stated": 0,
+        "risk_total_stated": 203,
+        "allocated_from_policy": 21,
+    }
+
+
+@needs_extract
+def test_the_migration_is_reproducible(batch):
+    """A confidential fixture nobody can regenerate is one nobody can check."""
+    import io
+
+    from cass_extract import intake, legacy
+
+    # Compared as content, not as bytes: an xlsx is a zip and openpyxl stamps
+    # its entries with the time of writing, so two identical workbooks differ
+    # by a byte or two. What has to be stable is every cell.
+    def rows():
+        payload, _ = legacy.migrate(EXTRACT_PATH, generated=dt.date(2026, 6, 30))
+        read = intake.read_workbook(io.BytesIO(payload))
+        return (
+            [dict(row.raw) for row in read.risks.rows],
+            [dict(row.raw) for row in read.policies.rows],
+        )
+
+    first_risks, first_policies = rows()
+    second_risks, second_policies = rows()
+    assert first_risks == second_risks
+    assert first_policies == second_policies
+
+
+@needs_extract
+def test_no_counterparty_column_crosses_into_the_template(batch):
+    """Insured, cedent and broker have no destination in the new format.
+
+    The columns, that is. Six of the source's addresses *begin* with the
+    insured's registered name -- "PT Ainul Hayat Sejahtera, Mangunreja 42455"
+    -- so a counterparty name does reach the template inside the address, and
+    stripping it would corrupt an address a reviewer needs. The protection is
+    the same either way: Address is a confidential column, so it is role-gated
+    and never logged, and the test below holds that.
+    """
+    from cass_extract import legacy, profile
+    from cass_extract.reader import read_workbook
+
+    converted = legacy.convert(read_workbook(EXTRACT_PATH))
+    written = {key for row in converted.risks for key in row}
+    written |= {key for row in converted.policies for key in row}
+
+    assert not written & {"insured_name", "cedent_name", "broker_name", "business_title"}
+    # "Total insured value" is an amount, not a party, so match whole names.
+    assert not {
+        item
+        for item in written
+        if item.lower() in ("insured", "cedent", "broker", "business title", "insured name")
+    }
+    # Every column that can carry a name is marked confidential in the profile.
+    assert profile.column("Address").is_confidential
+    assert profile.column("Risk name").is_confidential
+
+
+@needs_extract
+def test_an_address_that_embeds_a_name_is_still_a_confidential_column(batch):
+    """The reason Address is role-gated rather than merely tidy.
+
+    A geocoded address in this source is not neutral text: for some risks it
+    is the counterparty's registered name with a street after it. Treating the
+    column as open because "it is only an address" would put those names in
+    front of a modeller and into any log that quoted a row.
+    """
+    from cass_extract import legacy, profile
+    from cass_extract.reader import read_workbook
+
+    source = read_workbook(EXTRACT_PATH)
+    names = {
+        str(row.get("insured_name") or "").strip()
+        for row in source.policies.rows
+        if row.get("insured_name")
+    }
+    converted = legacy.convert(source)
+    embedded = [
+        row
+        for row in converted.risks
+        if any(name and name in str(row.get("Address", "")) for name in names)
+    ]
+
+    assert embedded, "the source does embed insured names in addresses"
+    assert profile.column("Address").is_confidential
+    # And nowhere else on the row.
+    for row in embedded:
+        others = {
+            key: value for key, value in row.items() if key not in ("Address", "Risk name")
+        }
+        assert not any(
+            name and name in str(value) for value in others.values() for name in names
+        )

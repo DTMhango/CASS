@@ -155,7 +155,7 @@ def import_extract(
 
     report = extract.build_join_report(policies, locations)
     assignments = extract.assign_all(locations)
-    cohort_profile = extract.profile(locations, assignments)
+    cohort_profile = extract.cohort_profile(locations, assignments)
 
     with transaction.atomic():
         batch = ImportBatch.objects.create(

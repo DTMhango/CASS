@@ -220,7 +220,7 @@ class CohortProfile:
         }
 
 
-def profile(
+def cohort_profile(
     locations: Iterable[Mapping[str, Any]], assignments: Iterable[Assignment]
 ) -> CohortProfile:
     """Summarise an assignment set the way the review screen shows it."""
