@@ -164,6 +164,34 @@ class PlatformInfoView(APIView):
         )
 
 
+class EngineStatusView(APIView):
+    """Whether each engine is reachable and running a tested version.
+
+    Kept apart from the platform metadata view because this one talks to the
+    engines. Metadata is a cheap read that a screen can poll; this is a network
+    call per engine, and folding the two together would make every page load
+    wait on an Oasis server that might be down.
+
+    Section 18 is the reason the answer is not merely "reachable": an engine
+    answering on an untested version is a compatibility question an operator
+    has to see before submitting a run, not after one produces a result nobody
+    can defend.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses=inline_serializer(
+            name="EngineStatus",
+            fields={"engines": serializers.DictField()},
+        )
+    )
+    def get(self, request, *args, **kwargs):
+        from apps.common.engines import describe_engines
+
+        return Response({"engines": describe_engines()})
+
+
 class HealthView(APIView):
     """Liveness and readiness, unauthenticated so a probe can reach it."""
 

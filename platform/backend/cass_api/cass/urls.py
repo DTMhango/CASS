@@ -16,7 +16,13 @@ from drf_spectacular.views import (
 )
 from rest_framework.routers import DefaultRouter
 
-from apps.accounts.api import HealthView, PlatformInfoView, SessionView, UserViewSet
+from apps.accounts.api import (
+    EngineStatusView,
+    HealthView,
+    PlatformInfoView,
+    SessionView,
+    UserViewSet,
+)
 from apps.artifacts.api import ArtifactViewSet
 from apps.audit.api import ApprovalViewSet, AuditEventViewSet
 from apps.exposure.api import EnrichmentRunViewSet, ExposureVersionViewSet
@@ -61,6 +67,7 @@ router.register("comparisons", ResultComparisonViewSet, basename="comparison")
 api_patterns = [
     path("session/", SessionView.as_view(), name="session"),
     path("platform/", PlatformInfoView.as_view(), name="platform-info"),
+    path("engines/", EngineStatusView.as_view(), name="engine-status"),
     path("", include(router.urls)),
 ]
 

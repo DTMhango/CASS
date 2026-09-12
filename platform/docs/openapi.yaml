@@ -1263,6 +1263,33 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/engines/:
+    get:
+      operationId: api_v1_engines_retrieve
+      description: |-
+        Whether each engine is reachable and running a tested version.
+
+        Kept apart from the platform metadata view because this one talks to the
+        engines. Metadata is a cheap read that a screen can poll; this is a network
+        call per engine, and folding the two together would make every page load
+        wait on an Oasis server that might be down.
+
+        Section 18 is the reason the answer is not merely "reachable": an engine
+        answering on an untested version is a compatibility question an operator
+        has to see before submitting a run, not after one produces a result nobody
+        can defend.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineStatus'
+          description: ''
   /api/v1/enrichment-runs/:
     get:
       operationId: api_v1_enrichment_runs_list
@@ -4209,6 +4236,14 @@ components:
         * `approved` - Approved
         * `rejected` - Rejected
         * `withdrawn` - Withdrawn
+    EngineStatus:
+      type: object
+      properties:
+        engines:
+          type: object
+          additionalProperties: {}
+      required:
+      - engines
     EnrichmentRun:
       type: object
       properties:

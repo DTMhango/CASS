@@ -168,6 +168,18 @@ CASS_OASIS_API_URL = env("CASS_OASIS_API_URL", "http://oasis-api:8000")
 CASS_KEYS_SERVICE_URL = env("CASS_KEYS_SERVICE_URL", "http://keys:8010")
 CASS_CONVERTER_URL = env("CASS_CONVERTER_URL", "http://converter:8020")
 
+#: Oasis Platform credentials. The adapter asks the server whether it wants
+#: authentication at all, so a local server with it switched off needs neither
+#: of these; a deployment with section 10's access control on needs both.
+CASS_OASIS_USERNAME = env("CASS_OASIS_USERNAME", "")
+CASS_OASIS_PASSWORD = env("CASS_OASIS_PASSWORD", "")
+
+#: The model triple as the Oasis server registers it. KRE here is Klapton
+#: Reinsurance as the model supplier, not the platform.
+CASS_OASIS_MODEL_SUPPLIER_ID = env("CASS_OASIS_MODEL_SUPPLIER_ID", "KRE")
+CASS_OASIS_MODEL_ID = env("CASS_OASIS_MODEL_ID", "EQ")
+CASS_OASIS_MODEL_VERSION_ID = env("CASS_OASIS_MODEL_VERSION_ID", "1")
+
 #: Tested engine combinations. Section 18 requires promotion only after
 #: contract and regression suites pass, so this is data a release updates.
 CASS_COMPATIBILITY_MATRIX = [
