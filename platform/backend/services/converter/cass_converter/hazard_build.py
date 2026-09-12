@@ -84,6 +84,10 @@ class HazardSet:
     intensity_bins: Mapping[str, IntensityBinSet]
     metrics: ConversionMetrics
     problems: tuple[str, ...]
+    #: How the event set and the footprint line up. Held apart from
+    #: ``problems`` because most of what it reports is expected: a national
+    #: event set over a regional grid contains many events that do nothing here.
+    coverage: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     job: HazardJob | None = None
     build_version: str = HAZARD_BUILD_VERSION
 
@@ -115,6 +119,7 @@ class HazardSet:
                 imt: len(self.rows_for(imt)) for imt in self.imts
             },
             "conversion": self.metrics.as_dict(),
+            "event_coverage": dict(self.coverage),
             "valid": self.is_valid,
             "problems": list(self.problems),
             "job": self.job.as_dict() if self.job is not None else None,
@@ -215,7 +220,8 @@ def build_hazard(
     rows.extend(accumulator.close())
 
     problems = list(validate_footprint(rows))
-    problems.extend(check_event_coverage(rows, [item.event_id for item in events]))
+    coverage = check_event_coverage(rows, [item.event_id for item in events])
+    problems.extend(coverage["problems"])
     if accumulator.metrics.clips_the_hazard:
         problems.append(
             f"{accumulator.metrics.samples_above_range} ground-motion values "
@@ -235,6 +241,7 @@ def build_hazard(
         intensity_bins=dict(intensity_bins),
         metrics=accumulator.metrics,
         problems=tuple(problems),
+        coverage=coverage,
         job=job,
     )
 

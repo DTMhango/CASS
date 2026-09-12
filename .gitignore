@@ -56,3 +56,11 @@ premium_policies_2026-06-30_geocoded.xlsx
 # and carry the name of whoever opened it.
 ~$*
 data/private/
+
+# Licensed PSHA source models. CC BY-NC-SA, tens of megabytes of NRML, and the
+# platform's own copy lives in the artifact store -- these are the operator's
+# working copy. Tracked via models/hazard/*/*/MANIFEST.md.
+models/hazard/*/*/ssm/
+models/hazard/*/*/*.hdf5
+models/hazard/*/*/iid-*.csv
+models/hazard/*.zip

@@ -210,6 +210,125 @@ class VulnerabilitySet(BaseModel, FreezableModel):
         )
 
 
+class HazardModel(BaseModel, FreezableModel):
+    """An uploaded PSHA source model package, before any calculation is run.
+
+    A published national model arrives as an archive of NRML and a ``job.ini``,
+    and until now getting one into CASS meant an operator with a shell. This is
+    the record of one that was uploaded: its files in the artifact store, its
+    configuration parsed into editable parameters, and the licence somebody
+    asserted about it.
+
+    Distinct from ``HazardSet``, which is the *output* of running one. A model
+    is uploaded once and run many times -- at different investigation times, on
+    different grids, with different event set counts -- and each run is its own
+    hazard set. Conflating them would make re-running a model at a longer
+    return period look like acquiring a different model.
+    """
+
+    country_code = models.CharField(max_length=2, db_index=True)
+    version = models.CharField(max_length=32)
+    label = models.CharField(max_length=200)
+
+    #: What the publisher calls it, and who they are. Neither is derivable from
+    #: the archive: OpenQuake records that a source model was used, never whose.
+    source_organisation = models.CharField(max_length=200, blank=True)
+    publication_reference = models.CharField(max_length=300, blank=True)
+    licence = models.CharField(max_length=120, blank=True)
+    licence_cleared = models.BooleanField(default=False)
+    licence_note = models.TextField(blank=True)
+
+    archive_checksum = models.CharField(max_length=64, blank=True)
+    archive_bytes = models.BigIntegerField(default=0)
+    file_manifest = models.JSONField(
+        default=list, help_text="Every file in the package, with its size and checksum."
+    )
+
+    #: The published job.ini, parsed. Held as JSON rather than reparsed on each
+    #: request so the editor renders from one reading of the file.
+    job_configuration = models.JSONField(default=dict)
+    published_calculation_mode = models.CharField(max_length=32, blank=True)
+    intensity_measures = models.JSONField(default=list)
+    tectonic_regions = models.JSONField(default=list)
+    estimated_realizations = models.IntegerField(default=0)
+    logic_tree_summary = models.JSONField(default=dict)
+
+    publication_state = models.CharField(
+        max_length=16, choices=PublicationState.choices, default=PublicationState.DRAFT
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["country_code", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["country_code", "version"], name="unique_hazard_model_version"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.country_code} hazard model {self.version}"
+
+    @property
+    def reference(self) -> str:
+        return f"{self.country_code.lower()}-hazmodel-{self.version}"
+
+    @property
+    def needs_conversion(self) -> bool:
+        """Whether the published configuration has to change to make a footprint."""
+        return self.published_calculation_mode != "event_based"
+
+    @property
+    def needs_sampling(self) -> bool:
+        """Whether the logic tree has to be sampled down to one realisation."""
+        return self.estimated_realizations > 1
+
+
+class HazardJobSpec(BaseModel):
+    """One configured run of an uploaded model, before it is executed.
+
+    The thing the editor edits. It holds the operator's parameter choices and
+    nothing else -- the model's own files and science stay on ``HazardModel``,
+    so a spec can be revised, copied and compared without touching them.
+
+    Kept after the run so a hazard set can always name the configuration that
+    produced it, which is the only way two footprints from one model can be
+    told apart.
+    """
+
+    model = models.ForeignKey(
+        HazardModel, on_delete=models.PROTECT, related_name="job_specs"
+    )
+    name = models.CharField(max_length=200)
+    grid = models.ForeignKey(
+        AreaPerilGrid, on_delete=models.PROTECT, related_name="hazard_job_specs"
+    )
+
+    #: The operator's edits, as parameter name to value. Applied over the
+    #: model's published configuration rather than replacing it, so a setting
+    #: nobody touched keeps whatever the publisher chose.
+    overrides = models.JSONField(default=dict)
+    #: The configuration those edits produce, rendered and validated. Stored so
+    #: a reviewer sees what would run rather than having to recompute it.
+    resolved_configuration = models.JSONField(default=dict)
+    conversion_report = models.JSONField(default=dict)
+    site_join_report = models.JSONField(default=dict)
+    problems = models.JSONField(default=list)
+
+    is_runnable = models.BooleanField(default=False)
+    job_checksum = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.model})"
+
+    @property
+    def blocking_problems(self) -> list[dict]:
+        return [item for item in self.problems if item.get("severity") == "error"]
+
+
 class HazardSet(BaseModel, FreezableModel):
     """A versioned event set and its footprints, with the calculation behind them.
 

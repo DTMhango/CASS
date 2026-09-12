@@ -344,16 +344,27 @@ def test_validation_catches_a_repeated_intensity_bin():
     assert any("more than once" in problem for problem in validate_footprint(broken))
 
 
-def test_an_event_with_no_footprint_is_reported(bin_sets):
-    """Frequency without loss understates the answer silently."""
+def test_an_event_with_no_footprint_is_counted_but_not_called_a_defect(bin_sets):
+    """A national event set over a regional grid is mostly events that miss.
+
+    An earthquake off Sulawesi occurs and does nothing in Jakarta, so it
+    correctly contributes an occurrence and no loss. Reported as a share,
+    because if it were *most* of the set the grid and the sources would not be
+    describing the same place.
+    """
     rows, _ = build_footprint([sample(1, 10, "0.5")], bin_sets)
-    problems = check_event_coverage(rows, [1, 2, 3])
-    assert any("no footprint rows" in problem for problem in problems)
+    coverage = check_event_coverage(rows, [1, 2, 3])
+    assert coverage["events_without_footprint"] == 2
+    assert coverage["silent_share"] == pytest.approx(2 / 3)
+    assert coverage["problems"] == []
 
 
-def test_a_footprint_event_outside_the_event_set_is_reported(bin_sets):
+def test_a_footprint_event_outside_the_event_set_is_a_defect(bin_sets):
+    """Loss with no occurrence behind it contributes damage at no frequency."""
     rows, _ = build_footprint([sample(9, 10, "0.5")], bin_sets)
-    assert any("not in the event set" in p for p in check_event_coverage(rows, [1]))
+    coverage = check_event_coverage(rows, [1])
+    assert coverage["unknown_events"] == 1
+    assert any("not in the event set" in item for item in coverage["problems"])
 
 
 # -- occurrence and frequency ----------------------------------------------

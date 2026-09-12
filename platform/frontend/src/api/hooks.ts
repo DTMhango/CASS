@@ -16,11 +16,16 @@ import {
 
 import { api, rows } from "./client";
 import type {
+  AreaPerilGridSummary,
   CatalogueModel,
   ExposurePreview,
+  ConfiguredRun,
   ExposureVersion,
+  HazardModel,
   ImportResults,
+  JobParameter,
   OEDFileKind,
+  PackageInspection,
   Paginated,
   PortfolioImport,
   PlatformInfo,
@@ -350,5 +355,104 @@ export function useRecordDecision(batchId: UUID) {
       ),
     onSuccess: () =>
       client.invalidateQueries({ queryKey: ["portfolio-imports", batchId] }),
+  });
+}
+
+// -- uploaded hazard models --------------------------------------------------
+
+export function useHazardModels(countryCode?: string) {
+  return useQuery({
+    queryKey: ["hazard-models", countryCode ?? "all"] as const,
+    queryFn: async () =>
+      rows(
+        await api.get<Paginated<HazardModel>>(
+          "/hazard-models/",
+          countryCode ? { country_code: countryCode } : undefined,
+        ),
+      ),
+  });
+}
+
+export function useJobParameters() {
+  return useQuery({
+    queryKey: ["hazard-models", "parameters"] as const,
+    queryFn: () => api.get<JobParameter[]>("/hazard-models/parameters/"),
+    staleTime: Infinity,
+  });
+}
+
+/** Read an archive and say what it is, storing nothing. */
+export function useInspectPackage() {
+  return useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData();
+      body.append("archive", file);
+      return api.upload<PackageInspection>("/hazard-models/inspect/", body);
+    },
+  });
+}
+
+export function useUploadHazardModel() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      file: File;
+      country_code: string;
+      version: string;
+      label: string;
+      source_organisation?: string;
+      licence?: string;
+    }) => {
+      const body = new FormData();
+      body.append("archive", input.file);
+      body.append("country_code", input.country_code);
+      body.append("version", input.version);
+      body.append("label", input.label);
+      if (input.source_organisation)
+        body.append("source_organisation", input.source_organisation);
+      if (input.licence) body.append("licence", input.licence);
+      return api.upload<HazardModel>("/hazard-models/upload/", body);
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ["hazard-models"] }),
+  });
+}
+
+/**
+ * Resolve a configuration without running it.
+ *
+ * Called on every edit rather than on submit, because the point of the screen
+ * is that a national calculation's problems are visible while somebody is
+ * still looking at it. Finding out after four hours is the expensive way.
+ */
+export function useConfigureRun(modelId: UUID) {
+  return useMutation({
+    mutationFn: (input: { grid: UUID; overrides: Record<string, unknown> }) =>
+      api.post<ConfiguredRun>(`/hazard-models/${modelId}/configure/`, input),
+  });
+}
+
+export function useSaveRunSpec(modelId: UUID) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      grid: UUID;
+      name: string;
+      overrides: Record<string, unknown>;
+    }) => api.post(`/hazard-models/${modelId}/specs/`, input),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: ["hazard-models", modelId] }),
+  });
+}
+
+export function useGrids(countryCode?: string) {
+  return useQuery({
+    queryKey: ["grids", countryCode ?? "all"] as const,
+    queryFn: async () =>
+      rows(
+        await api.get<Paginated<AreaPerilGridSummary>>(
+          "/grids/",
+          countryCode ? { country_code: countryCode } : undefined,
+        ),
+      ),
   });
 }

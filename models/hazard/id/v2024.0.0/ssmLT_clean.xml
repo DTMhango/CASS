@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nrml xmlns:gml="http://www.opengis.net/gml"
+      xmlns="http://openquake.org/xmlns/nrml/0.4">
+    <logicTree logicTreeID="lt1">
+            <logicTreeBranchSet uncertaintyType="sourceModel" branchSetID="bs1">
+                <logicTreeBranch branchID="b1">
+                      <uncertaintyModel>
+                        ssm/gridded/layer1.xml
+                        ssm/gridded/layer2.xml
+                        ssm/gridded/layer3.xml
+                        ssm/gridded/layer4.xml
+                        ssm/gridded/layer5.xml
+                        ssm/gridded/layer6.xml
+                        ssm/interface/Sub_Indo_GR_S1.xml
+			            ssm/interface/Sub_Indo_CH_S1.xml
+                        ssm/crust/Indo_Faults_GR.xml
+                        ssm/crust/Indo_Faults_CH.xml
+                      </uncertaintyModel>
+                    <uncertaintyWeight>0.9</uncertaintyWeight>
+                </logicTreeBranch>
+                <logicTreeBranch branchID="b2">
+                      <uncertaintyModel>
+                        ssm/gridded/layer1.xml
+                        ssm/gridded/layer2.xml
+                        ssm/gridded/layer3.xml
+                        ssm/gridded/layer4.xml
+                        ssm/gridded/layer5.xml
+                        ssm/gridded/layer6.xml
+                        ssm/interface/Sub_Indo_GR_S2.xml
+                        ssm/interface/Sub_Indo_CH_S2.xml
+                        ssm/crust/Indo_Faults_GR.xml
+                        ssm/crust/Indo_Faults_CH.xml
+                      </uncertaintyModel>
+                    <uncertaintyWeight>0.1</uncertaintyWeight>
+                </logicTreeBranch>
+            </logicTreeBranchSet>
+    </logicTree>
+</nrml>

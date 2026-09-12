@@ -72,9 +72,28 @@ VULNERABILITY_DICTIONARY_ROLE = "vulnerability_dictionary"
 #: that visible instead of hiding four tables behind one role.
 HAZARD_ROLE_PREFIX = "hazard_"
 
+#: One role per file of an uploaded PSHA package. A national model is a
+#: directory of NRML naming its parts from the job configuration, so the
+#: published path is the identity and flattening them under one role would
+#: leave nothing able to find the file a logic tree references.
+HAZARD_MODEL_ROLE_PREFIX = "hazard_model:"
+
 #: Separator for multi-valued taxonomy columns. A comma would collide with the
 #: CSV itself and quoting a list inside a cell is how a reviewer misreads one.
 CODE_SEPARATOR = "|"
+
+#: Media types for the file kinds a model asset can be. A source model is NRML,
+#: which is XML, and storing it as text/csv would make it unreadable to
+#: anything that trusts the content type.
+_MEDIA_TYPES = {
+    "json": "application/json",
+    "xml": "application/xml",
+    "ini": "text/plain",
+    "md": "text/markdown",
+    "txt": "text/plain",
+    "hdf5": "application/x-hdf5",
+    "csv": "text/csv",
+}
 
 GRID_COLUMNS = (
     "AreaPerilID",
@@ -98,8 +117,21 @@ class ModelAssetError(Exception):
 
 # -- registering -------------------------------------------------------------
 
-def _attach(subject, subject_type: str, role: str, payload: bytes, filename: str, actor):
-    """Store one model asset and link it to its registry record."""
+def _attach(
+    subject,
+    subject_type: str,
+    role: str,
+    payload: bytes,
+    filename: str,
+    actor,
+    key: str | None = None,
+):
+    """Store one model asset and link it to its registry record.
+
+    ``key`` overrides the stored path. A hazard model package keeps the paths
+    its own logic trees reference, and those are directories rather than a
+    role name.
+    """
     # Taken from the filename the caller chose rather than assumed: the
     # provenance dictionary is JSON, and storing it as text/csv would make it
     # unreadable to anything that trusts the content type.
@@ -107,9 +139,9 @@ def _attach(subject, subject_type: str, role: str, payload: bytes, filename: str
     store = get_store()
     ref = store.put_bytes(
         bucket("model"),
-        f"{subject_type}/{subject.id}/{role}.{suffix}",
+        key or f"{subject_type}/{subject.id}/{role}.{suffix}",
         payload,
-        content_type="application/json" if suffix == "json" else "text/csv",
+        content_type=_MEDIA_TYPES.get(suffix, "text/csv"),
         retention=RetentionClass.MODEL_ASSET,
         access=AccessPolicy.MODEL,
     )
@@ -368,6 +400,24 @@ def attach_hazard_asset(hazard_set, filename: str, payload: bytes, *, actor=None
     """
     role = HAZARD_ROLE_PREFIX + pathlib.PurePosixPath(filename).stem
     return _attach(hazard_set, "hazard_set", role, payload, filename, actor)
+
+
+def attach_hazard_model_file(model, path: str, payload: bytes, *, actor=None):
+    """Register one file of an uploaded hazard model package.
+
+    Stored under its path inside the package, because a source model logic tree
+    references its files by relative path and a store that renamed them would
+    hold a model nothing could assemble.
+    """
+    return _attach(
+        model,
+        "hazard_model",
+        HAZARD_MODEL_ROLE_PREFIX + path,
+        payload,
+        pathlib.PurePosixPath(path).name,
+        actor,
+        key=f"hazard_model/{model.id}/files/{path}",
+    )
 
 
 def _read_vulnerability(text: str) -> Iterator[VulnerabilityEntry]:

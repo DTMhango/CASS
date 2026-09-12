@@ -1,0 +1,169 @@
+/* The hazard model upload and configuration screen.
+ *
+ * Layout only. The meaning is in the markup: a parameter beside its
+ * consequence, a published value beside the one that will run.
+ */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* Registered models ------------------------------------------------------- */
+
+.models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.models__item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.models__item:hover {
+  background: var(--grey-100);
+}
+
+.models__item--active {
+  background: var(--kre-blue-subtle);
+  border-color: var(--kre-blue-border);
+  box-shadow: inset 3px 0 0 var(--kre-blue);
+}
+
+.models__name {
+  font-weight: 600;
+}
+
+/* Each flag is a reason this model is not yet usable, so they read as a row
+   of small warnings rather than as decoration. */
+.models__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.models__flags em {
+  font-style: normal;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--amber-subtle, var(--grey-100));
+  color: var(--grey-800);
+}
+
+/* Forms ------------------------------------------------------------------- */
+
+.upload-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.save-run {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+}
+
+/* Package contents -------------------------------------------------------- */
+
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: var(--text-sm);
+}
+
+.files li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+/* Consequences and changes ------------------------------------------------ */
+
+.consequences {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.consequences dt {
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.consequences dd {
+  margin: 2px 0 0;
+  color: var(--grey-700);
+  font-size: var(--text-sm);
+  max-width: 70ch;
+}
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.grid th,
+.grid td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--grey-200);
+  vertical-align: top;
+}
+
+.grid thead th {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--grey-600);
+  border-bottom-width: 2px;
+}
+
+.notes {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-5);
+  color: var(--grey-700);
+  font-size: var(--text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.rendered {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--grey-050, var(--grey-100));
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  overflow-x: auto;
+  max-height: 420px;
+}

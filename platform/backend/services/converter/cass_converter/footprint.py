@@ -296,26 +296,49 @@ def validate_footprint(rows: Iterable[FootprintRow]) -> list[str]:
 def check_event_coverage(
     rows: Iterable[FootprintRow],
     expected_event_ids: Iterable[int],
-) -> list[str]:
-    """Report events that produced no footprint, and rows for unknown events.
+) -> dict[str, Any]:
+    """How the event set and the footprint line up, and which gaps matter.
 
-    An event that reaches the occurrence table but has no footprint contributes
-    frequency without loss, which understates the answer silently.
+    Two things can disagree here and only one of them is a defect.
+
+    An event in the set with **no footprint rows** is usually not a defect at
+    all. A national source model produces earthquakes across the whole country
+    and a footprint covers the cells a portfolio sits in, so a rupture off
+    Sulawesi does nothing in Jakarta and correctly contributes an occurrence
+    with no loss. It is reported as a share rather than a problem, because the
+    number is worth seeing -- if it is *most* of the set, the grid and the
+    source model may not be describing the same place.
+
+    A footprint row for an event **not in the set** is always a defect: it is
+    loss with no occurrence behind it, so it contributes damage at no frequency
+    and nothing downstream will notice.
     """
     present = {row.event_id for row in rows}
     expected = set(expected_event_ids)
 
-    problems: list[str] = []
-    missing = sorted(expected - present)
-    if missing:
-        problems.append(
-            f"{len(missing)} event(s) have no footprint rows, starting with "
-            f"{missing[:5]}"
-        )
+    silent = sorted(expected - present)
     unknown = sorted(present - expected)
+
+    problems: list[str] = []
     if unknown:
         problems.append(
-            f"{len(unknown)} footprint event(s) are not in the event set, starting "
-            f"with {unknown[:5]}"
+            f"{len(unknown)} footprint event(s) are not in the event set, "
+            f"starting with {unknown[:5]}. Loss with no occurrence behind it "
+            "contributes damage at no frequency."
         )
-    return problems
+
+    return {
+        "events_expected": len(expected),
+        "events_with_footprint": len(expected & present),
+        "events_without_footprint": len(silent),
+        "silent_share": len(silent) / len(expected) if expected else 0.0,
+        "silent_examples": silent[:5],
+        "unknown_events": len(unknown),
+        "problems": problems,
+        "note": (
+            "An event with no footprint rows caused no ground motion above the "
+            "minimum intensity at any cell in this domain. For a national source "
+            "model over a regional grid that is the ordinary case and not a "
+            "defect: the event occurred and did nothing here."
+        ),
+    }

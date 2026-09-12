@@ -17,6 +17,7 @@ import { Administration } from "@/pages/Administration";
 import { AnalysisBuilder } from "@/pages/AnalysisBuilder";
 import { Dashboard } from "@/pages/Dashboard";
 import { ExposureWorkspace } from "@/pages/ExposureWorkspace";
+import { HazardModels } from "@/pages/HazardModels";
 import { ImportReview } from "@/pages/ImportReview";
 import { ModelBuild } from "@/pages/ModelBuild";
 import { ModelCatalogue } from "@/pages/ModelCatalogue";
@@ -50,6 +51,7 @@ export function App() {
         <Route path="runs/:runId" element={<RunMonitor />} />
         <Route path="results" element={<ResultsWorkspace />} />
         <Route path="model-build" element={<ModelBuild />} />
+        <Route path="hazard-models" element={<HazardModels />} />
         <Route path="administration" element={<Administration />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

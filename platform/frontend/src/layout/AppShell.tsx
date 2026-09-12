@@ -77,6 +77,12 @@ const NAVIGATION: NavItem[] = [
     description: "Hazard runs, converter QA and approval gates",
   },
   {
+    to: "/hazard-models",
+    label: "Hazard models",
+    glyph: "◇",
+    description: "Upload a published seismic model and configure a run",
+  },
+  {
     to: "/administration",
     label: "Administration",
     glyph: "⚙",

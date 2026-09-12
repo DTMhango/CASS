@@ -18,11 +18,10 @@ top bin has nowhere to go, and clipping it removes precisely the events that
 drive the loss. So the top is set well above what a footprint is expected to
 carry rather than at it.
 
-Both are drafts. The counts below are chosen to be fine enough that the
-reconstruction check in ``vulnerability`` passes comfortably on the GEM
-functions, and they have not been tuned against a real footprint -- there is
-no footprint yet. When one exists, the intensity range should be re-derived
-from it rather than left at these limits.
+The damage bins remain a draft. The intensity ranges are no longer: they were
+re-derived from an event-based run of the published PuSGeN 2024 Indonesia model
+after the first one clipped, and the derivation is recorded against
+``INTENSITY_RANGE`` below.
 """
 
 from __future__ import annotations
@@ -45,20 +44,38 @@ DAMAGE_BIN_INTERIOR = 20
 #: Intensity bins per measure, logarithmically spaced. Ground motion spans
 #: orders of magnitude and vulnerability functions are steepest at the low end,
 #: so equal ratios carry more information than equal differences.
-INTENSITY_BIN_COUNT = 40
+#:
+#: Raised from 40 when the ranges below were widened, so widening the top did
+#: not coarsen the resolution where the functions are steep.
+INTENSITY_BIN_COUNT = 50
 
 #: Lowest and highest ground motion each measure is binned over, in g.
 #:
-#: The floor is below any motion that causes reportable damage; the ceiling is
-#: above the largest value expected in either pilot country. Short-period
-#: measures are given a higher ceiling than long-period ones because that is
-#: how a response spectrum is shaped -- a near-field record can exceed 2 g at
-#: 0.3 s and will not approach it at 1.0 s.
+#: The floor is below any motion that causes reportable damage. The ceiling is
+#: the asymmetric one: motion above the top bin has nowhere to go, and dropping
+#: it removes precisely the events that drive the loss.
+#:
+#: These are now derived from a footprint rather than guessed. An event-based
+#: run of the PuSGeN 2024 Indonesia model over the Jakarta-Bandung cells --
+#: 27,413 events across 1,000 years, 858 cells, subduction and crustal sources
+#: -- produced maxima of 2.30 g PGA, 6.34 g at 0.3 s, 4.61 g at 0.6 s and
+#: 4.05 g at 1.0 s. Three of those four exceeded the ranges that stood before,
+#: which were set against a prototype crustal source model that could not
+#: produce a megathrust.
+#:
+#: Each ceiling is set near double the observed maximum. The observation is one
+#: realisation of one model over one region, so it is a floor on what is
+#: needed rather than a bound on it, and doubling is what keeps a larger event
+#: set from clipping. The clipping check reports any that still do.
+#:
+#: The short-period measures keep the higher ceilings because that is the shape
+#: of a response spectrum -- a near-field record reaches further above 1 g at
+#: 0.3 s than at 1.0 s.
 INTENSITY_RANGE: Mapping[str, tuple[str, str]] = {
-    "PGA": ("0.005", "4.0"),
-    "SA(0.3)": ("0.005", "6.0"),
-    "SA(0.6)": ("0.005", "4.0"),
-    "SA(1.0)": ("0.005", "3.0"),
+    "PGA": ("0.005", "6.0"),
+    "SA(0.3)": ("0.005", "13.0"),
+    "SA(0.6)": ("0.005", "9.0"),
+    "SA(1.0)": ("0.005", "8.0"),
 }
 
 #: The measures GEM's pilot-country functions demand. Not a choice: it is what

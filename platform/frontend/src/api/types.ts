@@ -411,3 +411,118 @@ export interface ImportResults {
   use_modes: { mode: string; meaning: string }[];
   allocation_note: string;
 }
+
+// -- uploaded hazard models --------------------------------------------------
+
+export interface JobParameter {
+  name: string;
+  section: string;
+  kind: string;
+  label: string;
+  editability: "model" | "science" | "discretisation" | "output";
+  help_text: string;
+  consequence: string;
+  choices: string[];
+  minimum: number | null;
+  maximum: number | null;
+  unit: string;
+  required_for_footprint: string;
+}
+
+export interface JobSetting {
+  name: string;
+  section: string;
+  value: string;
+  recognised: boolean;
+  parameter: JobParameter | null;
+}
+
+export interface JobProblem {
+  parameter: string;
+  severity: "error" | "warning";
+  message: string;
+}
+
+export interface JobConfiguration {
+  source_name: string;
+  checksum: string;
+  calculation_mode: string;
+  is_event_based: boolean;
+  intensity_measures: string[];
+  effective_time: number | null;
+  unrecognised: string[];
+  settings: JobSetting[];
+  problems: JobProblem[];
+  runnable: boolean;
+  footprint_requirements: string[];
+  editable: Record<string, string[]>;
+}
+
+export interface LogicTreeSummary {
+  estimated_realizations: number;
+  tectonic_regions?: string[];
+  source_branch_sets?: { tectonic_region: string; branches: number }[];
+  gsim_branch_sets?: { tectonic_region: string; branches: number }[];
+  note: string;
+}
+
+export interface HazardModel {
+  id: UUID;
+  reference: string;
+  country_code: string;
+  version: string;
+  label: string;
+  source_organisation: string;
+  publication_reference: string;
+  licence: string;
+  licence_cleared: boolean;
+  licence_note: string;
+  archive_checksum: string;
+  archive_bytes: number;
+  file_manifest: { path: string; size_bytes: number; checksum: string }[];
+  published_calculation_mode: string;
+  intensity_measures: string[];
+  tectonic_regions: string[];
+  estimated_realizations: number;
+  logic_tree_summary: LogicTreeSummary;
+  needs_conversion: boolean;
+  needs_sampling: boolean;
+  publication_state: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface PackageInspection {
+  job_path: string;
+  files: { path: string; size_bytes: number; checksum: string }[];
+  file_count: number;
+  archive_checksum: string;
+  archive_bytes: number;
+  configuration: JobConfiguration;
+  logic_trees: LogicTreeSummary;
+}
+
+export interface ConfiguredRun {
+  overrides: Record<string, string | number>;
+  configuration: JobConfiguration;
+  conversion: {
+    changes: { parameter: string; from: string; to: string }[];
+    removed: string[];
+    notes: string[];
+  };
+  site_join: Record<string, unknown>;
+  problems: JobProblem[];
+  runnable: boolean;
+  job_checksum: string;
+  rendered: string;
+}
+
+export interface AreaPerilGridSummary {
+  id: UUID;
+  reference: string;
+  country_code: string;
+  version: string;
+  label: string;
+  cell_count: number;
+  publication_state: string;
+}

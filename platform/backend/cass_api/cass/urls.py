@@ -34,6 +34,7 @@ from apps.exposure.api import (
 from apps.modelregistry.api import (
     AreaPerilGridViewSet,
     AssumptionSetViewSet,
+    HazardModelViewSet,
     ModelVersionViewSet,
     VulnerabilitySetViewSet,
 )
@@ -61,6 +62,7 @@ router.register(
 
 router.register("grids", AreaPerilGridViewSet, basename="grid")
 router.register("vulnerability-sets", VulnerabilitySetViewSet, basename="vulnerability-set")
+router.register("hazard-models", HazardModelViewSet, basename="hazard-model")
 router.register("assumption-sets", AssumptionSetViewSet, basename="assumption-set")
 router.register("model-versions", ModelVersionViewSet, basename="model-version")
 
