@@ -252,7 +252,7 @@ def allocate_policy(
         evidence = AllocationEvidence.ASSUMED
         weights = [Fraction(1, count)] * count
 
-    amounts = _apportion(tiv, weights)
+    amounts = apportion(tiv, weights)
     floors = _floor_cents(tiv, weights)
     shares = tuple(
         LocationShare(
@@ -393,7 +393,7 @@ def concentration_envelope(
 
 # -- exact apportionment ------------------------------------------------------------
 
-def _apportion(total: Decimal, weights: Sequence[Fraction]) -> list[Decimal]:
+def apportion(total: Decimal, weights: Sequence[Fraction]) -> list[Decimal]:
     """Divide an amount by exact weights, to the cent, losing nothing.
 
     Integer cents and rational weights throughout. The cents that rounding
@@ -463,3 +463,8 @@ def _is_yes(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in ("yes", "y", "true", "1")
+
+
+#: The location allocation and the coverage split both need exact
+#: apportionment, and there must be exactly one implementation of it.
+_apportion = apportion

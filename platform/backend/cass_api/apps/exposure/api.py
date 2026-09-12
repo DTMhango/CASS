@@ -7,13 +7,19 @@ immutable version.
 
 from __future__ import annotations
 
+import json
+
 from django.conf import settings
 from django.utils.dateparse import parse_date
+from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+import cass_extract
 from apps.artifacts.models import ArtifactLink
 from apps.audit import services as audit
 from apps.audit.models import AuditAction
@@ -23,7 +29,7 @@ from apps.projects.models import Project
 from cass_oed.schema import FileKind
 
 from . import extract as extract_service
-from . import services
+from . import promotion, services
 from .models import (
     AttributeOverride,
     EnrichmentRun,
@@ -493,6 +499,64 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
             )
         )
 
+
+    @action(detail=True, methods=["post"])
+    def promote(self, request, pk=None, version=None):
+        """Turn a cohort selection into a published OED exposure version.
+
+        The assumptions are the caller's to choose: which cohort, how a
+        multi-location policy divides, and how a location total splits across
+        coverages. Every one of them is recorded on the version that results,
+        so a later reader can see what produced it and run it again differently.
+        """
+        batch = self.get_object()
+        if not batch.project.may_write(request.user):
+            return Response(
+                {"detail": "You may not promote imports in this project."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        name = str(request.data.get("name") or "").strip()
+        if not name:
+            return Response(
+                {"detail": "Name the exposure version this selection produces."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            cohort = cass_extract.Cohort(str(request.data.get("cohort") or "A"))
+            method = cass_extract.AllocationMethod(
+                str(
+                    request.data.get("allocation_method")
+                    or cass_extract.AllocationMethod.EQUAL_LOCATION
+                )
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        class_of_business = request.data.get("class_of_business", "Fire")
+        if class_of_business in ("", "any", None):
+            class_of_business = None
+
+        try:
+            split = _requested_split(request.data)
+            exposure = promotion.promote(
+                batch,
+                name=name,
+                cohort=cohort,
+                class_of_business=class_of_business,
+                allocation_method=method,
+                component_split=split,
+                actor=request.user,
+                request=request,
+            )
+        except (promotion.PromotionError, cass_extract.AllocationError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        return Response(
+            promotion.promotion_summary(exposure), status=status.HTTP_201_CREATED
+        )
+
     @action(detail=True, methods=["post"])
     def accept(self, request, pk=None, version=None):
         """Record that the join report and cohorts have been reviewed."""
@@ -507,3 +571,95 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         except extract_service.ExtractImportError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(self.get_serializer(batch).data)
+
+
+def _requested_split(data) -> cass_extract.ComponentSplit:
+    """The coverage split the caller asked for, preset or their own.
+
+    Custom percentages are accepted because the point of the assumption is that
+    someone can change it. They are still validated to sum to 100 rather than
+    normalised: normalising would silently apply something other than what was
+    asked for.
+    """
+    percentages = data.get("coverage_percentages")
+    if percentages:
+        if isinstance(percentages, str):
+            percentages = json.loads(percentages)
+        return cass_extract.custom(
+            str(data.get("coverage_split") or "custom_v1"),
+            percentages,
+            description=str(data.get("coverage_split_description") or ""),
+        )
+    requested = str(data.get("coverage_split") or "").strip()
+    if not requested:
+        return cass_extract.DEFAULT_SPLIT
+    return cass_extract.preset(requested)
+
+
+
+class AssumptionCatalogueView(APIView):
+    """The assumptions a promotion may be run under.
+
+    Returned as data rather than hard-coded in the browser, so the interface
+    offers exactly what the platform supports and a new scenario appears
+    without a frontend release. Every entry says whether an approved prior
+    stands behind it, because the difference between a test assumption and an
+    approved one is the difference between a research result and a usable one.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses=inline_serializer(
+            name="AssumptionCatalogue",
+            fields={
+                "cohorts": serializers.ListField(),
+                "allocation_methods": serializers.ListField(),
+                "coverage_splits": serializers.ListField(),
+                "coverages": serializers.ListField(),
+            },
+        )
+    )
+    def get(self, request, *args, **kwargs):
+        return Response(
+            {
+                "cohorts": [
+                    {"value": str(item), "label": item.label}
+                    for item in cass_extract.Cohort
+                    if item is not cass_extract.Cohort.UNCLASSIFIED
+                ],
+                "allocation_methods": [
+                    {
+                        "value": str(cass_extract.AllocationMethod.EQUAL_LOCATION),
+                        "label": "Equal across locations",
+                        "description": (
+                            "The maximum-ignorance baseline. Introduces no ranking "
+                            "among sites that the source does not support."
+                        ),
+                        "baseline": True,
+                    },
+                    {
+                        "value": str(cass_extract.AllocationMethod.PRIMARY_CONCENTRATED),
+                        "label": "Primary concentrated (70/30)",
+                        "description": (
+                            "Sensitivity: 70% at the reported primary site, 30% shared "
+                            "by the rest. Tests whether the primary flag is "
+                            "economically material without asserting that it is."
+                        ),
+                        "baseline": False,
+                    },
+                ],
+                "coverage_splits": [
+                    split.as_dict()
+                    for split in sorted(
+                        cass_extract.PRESETS.values(), key=lambda item: item.name
+                    )
+                ],
+                "coverages": [
+                    {"value": str(item), "label": item.label}
+                    for item in cass_extract.COVERAGE_ORDER
+                ],
+                "default_coverage_split": cass_extract.DEFAULT_SPLIT.name,
+                "custom_split_allowed": True,
+            }
+        )

@@ -21,6 +21,7 @@ from .allocation import (
     PolicyAllocation,
     allocate,
     allocate_policy,
+    apportion,
     concentration_envelope,
 )
 from .cohorts import (
@@ -31,6 +32,19 @@ from .cohorts import (
     assign_all,
     business_complete,
     profile,
+)
+from .components import (
+    BUILDING_ONLY,
+    COMPONENT_RULE_VERSION,
+    COVERAGE_ORDER,
+    DEFAULT_SPLIT,
+    PRESETS,
+    ComponentSplit,
+    Coverage,
+    custom,
+    preset,
+    reconciliation,
+    split_locations,
 )
 from .join import JOIN_RULE_VERSION, JoinFinding, JoinReport, JoinSeverity
 from .join import build as build_join_report
@@ -61,7 +75,12 @@ from .schema import (
 
 __all__ = [
     "ALLOCATION_RULE_VERSION",
+    "BUILDING_ONLY",
+    "COMPONENT_RULE_VERSION",
+    "COVERAGE_ORDER",
     "COHORT_RULE_VERSION",
+    "DEFAULT_SPLIT",
+    "PRESETS",
     "CONFIDENTIAL_COLUMNS",
     "JOIN_RULE_VERSION",
     "LOCATION_FIELDS",
@@ -77,6 +96,8 @@ __all__ = [
     "AllocationResult",
     "Assignment",
     "Cohort",
+    "ComponentSplit",
+    "Coverage",
     "DataType",
     "ExtractRead",
     "ExtractReadError",
@@ -97,7 +118,12 @@ __all__ = [
     "assign_all",
     "build_join_report",
     "business_complete",
+    "apportion",
     "concentration_envelope",
+    "custom",
+    "preset",
+    "reconciliation",
+    "split_locations",
     "country_code",
     "masked",
     "profile",

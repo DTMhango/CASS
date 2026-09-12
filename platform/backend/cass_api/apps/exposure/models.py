@@ -86,6 +86,12 @@ class ExposureVersion(BaseModel, FreezableModel):
     )
     unmodelled_subperils = models.JSONField(default=list, blank=True)
 
+    #: How this version was derived from a source extract: the batch it came
+    #: from, the cohort selected, the allocation scenario and which attributes
+    #: were not reported. Section 8 forbids an assumed attribute overwriting a
+    #: reported one, and this is where the difference between the two is kept.
+    source_lineage = models.JSONField(default=dict, blank=True)
+
     supersedes = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.PROTECT, related_name="superseded_by"
     )
@@ -313,6 +319,13 @@ class ImportBatch(BaseModel):
     join_report = models.JSONField(default=dict, blank=True)
     cohort_profile = models.JSONField(default=dict, blank=True)
 
+    #: The exposure versions promoted out of this batch. A batch can produce
+    #: more than one -- a cohort A benchmark and a multi-location sensitivity
+    #: are different selections of the same read.
+    exposure_versions = models.ManyToManyField(
+        "exposure.ExposureVersion", blank=True, related_name="source_batches"
+    )
+
     accepted_at = models.DateTimeField(null=True, blank=True)
     accepted_by = models.ForeignKey(
         "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
@@ -414,6 +427,11 @@ class SourceRiskLocation(BaseModel):
     #: Validated ISO code, empty where the source country was not recognised.
     #: A guess here would route a location to the wrong national grid.
     country_code = models.CharField(max_length=2, blank=True)
+
+    #: Section 4.4 asks for a deterministic location identifier. Derived from
+    #: the source checksum and the natural key, so the same location in the
+    #: same source is the same identifier on every read, in every project.
+    cass_location_id = models.UUIDField(null=True, blank=True, db_index=True)
 
     cohort = models.CharField(max_length=16, db_index=True)
     cohort_reason = models.CharField(max_length=200, blank=True)

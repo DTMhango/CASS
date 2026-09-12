@@ -826,6 +826,29 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/assumptions/:
+    get:
+      operationId: api_v1_assumptions_retrieve
+      description: |-
+        The assumptions a promotion may be run under.
+
+        Returned as data rather than hard-coded in the browser, so the interface
+        offers exactly what the platform supports and a new scenario appears
+        without a frontend release. Every entry says whether an approved prior
+        stands behind it, because the difference between a test assumption and an
+        approved one is the difference between a research result and a usable one.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssumptionCatalogue'
+          description: ''
   /api/v1/audit-events/:
     get:
       operationId: api_v1_audit_events_list
@@ -2570,6 +2593,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportBatch'
           description: ''
+  /api/v1/portfolio-imports/{id}/promote/:
+    post:
+      operationId: api_v1_portfolio_imports_promote_create
+      description: |-
+        Turn a cohort selection into a published OED exposure version.
+
+        The assumptions are the caller's to choose: which cohort, how a
+        multi-location policy divides, and how a location total splits across
+        coverages. Every one of them is recorded on the version that results,
+        so a later reader can see what produced it and run it again differently.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
   /api/v1/portfolio-imports/upload/:
     post:
       operationId: api_v1_portfolio_imports_upload_create
@@ -4188,6 +4241,26 @@ components:
         * `registered` - Registered
         * `quarantined` - Quarantined
         * `expired` - Expired
+    AssumptionCatalogue:
+      type: object
+      properties:
+        cohorts:
+          type: array
+          items: {}
+        allocation_methods:
+          type: array
+          items: {}
+        coverage_splits:
+          type: array
+          items: {}
+        coverages:
+          type: array
+          items: {}
+      required:
+      - allocation_methods
+      - cohorts
+      - coverage_splits
+      - coverages
     AssumptionSet:
       type: object
       properties:

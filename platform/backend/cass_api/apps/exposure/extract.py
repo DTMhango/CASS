@@ -18,6 +18,7 @@ database and the storage rules without a workbook.
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
@@ -42,6 +43,16 @@ from .models import (
 
 #: The role the raw workbook is registered under.
 SOURCE_ROLE = "portfolio_extract_source"
+
+#: Namespace for deterministic location identifiers. A fixed UUID, so the same
+#: location in the same source resolves to the same identifier on every read,
+#: in every project and every installation.
+LOCATION_NAMESPACE = uuid.UUID("6f5b3f2c-1a44-4f0e-9a1d-0c9a4d6e5b71")
+
+
+def location_identity(checksum: str, business_id: str, location_number: int) -> uuid.UUID:
+    """The deterministic internal identifier section 4.4 asks for."""
+    return uuid.uuid5(LOCATION_NAMESPACE, f"{checksum}:{business_id}:{location_number}")
 
 
 class ExtractImportError(Exception):
@@ -245,6 +256,11 @@ def _stage_locations(batch: ImportBatch, rows, assignments) -> None:
                 row_number=row.row_number,
                 business_id=str(row.get("business_id") or "")[:64],
                 location_number=int(row.get("location_number") or 0),
+                cass_location_id=location_identity(
+                    batch.source_checksum,
+                    str(row.get("business_id") or ""),
+                    int(row.get("location_number") or 0),
+                ),
                 primary_location=bool(row.get("primary_location")),
                 latitude=row.get("latitude"),
                 longitude=row.get("longitude"),

@@ -328,3 +328,131 @@ def test_restricting_to_cohort_a_excludes_whole_policies_rather_than_redistribut
     ungated_totals = ungated.by_location()
     for key, amount in gated.by_location().items():
         assert ungated_totals[key] == amount
+
+
+# -- promoting the real benchmark to OED --------------------------------------------
+
+@needs_extract
+def test_the_forty_two_risk_benchmark_promotes_to_a_published_oed_version(batch, analyst):
+    """Step 4 of the execution order needs this version to exist and validate."""
+    from decimal import Decimal
+
+    from apps.exposure.models import ExposureState
+    from apps.exposure.promotion import promote
+
+    version = promote(batch, name="Cohort A Fire benchmark", actor=analyst)
+
+    assert version.state == ExposureState.PUBLISHED
+    assert version.is_usable_by_runs is True
+    assert version.location_count == 42
+    assert version.total_tiv == Decimal("147044599.14")
+    assert version.run_currency == "USD"
+
+
+@needs_extract
+def test_the_benchmark_version_carries_no_allocation_assumption(batch, analyst):
+    """All 42 businesses hold one site, so nothing about location is assumed."""
+    from apps.exposure.promotion import promote
+
+    version = promote(batch, name="Benchmark", actor=analyst)
+    allocation = version.source_lineage["allocation"]
+
+    assert allocation["methods_used"] == ["single_location_v1"]
+    assert allocation["reconciles"] is True
+    assert allocation["policy_count"] == 42
+
+
+@needs_extract
+def test_the_benchmark_spans_both_pilot_countries(batch, analyst):
+    from apps.exposure.promotion import promote
+
+    version = promote(batch, name="Benchmark", actor=analyst)
+    assert version.source_lineage["countries"] == ["ID", "NP"]
+    assert version.tiv_by_country["ID"] > version.tiv_by_country["NP"]
+
+
+@needs_extract
+@pytest.mark.parametrize(
+    "split_name",
+    [
+        "building_only_technical_v1",
+        "building_contents_test_v1",
+        "commercial_property_test_v1",
+    ],
+)
+def test_the_benchmark_total_holds_under_every_coverage_split(batch, analyst, split_name):
+    """A component assumption moves value between columns, never creates it."""
+    from decimal import Decimal
+
+    from apps.exposure.promotion import promote
+
+    version = promote(
+        batch,
+        name=f"Benchmark {split_name}",
+        component_split=extract.preset(split_name),
+        actor=analyst,
+    )
+    assert version.total_tiv == Decimal("147044599.14")
+    assert version.source_lineage["coverage_split"]["reconciliation"]["reconciles"] is True
+
+
+@needs_extract
+def test_the_multi_location_sensitivity_promotes_as_its_own_version(batch, analyst):
+    """The ten multi-location businesses are a separate allocation test.
+
+    They are cohort-mixed in the real extract, so this promotes the cohort A
+    Fire selection under the primary-concentrated scenario and checks the
+    version records which scenario produced it.
+    """
+    from apps.exposure.promotion import promote
+
+    version = promote(
+        batch,
+        name="Primary concentrated sensitivity",
+        allocation_method=extract.AllocationMethod.PRIMARY_CONCENTRATED,
+        actor=analyst,
+    )
+    assert version.source_lineage["allocation"]["method"] == "primary_concentrated_v1"
+    assert version.source_lineage["allocation"]["reconciles"] is True
+
+
+@needs_extract
+def test_one_batch_can_produce_several_versions(batch, analyst):
+    """A benchmark and a sensitivity are different selections of one read."""
+    from apps.exposure.promotion import promote
+
+    promote(batch, name="Baseline", actor=analyst)
+    promote(
+        batch,
+        name="Sensitivity",
+        allocation_method=extract.AllocationMethod.PRIMARY_CONCENTRATED,
+        actor=analyst,
+    )
+    assert batch.exposure_versions.count() == 2
+
+
+@needs_extract
+def test_the_promoted_oed_names_no_counterparty(batch, analyst):
+    import csv
+    import io
+
+    from apps.artifacts.models import ArtifactLink
+    from apps.common.storage import get_store
+    from apps.exposure.promotion import promote
+
+    version = promote(batch, name="Benchmark", actor=analyst)
+    link = ArtifactLink.objects.get(
+        subject_type="exposure_version", subject_id=version.id, role="oed_location"
+    )
+    with get_store().open(link.artifact.uri) as handle:
+        text = handle.read().decode("utf-8")
+
+    rows = list(csv.DictReader(io.StringIO(text)))
+    assert len(rows) == 42
+    assert set(rows[0]) == {
+        "PortNumber", "AccNumber", "LocNumber", "CountryCode", "Latitude",
+        "Longitude", "OccupancyCode", "LocPerilsCovered", "BuildingTIV",
+        "OtherTIV", "ContentsTIV", "BITIV", "LocCurrency",
+    }
+    # Business references only, never a name.
+    assert all(row["AccNumber"].startswith("PFAC") for row in rows)

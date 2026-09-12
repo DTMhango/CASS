@@ -26,6 +26,7 @@ from apps.accounts.api import (
 from apps.artifacts.api import ArtifactViewSet
 from apps.audit.api import ApprovalViewSet, AuditEventViewSet
 from apps.exposure.api import (
+    AssumptionCatalogueView,
     EnrichmentRunViewSet,
     ExposureVersionViewSet,
     PortfolioImportViewSet,
@@ -75,6 +76,9 @@ api_patterns = [
     path("session/", SessionView.as_view(), name="session"),
     path("platform/", PlatformInfoView.as_view(), name="platform-info"),
     path("engines/", EngineStatusView.as_view(), name="engine-status"),
+    path(
+        "assumptions/", AssumptionCatalogueView.as_view(), name="assumption-catalogue"
+    ),
     path("", include(router.urls)),
 ]
 
