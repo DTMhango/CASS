@@ -8,19 +8,29 @@ immutable version.
 from __future__ import annotations
 
 from django.conf import settings
+from django.utils.dateparse import parse_date
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.artifacts.models import ArtifactLink
+from apps.audit import services as audit
+from apps.audit.models import AuditAction
 from apps.common.permissions import IsProjectMember
 from apps.common.queries import visible_projects
 from apps.projects.models import Project
 from cass_oed.schema import FileKind
 
+from . import extract as extract_service
 from . import services
-from .models import AttributeOverride, EnrichmentRun, ExposureVersion
+from .models import (
+    AttributeOverride,
+    EnrichmentRun,
+    ExposureVersion,
+    ImportBatch,
+    SourceRiskLocation,
+)
 
 
 class ExposureVersionSerializer(serializers.ModelSerializer):
@@ -312,3 +322,188 @@ class EnrichmentRunViewSet(viewsets.ReadOnlyModelViewSet):
         return EnrichmentRun.objects.filter(
             exposure_version__project__in=visible_projects(self.request.user)
         ).select_related("exposure_version", "assumption_set")
+
+
+# -- the Klapton Re geocoded policy extract -----------------------------------
+
+class ImportBatchSerializer(serializers.ModelSerializer):
+    blocking = serializers.BooleanField(read_only=True)
+    may_accept = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = ImportBatch
+        fields = [
+            "id", "project", "profile", "state", "source_filename",
+            "source_checksum", "snapshot_date", "schema_version", "parser_version",
+            "cohort_rule_version", "join_rule_version", "policy_row_count",
+            "location_row_count", "findings", "join_report", "cohort_profile",
+            "blocking", "may_accept", "rejection_reason", "accepted_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class SourceRiskLocationSerializer(serializers.ModelSerializer):
+    """A staged location, without the address unless the caller may see it.
+
+    The address is the confidential column on this record, and section 10 keeps
+    it to roles that need it. Serialising it and letting a screen decide would
+    put it in every response body and every proxy log on the way.
+    """
+
+    address = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SourceRiskLocation
+        fields = [
+            "id", "row_number", "business_id", "location_number",
+            "primary_location", "latitude", "longitude", "precision",
+            "needs_review", "class_of_business", "country", "country_code",
+            "cohort", "cohort_reason", "cohort_rule_version", "review_state",
+            "review_note", "reviewed_at", "address",
+        ]
+        read_only_fields = fields
+
+    def get_address(self, obj) -> str | None:
+        user = self.context["request"].user
+        if not getattr(user, "may_see_counterparty_names", False):
+            return None
+        return obj.values.get("risk_location_address") or ""
+
+
+class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
+    """Importing and profiling a source portfolio extract.
+
+    Read-only as a viewset: a batch is created by uploading a workbook, not by
+    posting a record, and nothing about a completed read may be edited
+    afterwards. What a person can change is the decision -- accept the batch,
+    or review a flagged location -- and those are their own actions.
+    """
+
+    queryset = ImportBatch.objects.none()
+    serializer_class = ImportBatchSerializer
+    permission_classes = [IsProjectMember]
+    parser_classes = [MultiPartParser, FormParser, *viewsets.ReadOnlyModelViewSet.parser_classes]
+    filterset_fields = ["project", "state"]
+    ordering_fields = ["created_at"]
+
+    def get_queryset(self):
+        return ImportBatch.objects.filter(
+            project__in=visible_projects(self.request.user)
+        ).select_related("project", "source_artifact")
+
+    @action(detail=False, methods=["post"], url_path="upload")
+    def upload(self, request, version=None):
+        """Register, parse and profile one extract workbook."""
+        project_id = request.data.get("project")
+        upload = request.FILES.get("file")
+
+        if not upload:
+            return Response(
+                {"detail": "Attach the extract workbook as 'file'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        project = Project.objects.filter(
+            id=project_id, id__in=[p.id for p in visible_projects(request.user)]
+        ).first()
+        if project is None:
+            return Response(
+                {"detail": "Name a project you are a member of."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not project.may_write(request.user):
+            return Response(
+                {"detail": "You may not import portfolio data into this project."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if upload.size > settings.CASS_MAX_UPLOAD_BYTES:
+            return Response(
+                {"detail": "The file is larger than this installation accepts."},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
+        snapshot_date = parse_date(str(request.data.get("snapshot_date") or "")) or None
+        batch = extract_service.import_extract(
+            project,
+            upload.read(),
+            filename=upload.name,
+            snapshot_date=snapshot_date,
+            actor=request.user,
+            request=request,
+        )
+        return Response(
+            self.get_serializer(batch).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["get"])
+    def locations(self, request, pk=None, version=None):
+        """The staged locations, filterable by cohort and review state.
+
+        This is the review queue of work package 1: ``?review_state=pending``
+        is the backlog a person owes, and ``?cohort=A`` is what the automated
+        benchmark may use.
+        """
+        batch = self.get_object()
+        rows = batch.location_rows.all()
+        cohort = request.query_params.get("cohort")
+        review_state = request.query_params.get("review_state")
+        if cohort:
+            rows = rows.filter(cohort=cohort)
+        if review_state:
+            rows = rows.filter(review_state=review_state)
+
+        page = self.paginate_queryset(rows)
+        serializer = SourceRiskLocationSerializer(
+            page if page is not None else rows, many=True, context={"request": request}
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def manifest(self, request, pk=None, version=None):
+        """The transformation manifest, without insured names by default."""
+        batch = self.get_object()
+        include = str(request.query_params.get("include_confidential", "")).lower() in (
+            "1", "true", "yes"
+        )
+        if include and not getattr(request.user, "may_see_counterparty_names", False):
+            return Response(
+                {
+                    "detail": "You may not download a manifest containing counterparty names.",
+                    "hint": "Request it without include_confidential.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        audit.record(
+            action=AuditAction.DOWNLOAD,
+            subject_type="import_batch",
+            subject_id=batch.id,
+            actor=request.user,
+            project=batch.project,
+            subject_label=str(batch),
+            after={"include_confidential": include},
+            request=request,
+        )
+        return Response(
+            extract_service.transformation_manifest(
+                batch, include_confidential=include
+            )
+        )
+
+    @action(detail=True, methods=["post"])
+    def accept(self, request, pk=None, version=None):
+        """Record that the join report and cohorts have been reviewed."""
+        batch = self.get_object()
+        if not batch.project.may_write(request.user):
+            return Response(
+                {"detail": "You may not accept imports in this project."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            extract_service.accept(batch, actor=request.user, request=request)
+        except extract_service.ExtractImportError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(self.get_serializer(batch).data)

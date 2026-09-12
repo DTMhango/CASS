@@ -2405,6 +2405,187 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlatformInfo'
           description: ''
+  /api/v1/portfolio-imports/:
+    get:
+      operationId: api_v1_portfolio_imports_list
+      description: |-
+        Importing and profiling a source portfolio extract.
+
+        Read-only as a viewset: a batch is created by uploading a workbook, not by
+        posting a record, and nothing about a completed read may be edited
+        afterwards. What a person can change is the decision -- accept the batch,
+        or review a flagged location -- and those are their own actions.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: state
+        schema:
+          type: string
+          enum:
+          - accepted
+          - parsed
+          - rejected
+        description: |-
+          * `parsed` - Parsed
+          * `rejected` - Rejected
+          * `accepted` - Accepted
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedImportBatchList'
+          description: ''
+  /api/v1/portfolio-imports/{id}/:
+    get:
+      operationId: api_v1_portfolio_imports_retrieve
+      description: |-
+        Importing and profiling a source portfolio extract.
+
+        Read-only as a viewset: a batch is created by uploading a workbook, not by
+        posting a record, and nothing about a completed read may be edited
+        afterwards. What a person can change is the decision -- accept the batch,
+        or review a flagged location -- and those are their own actions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
+  /api/v1/portfolio-imports/{id}/accept/:
+    post:
+      operationId: api_v1_portfolio_imports_accept_create
+      description: Record that the join report and cohorts have been reviewed.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
+  /api/v1/portfolio-imports/{id}/locations/:
+    get:
+      operationId: api_v1_portfolio_imports_locations_retrieve
+      description: |-
+        The staged locations, filterable by cohort and review state.
+
+        This is the review queue of work package 1: ``?review_state=pending``
+        is the backlog a person owes, and ``?cohort=A`` is what the automated
+        benchmark may use.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
+  /api/v1/portfolio-imports/{id}/manifest/:
+    get:
+      operationId: api_v1_portfolio_imports_manifest_retrieve
+      description: The transformation manifest, without insured names by default.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
+  /api/v1/portfolio-imports/upload/:
+    post:
+      operationId: api_v1_portfolio_imports_upload_create
+      description: Register, parse and profile one extract workbook.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
   /api/v1/projects/:
     get:
       operationId: api_v1_projects_list
@@ -4695,6 +4876,112 @@ components:
       required:
       - checks
       - status
+    ImportBatch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+        profile:
+          type: string
+          readOnly: true
+          description: The import profile that read this source, such as the Klapton
+            Re geocoded policy extract.
+        state:
+          allOf:
+          - $ref: '#/components/schemas/ImportBatchStateEnum'
+          readOnly: true
+        source_filename:
+          type: string
+          readOnly: true
+        source_checksum:
+          type: string
+          readOnly: true
+        snapshot_date:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+        schema_version:
+          type: string
+          readOnly: true
+        parser_version:
+          type: string
+          readOnly: true
+        cohort_rule_version:
+          type: string
+          readOnly: true
+        join_rule_version:
+          type: string
+          readOnly: true
+        policy_row_count:
+          type: integer
+          readOnly: true
+        location_row_count:
+          type: integer
+          readOnly: true
+        findings:
+          readOnly: true
+          description: Type and required-value findings raised while parsing.
+        join_report:
+          readOnly: true
+        cohort_profile:
+          readOnly: true
+        blocking:
+          type: boolean
+          readOnly: true
+        may_accept:
+          type: boolean
+          readOnly: true
+        rejection_reason:
+          type: string
+          readOnly: true
+        accepted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - accepted_at
+      - blocking
+      - cohort_profile
+      - cohort_rule_version
+      - created_at
+      - findings
+      - id
+      - join_report
+      - join_rule_version
+      - location_row_count
+      - may_accept
+      - parser_version
+      - policy_row_count
+      - profile
+      - project
+      - rejection_reason
+      - schema_version
+      - snapshot_date
+      - source_checksum
+      - source_filename
+      - state
+    ImportBatchStateEnum:
+      enum:
+      - parsed
+      - rejected
+      - accepted
+      type: string
+      description: |-
+        * `parsed` - Parsed
+        * `rejected` - Rejected
+        * `accepted` - Accepted
     KindEnum:
       enum:
       - hazard
@@ -5118,6 +5405,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HazardRun'
+    PaginatedImportBatchList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportBatch'
     PaginatedModelVersionList:
       type: object
       required:

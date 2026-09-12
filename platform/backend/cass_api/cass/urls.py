@@ -25,7 +25,11 @@ from apps.accounts.api import (
 )
 from apps.artifacts.api import ArtifactViewSet
 from apps.audit.api import ApprovalViewSet, AuditEventViewSet
-from apps.exposure.api import EnrichmentRunViewSet, ExposureVersionViewSet
+from apps.exposure.api import (
+    EnrichmentRunViewSet,
+    ExposureVersionViewSet,
+    PortfolioImportViewSet,
+)
 from apps.modelregistry.api import (
     AreaPerilGridViewSet,
     AssumptionSetViewSet,
@@ -50,6 +54,9 @@ router.register("approvals", ApprovalViewSet, basename="approval")
 
 router.register("exposure-versions", ExposureVersionViewSet, basename="exposure-version")
 router.register("enrichment-runs", EnrichmentRunViewSet, basename="enrichment-run")
+router.register(
+    "portfolio-imports", PortfolioImportViewSet, basename="portfolio-import"
+)
 
 router.register("grids", AreaPerilGridViewSet, basename="grid")
 router.register("vulnerability-sets", VulnerabilitySetViewSet, basename="vulnerability-set")

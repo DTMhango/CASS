@@ -167,6 +167,32 @@ run-exception approval. A blocked run is not a failed one: it keeps its
 progress, has its own `gate_summary`, and resumes from the gate rather than
 republishing its portfolio.
 
+**A source portfolio extract imports without joining itself.** The Klapton Re
+geocoded policy extract is registered as an immutable, project-restricted
+artifact *before* it is parsed — a workbook that cannot be read is still
+evidence of what was supplied — then both sheets are staged independently and
+the join is reported rather than performed. Two business references in the real
+extract carry more than one policy row, and joining on the business reference
+alone would repeat their locations once per policy and inflate a total that
+still looked plausible.
+
+Coordinate presence is not coordinate eligibility. Every location in the real
+extract has a valid coordinate pair and 115 of 224 still need review, so rows
+are assigned to governed cohorts — A precise and unflagged, B coarse and
+unflagged, C flagged — with the rule version that assigned them, and cohort C
+is the review queue. The transformation manifest is downloadable and withholds
+insured, cedent and broker names unless a role that needs them asks.
+
+The acceptance checks in the integration brief are numbers against the real
+workbook, which is confidential and not in this repository. They live in
+`test_extract_acceptance.py`, marked `integration` and skipped unless pointed
+at a copy:
+
+```bash
+CASS_EXTRACT_PATH=/path/to/premium_policies_2026-06-30_geocoded.xlsx \
+  .venv/bin/python -m pytest -m integration cass_api/tests/test_extract_acceptance.py
+```
+
 ### Running an analysis needs model assets
 
 A model version cannot map anything until its grid cells and vulnerability

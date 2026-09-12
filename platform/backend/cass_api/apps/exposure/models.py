@@ -1,4 +1,4 @@
-"""Exposure versions and enrichment runs.
+"""Exposure versions, enrichment runs and source-extract staging.
 
 Section 5 defines the exposure version as an immutable input version and the
 enrichment run as the traceable application of assumptions. Section 8 adds the
@@ -8,6 +8,11 @@ a reported field.
 
 Large enriched exposure tables stay in Parquet or OED artifacts. This app holds
 the control-plane record and the attribute-level lineage summary, not the rows.
+
+The staging models at the end are the exception, and deliberately so. A source
+extract's rows are neither large nor scientific: they are a few thousand
+records a person has to query, filter and record review decisions against, and
+holding them in an artifact would turn every one of those into a file download.
 """
 
 from __future__ import annotations
@@ -221,3 +226,230 @@ class AttributeOverride(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.location_reference}.{self.attribute} -> {self.new_value}"
+
+
+# -- the Klapton Re geocoded policy extract ----------------------------------
+#
+# Staging records for the two-sheet source workbook. Section 5 keeps rows out
+# of the control plane where they are large scientific arrays; these are
+# neither. They are 1,353 policy rows and 224 locations that a person has to
+# be able to query, filter, review and correct decisions about, and putting
+# them in an artifact would make every one of those a file download.
+#
+# They are staging, not exposure. Nothing here is an ExposureVersion: the
+# import produces evidence about the source, and the mapping into OED is a
+# later, separate step that must be able to fail without discarding the read.
+
+
+class ImportState(models.TextChoices):
+    PARSED = "parsed", "Parsed"
+    """Read and profiled. Nothing has been promoted to an exposure version."""
+
+    REJECTED = "rejected", "Rejected"
+    """A blocking finding stands. The batch is kept as evidence of the attempt."""
+
+    ACCEPTED = "accepted", "Accepted"
+    """A person has reviewed the join report and cohorts and allowed the batch on."""
+
+
+class ReviewState(models.TextChoices):
+    NOT_REQUIRED = "not_required", "No review required"
+    PENDING = "pending", "Awaiting review"
+    CONFIRMED = "confirmed", "Confirmed as located"
+    CORRECTED = "corrected", "Corrected"
+    EXCLUDED = "excluded", "Excluded from modelling"
+
+
+class ImportBatch(BaseModel):
+    """One read of one source workbook.
+
+    Holds what section 4.2 of the integration brief asks an ``ImportBatch`` to
+    hold -- checksum, parser version, warnings and row counts -- plus the three
+    rule versions that decided the outcome. A later rerun under changed rules
+    produces a new batch rather than reinterpreting this one, so the versions
+    are stored per batch and not looked up from the code that happens to be
+    deployed when someone opens the screen.
+    """
+
+    project = models.ForeignKey(
+        "projects.Project", on_delete=models.CASCADE, related_name="import_batches"
+    )
+    profile = models.CharField(
+        max_length=120,
+        help_text="The import profile that read this source, such as the Klapton Re "
+        "geocoded policy extract.",
+    )
+
+    #: The immutable raw workbook. Registered before parsing, so a source that
+    #: cannot be read is still retained as evidence of what was supplied.
+    source_artifact = models.ForeignKey(
+        "artifacts.Artifact",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="import_batches",
+    )
+    source_filename = models.CharField(max_length=255, blank=True)
+    source_checksum = models.CharField(max_length=80, db_index=True)
+    snapshot_date = models.DateField(null=True, blank=True)
+
+    schema_version = models.CharField(max_length=80, blank=True)
+    parser_version = models.CharField(max_length=32, blank=True)
+    cohort_rule_version = models.CharField(max_length=32, blank=True)
+    join_rule_version = models.CharField(max_length=32, blank=True)
+
+    state = models.CharField(
+        max_length=16, choices=ImportState.choices, default=ImportState.PARSED
+    )
+
+    policy_row_count = models.IntegerField(default=0)
+    location_row_count = models.IntegerField(default=0)
+
+    findings = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Type and required-value findings raised while parsing.",
+    )
+    join_report = models.JSONField(default=dict, blank=True)
+    cohort_profile = models.JSONField(default=dict, blank=True)
+
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    accepted_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="import_batches_accepted",
+    )
+    rejection_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            # Re-reading the same file into the same project is idempotent: it
+            # returns the batch that already exists rather than a second copy
+            # whose counts a reader would have to reconcile against the first.
+            models.UniqueConstraint(
+                fields=["project", "source_checksum"], name="unique_import_per_source"
+            )
+        ]
+        indexes = [models.Index(fields=["project", "state", "-created_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.profile} {self.source_filename or self.source_checksum[:16]}"
+
+    @property
+    def blocking(self) -> bool:
+        """Whether a finding stands that stops the batch being promoted."""
+        return bool((self.join_report or {}).get("blocking"))
+
+    @property
+    def may_accept(self) -> bool:
+        return self.state == ImportState.PARSED and not self.blocking
+
+
+class SourcePolicyRow(BaseModel):
+    """One row of the Premium Policies sheet, as supplied.
+
+    The whole row is kept in ``values`` and ``raw``; the columns promoted to
+    fields are the ones the importer filters, joins and totals on. Section 5
+    keeps the reported text beside the typed value so no transformation
+    silently replaces what was supplied.
+    """
+
+    batch = models.ForeignKey(
+        ImportBatch, on_delete=models.CASCADE, related_name="policy_rows"
+    )
+    row_number = models.IntegerField(help_text="The spreadsheet row, counting the header.")
+
+    policy_id = models.CharField(max_length=64, db_index=True)
+    business_id = models.CharField(max_length=64, db_index=True)
+
+    #: Reported TIV at KRE's share, in USD. Section 5.1 of the brief: preserve
+    #: gross_limit as reported and never apply the share a second time.
+    gross_limit = models.DecimalField(
+        max_digits=22, decimal_places=2, null=True, blank=True
+    )
+    risk_location_count = models.IntegerField(null=True, blank=True)
+    class_of_business = models.CharField(max_length=120, blank=True)
+    insured_country = models.CharField(max_length=120, blank=True)
+
+    values = models.JSONField(default=dict, blank=True)
+    raw = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["row_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "policy_id"], name="unique_policy_per_batch"
+            )
+        ]
+        indexes = [models.Index(fields=["batch", "business_id"])]
+
+    def __str__(self) -> str:
+        return self.policy_id
+
+
+class SourceRiskLocation(BaseModel):
+    """One row of the Risk Locations sheet, with its cohort assignment.
+
+    ``(business_id, location_number)`` is the natural key the brief names, and
+    it is enforced here: a duplicate is a source defect, not something to
+    absorb quietly.
+    """
+
+    batch = models.ForeignKey(
+        ImportBatch, on_delete=models.CASCADE, related_name="location_rows"
+    )
+    row_number = models.IntegerField()
+
+    business_id = models.CharField(max_length=64, db_index=True)
+    location_number = models.IntegerField()
+    primary_location = models.BooleanField(default=False)
+
+    latitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=12, decimal_places=8, null=True, blank=True)
+
+    precision = models.CharField(max_length=32, blank=True)
+    needs_review = models.BooleanField(default=False)
+    class_of_business = models.CharField(max_length=120, blank=True)
+    country = models.CharField(max_length=120, blank=True)
+    #: Validated ISO code, empty where the source country was not recognised.
+    #: A guess here would route a location to the wrong national grid.
+    country_code = models.CharField(max_length=2, blank=True)
+
+    cohort = models.CharField(max_length=16, db_index=True)
+    cohort_reason = models.CharField(max_length=200, blank=True)
+    cohort_rule_version = models.CharField(max_length=32, blank=True)
+
+    review_state = models.CharField(
+        max_length=16, choices=ReviewState.choices, default=ReviewState.NOT_REQUIRED
+    )
+    review_note = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="locations_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    values = models.JSONField(default=dict, blank=True)
+    raw = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["business_id", "location_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "business_id", "location_number"],
+                name="unique_location_per_batch",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["batch", "cohort"]),
+            models.Index(fields=["batch", "review_state"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.business_id}/{self.location_number}"
+
+    @property
+    def coordinate(self) -> str:
+        if self.latitude is None or self.longitude is None:
+            return ""
+        return f"{self.latitude},{self.longitude}"
