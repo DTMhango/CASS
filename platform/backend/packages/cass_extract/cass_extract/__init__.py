@@ -10,6 +10,19 @@ Nothing here touches Django or the artifact store. The importer in the exposure
 workspace supplies bytes and stores what comes back.
 """
 
+from .allocation import (
+    ALLOCATION_RULE_VERSION,
+    PRIMARY_SHARE,
+    AllocationError,
+    AllocationEvidence,
+    AllocationMethod,
+    AllocationResult,
+    LocationShare,
+    PolicyAllocation,
+    allocate,
+    allocate_policy,
+    concentration_envelope,
+)
 from .cohorts import (
     COHORT_RULE_VERSION,
     Assignment,
@@ -47,6 +60,7 @@ from .schema import (
 )
 
 __all__ = [
+    "ALLOCATION_RULE_VERSION",
     "COHORT_RULE_VERSION",
     "CONFIDENTIAL_COLUMNS",
     "JOIN_RULE_VERSION",
@@ -57,6 +71,10 @@ __all__ = [
     "POLICY_SHEET",
     "PROFILE_NAME",
     "SCHEMA_VERSION",
+    "AllocationError",
+    "AllocationEvidence",
+    "AllocationMethod",
+    "AllocationResult",
     "Assignment",
     "Cohort",
     "DataType",
@@ -67,13 +85,19 @@ __all__ = [
     "JoinFinding",
     "JoinReport",
     "JoinSeverity",
+    "LocationShare",
+    "PRIMARY_SHARE",
+    "PolicyAllocation",
     "Sensitivity",
     "SheetRead",
     "SourceRow",
+    "allocate",
+    "allocate_policy",
     "assign",
     "assign_all",
     "build_join_report",
     "business_complete",
+    "concentration_envelope",
     "country_code",
     "masked",
     "profile",
