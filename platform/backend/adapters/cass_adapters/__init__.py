@@ -4,9 +4,10 @@ Section 4 requires every engine boundary to be crossed through a versioned
 adapter over a supported API, and section 15 names what that prevents: custom
 engine forks accumulating, and an upgrade breaking integration silently.
 
-The contract lives in base.py. Concrete adapters arrive with the engine
-integration phases of the roadmap; the compatibility gate is enforced now so
-they cannot be written without one.
+The contract lives in base.py and the compatibility gate is enforced there, so
+no adapter can be written without one. ``oasis.py`` is the first concrete
+implementation, covering the analysis half of section 5's pipeline. The
+OpenQuake adapter arrives with the hazard phase of the roadmap.
 """
 
 from .base import (
@@ -19,11 +20,20 @@ from .base import (
     EngineVersion,
     IncompatibleEngine,
 )
+from .oasis import (
+    AnalysisStatus,
+    OasisAdapter,
+    OasisModel,
+    OasisPhase,
+    PortfolioFileKind,
+    analysis_state,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
     "AdapterError",
+    "AnalysisStatus",
     "EngineAdapter",
     "EngineJob",
     "EngineRejected",
@@ -31,5 +41,10 @@ __all__ = [
     "EngineUnavailable",
     "EngineVersion",
     "IncompatibleEngine",
+    "OasisAdapter",
+    "OasisModel",
+    "OasisPhase",
+    "PortfolioFileKind",
     "__version__",
+    "analysis_state",
 ]
