@@ -69,6 +69,25 @@ from .gem import (
     read_country,
     read_model,
 )
+from .hazard_build import (
+    HAZARD_BUILD_VERSION,
+    HazardBuildError,
+    HazardSet,
+    build_hazard,
+    footprint_csv,
+    hazard_report,
+    intensity_bins_csv,
+    occurrence_csv,
+)
+from .hazard_job import (
+    HazardJob,
+    HazardJobError,
+    Site,
+    job_checksum,
+    job_ini,
+    sites_csv,
+    sites_from_cells,
+)
 from .identifiers import (
     DeterministicIdMap,
     EventLineage,
@@ -95,6 +114,15 @@ from .occurrence import (
     check_frequency,
     empty_period_share,
     validate_occurrences,
+)
+from .openquake import (
+    CalculationMetadata,
+    Event,
+    OpenQuakeError,
+    read_events,
+    read_ground_motion,
+    read_metadata,
+    read_sites,
 )
 from .pilot_enrichment import PILOT_ENRICHMENTS, enrichment, load
 from .policy import (
@@ -153,6 +181,28 @@ __all__ = [
     "EventIdentity",
     "EventLineage",
     "Evidence",
+    "CalculationMetadata",
+    "Event",
+    "HAZARD_BUILD_VERSION",
+    "HazardBuildError",
+    "HazardJob",
+    "HazardJobError",
+    "HazardSet",
+    "OpenQuakeError",
+    "Site",
+    "build_hazard",
+    "footprint_csv",
+    "hazard_report",
+    "intensity_bins_csv",
+    "job_checksum",
+    "job_ini",
+    "occurrence_csv",
+    "read_events",
+    "read_ground_motion",
+    "read_metadata",
+    "read_sites",
+    "sites_csv",
+    "sites_from_cells",
     "FootprintAccumulator",
     "FootprintError",
     "FootprintRow",

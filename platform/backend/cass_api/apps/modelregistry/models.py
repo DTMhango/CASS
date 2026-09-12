@@ -210,6 +210,118 @@ class VulnerabilitySet(BaseModel, FreezableModel):
         )
 
 
+class HazardSet(BaseModel, FreezableModel):
+    """A versioned event set and its footprints, with the calculation behind them.
+
+    Hazard is versioned independently of vulnerability -- section 8 requires it,
+    and the reason is that they move for different reasons: a new seismic source
+    model changes the events, a new building-stock study changes the damage, and
+    a release that could only bump both together would force a scientifically
+    unnecessary revision of one every time the other moved.
+
+    The fields that carry weight are the timing ones. ``investigation_time`` and
+    ``stochastic_event_sets`` multiply to the effective time, which is the
+    denominator of every annual rate computed from this set. Stored rather than
+    recomputed, because an AAL derived from the wrong denominator is wrong by
+    exactly that ratio and nothing downstream would notice.
+    """
+
+    country_code = models.CharField(max_length=2, db_index=True)
+    version = models.CharField(max_length=32)
+    label = models.CharField(max_length=200)
+
+    source_model = models.CharField(
+        max_length=200,
+        help_text="The seismic source model, such as GEM Global Hazard Mosaic v2023.",
+    )
+    source_model_checksum = models.CharField(max_length=64, blank=True)
+    ground_motion_models = models.JSONField(
+        default=list, help_text="The GMPEs the logic tree used."
+    )
+    licence = models.CharField(max_length=120, blank=True)
+    licence_cleared = models.BooleanField(default=False)
+    licence_note = models.TextField(blank=True)
+
+    grid = models.ForeignKey(
+        AreaPerilGrid, on_delete=models.PROTECT, related_name="hazard_sets"
+    )
+    engine_version = models.CharField(max_length=32, blank=True)
+    calculation_checksum = models.CharField(max_length=64, blank=True)
+    job_checksum = models.CharField(max_length=64, blank=True)
+
+    investigation_time = models.FloatField(default=0.0)
+    stochastic_event_sets = models.IntegerField(default=0)
+    event_count = models.IntegerField(default=0)
+    cell_count = models.IntegerField(default=0)
+    footprint_row_count = models.BigIntegerField(default=0)
+    imts = models.JSONField(
+        default=list, help_text="Intensity measures this hazard set carries."
+    )
+
+    #: Ground motion discarded for falling above the top intensity bin. Never
+    #: benign: it is the strongest shaking the calculation produced, so every
+    #: loss at those cells is understated by exactly the events that drive the
+    #: tail.
+    samples_above_range = models.BigIntegerField(default=0)
+    conversion_report = models.JSONField(default=dict)
+
+    publication_state = models.CharField(
+        max_length=16, choices=PublicationState.choices, default=PublicationState.DRAFT
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["country_code", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["country_code", "version"], name="unique_hazard_version"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.country_code} hazard {self.version}"
+
+    @property
+    def reference(self) -> str:
+        return f"{self.country_code.lower()}-hazard-{self.version}"
+
+    @property
+    def effective_time(self) -> float:
+        """Years the event set represents, and so the number of Oasis periods."""
+        return self.investigation_time * self.stochastic_event_sets
+
+    @property
+    def annual_event_rate(self) -> float:
+        if self.effective_time <= 0:
+            return 0.0
+        return self.event_count / self.effective_time
+
+    @property
+    def clips_the_hazard(self) -> bool:
+        return self.samples_above_range > 0
+
+    def publication_blockers(self) -> list[str]:
+        problems = []
+        if not self.licence_cleared:
+            problems.append(
+                f"The {self.source_model} licence has not been cleared for use."
+            )
+        if self.clips_the_hazard:
+            problems.append(
+                f"{self.samples_above_range} ground-motion values fell above the top "
+                "intensity bin and were discarded, so loss at those cells is "
+                "understated. Widen the intensity dictionary and convert again."
+            )
+        if self.effective_time <= 0:
+            problems.append(
+                "No effective time is recorded, so no annual rate can be derived "
+                "from this event set."
+            )
+        if not self.imts:
+            problems.append("This hazard set carries no intensity measures.")
+        return problems
+
+
 class ModelVersion(BaseModel, FreezableModel):
     """A published calculation capability for one country and peril."""
 
@@ -223,6 +335,17 @@ class ModelVersion(BaseModel, FreezableModel):
         VulnerabilitySet, on_delete=models.PROTECT, related_name="models"
     )
 
+    #: Null until a hazard set exists for this country. A model version with
+    #: no hazard can hold exposure, map keys and refuse to run, which is the
+    #: honest state before the seismic sources arrive -- and better than a
+    #: string field describing a hazard set nothing can load.
+    hazard_set = models.ForeignKey(
+        HazardSet,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="models",
+    )
     hazard_source_model = models.CharField(max_length=200, blank=True)
     hazard_source_licence = models.CharField(max_length=120, blank=True)
     openquake_version = models.CharField(max_length=32, blank=True)
@@ -316,6 +439,23 @@ class ModelVersion(BaseModel, FreezableModel):
             )
         if self.grid.publication_state != PublicationState.PUBLISHED:
             blockers.append("The area-peril grid version is not published.")
+
+        if self.hazard_set is None:
+            blockers.append(
+                "No hazard set is attached, so this version can map exposure to "
+                "keys but cannot produce a loss."
+            )
+        else:
+            blockers.extend(self.hazard_set.publication_blockers())
+            missing = sorted(set(self.vulnerability_set.imts_used) - set(self.hazard_set.imts))
+            if missing:
+                blockers.append(
+                    "The hazard set carries no "
+                    + ", ".join(missing)
+                    + ", which vulnerability functions in this version demand. A "
+                    "function cannot be answered by ground motion it was not "
+                    "built for."
+                )
         if not self.peril_scope:
             blockers.append(
                 "No peril scope statement has been recorded, so results cannot be "

@@ -66,6 +66,12 @@ DAMAGE_BINS_ROLE = "damage_bin_dictionary"
 #: so a loss can be traced back to the buildings it was computed from.
 VULNERABILITY_DICTIONARY_ROLE = "vulnerability_dictionary"
 
+#: Hazard assets are role-per-file rather than one role per kind, because a set
+#: carries a footprint per intensity measure and they are different files
+#: answering different vulnerability functions. Naming them by filename keeps
+#: that visible instead of hiding four tables behind one role.
+HAZARD_ROLE_PREFIX = "hazard_"
+
 #: Separator for multi-valued taxonomy columns. A comma would collide with the
 #: CSV itself and quoting a list inside a cell is how a reviewer misreads one.
 CODE_SEPARATOR = "|"
@@ -350,6 +356,18 @@ def attach_vulnerability_dictionary(
         filename,
         actor,
     )
+
+
+def attach_hazard_asset(hazard_set, filename: str, payload: bytes, *, actor=None):
+    """Register one file of a hazard set: a footprint, the occurrence table,
+    an intensity dictionary, or the job that produced them.
+
+    Not parsed on the way in. A footprint is hundreds of thousands of rows and
+    the converter has already validated it -- probabilities summing to one,
+    every event covered, nothing clipped -- before it reaches here.
+    """
+    role = HAZARD_ROLE_PREFIX + pathlib.PurePosixPath(filename).stem
+    return _attach(hazard_set, "hazard_set", role, payload, filename, actor)
 
 
 def _read_vulnerability(text: str) -> Iterator[VulnerabilityEntry]:

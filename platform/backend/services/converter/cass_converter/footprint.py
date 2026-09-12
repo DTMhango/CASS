@@ -54,7 +54,16 @@ class ConversionMetrics:
 
     samples_read: int = 0
     samples_binned: int = 0
-    samples_out_of_range: int = 0
+    #: Motion below the lowest bin. Benign, and usually most of what is
+    #: dropped: it is ground shaking too weak to damage anything, and omitting
+    #: it is what keeps a footprint from carrying a row per site per event.
+    samples_below_range: int = 0
+    #: Motion above the highest bin. Never benign. It is the strongest shaking
+    #: the calculation produced and it is being discarded, so every loss at
+    #: that cell is understated -- and by exactly the events that drive the
+    #: tail. Counted separately because a single number covering both would
+    #: hide this behind the harmless case.
+    samples_above_range: int = 0
     events_emitted: int = 0
     rows_emitted: int = 0
     cells_seen: set[int] = dataclasses.field(default_factory=set)
@@ -62,17 +71,37 @@ class ConversionMetrics:
     peak_open_events: int = 0
 
     @property
+    def samples_out_of_range(self) -> int:
+        return self.samples_below_range + self.samples_above_range
+
+    @property
     def out_of_range_share(self) -> float:
         if self.samples_read == 0:
             return 0.0
         return self.samples_out_of_range / self.samples_read
 
+    @property
+    def above_range_share(self) -> float:
+        """The share that matters. Anything above zero is a finding."""
+        if self.samples_read == 0:
+            return 0.0
+        return self.samples_above_range / self.samples_read
+
+    @property
+    def clips_the_hazard(self) -> bool:
+        """Whether the intensity dictionary is too narrow for this hazard."""
+        return self.samples_above_range > 0
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "samples_read": self.samples_read,
             "samples_binned": self.samples_binned,
+            "samples_below_range": self.samples_below_range,
+            "samples_above_range": self.samples_above_range,
             "samples_out_of_range": self.samples_out_of_range,
             "out_of_range_share": self.out_of_range_share,
+            "above_range_share": self.above_range_share,
+            "clips_the_hazard": self.clips_the_hazard,
             "events_emitted": self.events_emitted,
             "rows_emitted": self.rows_emitted,
             "distinct_cells": len(self.cells_seen),
@@ -150,7 +179,16 @@ class FootprintAccumulator:
             # Out of range is counted and reported, never clamped: a value
             # above the dictionary means the dictionary is wrong for this
             # hazard, and silently pinning it to the top bin would hide that.
-            self.metrics.samples_out_of_range += 1
+            #
+            # Which side it fell off is recorded, because the two are opposite
+            # findings. Below the floor is motion too weak to damage anything
+            # and dropping it is how a footprint stays a manageable size.
+            # Above the ceiling is the strongest shaking in the calculation
+            # going missing.
+            if sample.value < bin_set.bins[0].lower:
+                self.metrics.samples_below_range += 1
+            else:
+                self.metrics.samples_above_range += 1
             return
 
         key = (sample.area_peril_id, sample.imt)

@@ -248,7 +248,11 @@ services:
   # Unmodified upstream images. CASS reaches them through adapters over their
   # supported APIs; it never writes to their internal stores.
   openquake:
-    image: ghcr.io/gem/oq-engine:3.23.1
+    # Docker Hub, not ghcr.io/gem/oq-engine, which this project pinned until a
+    # pull found it inaccessible without credentials. The 3.23 tag currently
+    # resolves to 3.23.4; the engine version is recorded on every hazard set,
+    # so a conversion always names the build that produced it.
+    image: openquake/engine:3.23
     command: ["oq", "webui", "start", "0.0.0.0:8800", "-s"]
     volumes:
       - openquake-data:/home/openquake/oqdata
