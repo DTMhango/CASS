@@ -549,3 +549,116 @@ def test_repeated_identical_engine_observations_do_not_bury_the_stage_history(
     generating = analysis_run.run.events.filter(stage="generate_inputs")
     raw_states = [e.metrics.get("raw_state") for e in generating if e.metrics]
     assert raw_states.count("INPUTS_GENERATION_STARTED") == 1
+
+
+# -- submitting through the API ---------------------------------------------
+
+@pytest.fixture()
+def oasis_is(monkeypatch):
+    """Point the service's engine factory at a scripted server."""
+
+    def _install(session):
+        monkeypatch.setattr(
+            "apps.runs.services.oasis_adapter", lambda **kwargs: engine_for(session)
+        )
+        return session
+
+    return _install
+
+
+def test_submitting_queues_the_run_and_returns_the_monitor_record(
+    api, analysis_run, oasis_is
+):
+    """The response is the queued run, not the result of a loss calculation."""
+    oasis_is(oasis_server())
+    response = api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    assert response.status_code == 202
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.SUCCEEDED
+
+
+def test_a_submitted_run_records_its_output_artifact(api, analysis_run, oasis_is):
+    oasis_is(oasis_server())
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    artifacts = api.get(f"{API}/runs/{analysis_run.run_id}/artifacts/")
+    assert artifacts.status_code == 200
+    assert [item["role"] for item in artifacts.data] == ["oasis_output"]
+
+
+def test_a_submitted_run_explains_itself_through_the_run_monitor(
+    api, analysis_run, oasis_is
+):
+    oasis_is(oasis_server())
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    events = api.get(f"{API}/runs/{analysis_run.run_id}/events/")
+    assert events.status_code == 200
+    assert {event["stage"] for event in events.data} >= {
+        "publish_oed", "generate_inputs", "validate_inputs", "losses", "collect"
+    }
+
+
+def test_a_run_that_is_not_a_draft_cannot_be_submitted(api, analysis_run, oasis_is):
+    oasis_is(oasis_server())
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    again = api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    assert again.status_code == 409
+    assert "draft" in again.data["hint"]
+
+
+def test_an_unpublished_exposure_version_is_refused_before_the_queue(
+    api, analysis_run, project, analyst, oasis_is
+):
+    session = oasis_is(oasis_server())
+    draft = ExposureVersion.objects.create(
+        project=project, name="Draft", version=99, created_by=analyst
+    )
+    analysis_run.exposure_version = draft
+    analysis_run.save()
+
+    response = api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    assert response.status_code == 409
+    assert "not published" in response.data["detail"]
+    assert session.calls == []
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.DRAFT
+
+
+def test_someone_without_write_access_cannot_submit(
+    client_for, outsider, analysis_run, oasis_is
+):
+    oasis_is(oasis_server())
+    response = client_for(outsider).post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    assert response.status_code in (403, 404)
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.DRAFT
+
+
+def test_a_domain_failure_is_recorded_on_the_run_rather_than_raised_at_the_broker(
+    analysis_run, oasis_is
+):
+    """The monitor is where a person reads this, not a Celery traceback."""
+    from apps.runs.tasks import execute_analysis
+
+    oasis_is(oasis_server(loss_status="RUN_ERROR"))
+    result = execute_analysis(str(analysis_run.id))
+
+    assert result["state"] == RunState.FAILED
+    assert result["stage"] == "losses"
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.FAILED
+
+
+def test_cancelling_through_the_api_stops_the_engine_and_completes_the_run(
+    api, analysis_run, analyst, oasis_is
+):
+    """CANCELLING is a request; the run only reaches CANCELLED once Oasis stops."""
+    session = oasis_is(oasis_server())
+    analysis_run.oasis_analysis_id = "7"
+    analysis_run.save()
+    run = analysis_run.run
+    run.transition(RunState.QUEUED, actor=analyst)
+    run.transition(RunState.RUNNING, actor=analyst)
+
+    response = api.post(f"{API}/runs/{run.id}/cancel/")
+    assert response.status_code == 200
+    assert "v2/analyses/7/cancel_generate_inputs/" in session.paths("POST")
+    assert Run.objects.get(id=run.id).state == RunState.CANCELLED

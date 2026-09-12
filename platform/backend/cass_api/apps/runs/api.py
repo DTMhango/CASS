@@ -178,6 +178,18 @@ class RunViewSet(viewsets.ReadOnlyModelViewSet):
             after={"state": run.state},
             request=request,
         )
+
+        # CANCELLING is a request, not an outcome. An analysis that has reached
+        # Oasis has a worker to stop, and section 11 only counts the resource
+        # envelope as freed once it has stopped, so the engine is told in the
+        # background and the run reaches CANCELLED from there.
+        analysis = getattr(run, "analysis", None)
+        if analysis is not None:
+            from .tasks import cancel_analysis
+
+            cancel_analysis.delay(str(analysis.id), str(request.user.id))
+            run.refresh_from_db()
+
         return Response(self.get_serializer(run).data)
 
     @action(detail=True, methods=["post"])
@@ -248,3 +260,59 @@ class AnalysisRunViewSet(viewsets.ModelViewSet):
         return AnalysisRun.objects.filter(
             run__project__in=visible_projects(self.request.user)
         ).select_related("run", "exposure_version", "model_version")
+
+    @action(detail=True, methods=["post"])
+    def submit(self, request, pk=None, version=None):
+        """Queue the analysis for execution against Oasis.
+
+        The response is the queued run, not the result. Section 3 asks the run
+        monitor to explain progress and failure, so an analyst follows the run
+        there rather than holding a request open for the length of a loss
+        calculation.
+        """
+        analysis = self.get_object()
+        run = analysis.run
+
+        if run.project and not run.project.may_write(request.user):
+            return Response(
+                {"detail": "You may not submit runs in this project."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if run.run_state is not RunState.DRAFT:
+            return Response(
+                {
+                    "detail": f"A run in state {run.state} cannot be submitted.",
+                    "hint": "Only a draft run may be submitted. Retry a failed run instead.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not analysis.exposure_version.is_usable_by_runs:
+            return Response(
+                {
+                    "detail": "The exposure version is not published.",
+                    "hint": (
+                        "Publish the exposure version first, so the run points at "
+                        "immutable input."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        from .tasks import execute_analysis
+
+        audit.record(
+            action=AuditAction.SUBMIT,
+            subject_type="analysis_run",
+            subject_id=run.id,
+            actor=request.user,
+            project=run.project,
+            subject_label=str(run),
+            after={"exposure_version": str(analysis.exposure_version_id)},
+            request=request,
+        )
+        execute_analysis.delay(str(analysis.id))
+
+        analysis.refresh_from_db()
+        return Response(
+            self.get_serializer(analysis).data, status=status.HTTP_202_ACCEPTED
+        )

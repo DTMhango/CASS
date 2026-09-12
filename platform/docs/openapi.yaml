@@ -184,6 +184,48 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/analysis-runs/{id}/submit/:
+    post:
+      operationId: api_v1_analysis_runs_submit_create
+      description: |-
+        Queue the analysis for execution against Oasis.
+
+        The response is the queued run, not the result. Section 3 asks the run
+        monitor to explain progress and failure, so an analyst follows the run
+        there rather than holding a request open for the length of a loss
+        calculation.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this analysis run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRun'
+          description: ''
   /api/v1/approvals/:
     get:
       operationId: api_v1_approvals_list
