@@ -1,4 +1,4 @@
-# KRE Geocoded Portfolio Test Dataset Integration Instructions
+# CASS Geocoded Portfolio Test Dataset Integration Instructions
 
 *Implementation brief for the 30 June 2026 portfolio extract*
 
@@ -132,14 +132,14 @@ Do not join during parsing. Validate types, required identifiers and coordinate 
 
 Use stable, non-name-based identifiers:
 
-- KRE project/extract reference → `PortNumber`;
+- CASS project/KRE extract reference → `PortNumber`;
 - `business_id` → account/business source reference and candidate `AccNumber`;
 - `policy_id` → policy source reference;
 - `location_number` → `LocNumber` within the business;
-- a deterministic location UUID → internal KRE location ID;
+- a deterministic location UUID → internal CASS location ID;
 - country name → validated ISO `CountryCode` (`ID` or `NP`);
 - latitude/longitude → OED location coordinates;
-- geocode method, precision, confidence, rationale and review flag → KRE evidence/lineage fields, not silent OED substitutions.
+- geocode method, precision, confidence, rationale and review flag → CASS evidence/lineage fields, not silent OED substitutions.
 
 Confirm the exact OED account/policy hierarchy against the pinned OED/ODS Tools version before publishing the importer. Never use insured or broker name as an identifier.
 
@@ -247,7 +247,7 @@ Use reported component values first. Otherwise derive country-, class- and occup
 
 ### Work package 1 — secure importer
 
-Build a `KRE geocoded policy extract` import profile in the Exposure workspace.
+Build a `Klapton Re geocoded policy extract` import profile in the CASS Exposure workspace.
 
 Required outputs:
 
@@ -301,7 +301,7 @@ After the PiWind platform slice proves the Oasis adapter:
 2. load `gross_limit` as reported KRE-share TIV in USD and assume earthquake coverage;
 3. apply and record the approved multi-location and coverage-component allocation scenario;
 4. apply a small approved test taxonomy set covering the active SA channels;
-5. run KRE keys and require complete record/value reconciliation;
+5. run CASS keys and require complete record/value reconciliation;
 6. generate Oasis files through the pinned OasisLMF implementation;
 7. execute the small earthquake golden model;
 8. ingest losses and display the KRE-share basis, data-quality cohort, allocation scenario, assumption set, model version and manifest;
@@ -354,8 +354,8 @@ Execute in this order:
 1. Protect and register the source workbook; approve who may access it.
 2. Record the confirmed KRE-share TIV, USD and earthquake-coverage interpretation; complete the remaining hierarchy, component-allocation and financial-term definitions.
 3. Build the parser, join report and cohort rules with masked structural fixtures.
-4. Complete the KRE-to-PiWind-to-Oasis vertical slice and engine contract tests.
-5. Import the workbook into a restricted KRE project and verify the aggregate acceptance counts.
+4. Complete the CASS-to-PiWind-to-Oasis vertical slice and engine contract tests.
+5. Import the workbook into a restricted CASS project owned by KRE and verify the aggregate acceptance counts.
 6. Map Cohort A and B to versioned grids; complete the geocoding sensitivity report.
 7. Run the Cohort A Fire geometry-only test.
 8. Run the business-complete 42-risk Cohort A Fire earthquake golden test using USD 147,044,599.14 of KRE-share TIV; then complete the OpenQuake reference comparison.
@@ -363,7 +363,7 @@ Execute in this order:
 10. Add coverage-component evidence, supported financial terms and governed enrichment.
 11. Promote selected records into the controlled portfolio-loss pilot only after review gates pass.
 
-The real workbook must not become a shortcut around the PiWind integration milestone. PiWind proves the supported Oasis workflow. This extract then proves that the earthquake workflow handles KRE's real hierarchy, geography, incomplete attributes and review decisions.
+The real workbook must not become a shortcut around the PiWind integration milestone. PiWind proves the supported Oasis workflow. This extract then proves that CASS handles KRE's real hierarchy, geography, incomplete attributes and review decisions.
 
 ## 10  Completion evidence
 

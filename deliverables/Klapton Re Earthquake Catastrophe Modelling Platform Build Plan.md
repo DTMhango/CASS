@@ -5,14 +5,14 @@ This plan is the product and engineering baseline. Model assumptions remain subj
 
 ![Klapton Reinsurance PLC](../assets/kre-logo.png)
 
-# Klapton Re Earthquake Catastrophe Modelling Platform Build Plan
+# CASS Earthquake Catastrophe Modelling Platform Build Plan
 
 *End to End Delivery Roadmap*
 
 | Prepared for | Klapton Reinsurance PLC |
 | --- | --- |
 | Planning date | 12 September 2026 |
-| Document version | 1.6 Geocoded Portfolio Test Baseline |
+| Document version | 1.7 CASS Naming and ODS Reference Baseline |
 | Initial peril | Earthquake |
 | Pilot countries | Indonesia and Nepal |
 | Deployment | KRE servers or approved local Docker installations |
@@ -20,11 +20,17 @@ This plan is the product and engineering baseline. Model assumptions remain subj
 
 **Purpose**
 
-This plan defines the product, scientific, data, engineering, validation and operating work required to build KRE's integrated catastrophe modelling platform. It establishes the target architecture and a staged route from the proven Docker test environment to a governed earthquake modelling service.
+This plan defines the product, scientific, data, engineering, validation and operating work required to build CASS, Klapton Reinsurance PLC's integrated catastrophe modelling application. It establishes the target architecture and a staged route from the proven Docker test environment to a governed earthquake modelling service.
 
 ## 1  Executive Direction
 
-KRE should build one browser-based catastrophe modelling product while preserving OpenQuake and Oasis as independently owned calculation engines. React will provide the analyst experience. Django will provide authentication, workflow orchestration, metadata, lineage and a stable KRE API. OpenQuake will generate earthquake hazard. A KRE-owned converter will transform supported OpenQuake outputs into versioned Oasis hazard packages. Oasis will apply vulnerability and financial structures and produce insured loss outputs.
+CASS will be one browser-based catastrophe modelling product while preserving OpenQuake and Oasis as independently owned calculation engines. React will provide the analyst experience. Django will provide authentication, workflow orchestration, metadata, lineage and a stable CASS API. OpenQuake will generate earthquake hazard. A CASS converter owned by KRE will transform supported OpenQuake outputs into versioned Oasis hazard packages. Oasis will apply vulnerability and financial structures and produce insured loss outputs.
+
+### Product and company naming
+
+**CASS is the application name. Klapton Reinsurance PLC, abbreviated KRE, is the company, data owner, model owner and deployment organisation.** Product-facing language, code namespaces, APIs, services, containers, support bundles and interface headings will use CASS. KRE will appear only where the company identity or economic meaning matters, including legal ownership, branding, permissions, source data, KRE servers, KRE-share TIV and KRE portfolio results.
+
+The primary interface title is `CASS`, with `Klapton Reinsurance PLC` as the organisation subtitle or footer. Technical names should use forms such as `cass_api`, `cass_core`, `cass_oed`, `cass_keys`, `cass_converter` and `CASS_*` environment variables. New implementation must not introduce `kre_*` product namespaces. Historical names may remain temporarily only behind migration aliases with an explicit removal date.
 
 The platform will use Docker as the common execution boundary from development onward. Large scientific arrays will remain in HDF5, Parquet or Oasis binary artifacts stored outside the Django relational database. PostgreSQL will hold application records, references, checksums and audit history. This design avoids Windows path problems, prevents the user interface database from becoming a scientific array store, and allows each engine to be upgraded behind a tested adapter.
 
@@ -34,7 +40,7 @@ The first technical model gate is an SA-only prototype using SA(0.3), SA(0.6) an
 
 **Build Outcome**
 
-- An internal KRE application through which an analyst can select a model, upload and validate exposure, run earthquake hazard and loss analyses, monitor progress, inspect quality checks, compare results and export governed outputs.
+- The internal CASS application through which an analyst can select a model, upload and validate exposure, run earthquake hazard and loss analyses, monitor progress, inspect quality checks, compare results and export governed outputs.
 
 - A reproducible earthquake model build process using stable geographic area-peril definitions, explicit event semantics, versioned vulnerability functions and documented financial assumptions.
 
@@ -48,15 +54,15 @@ The first technical model gate is an SA-only prototype using SA(0.3), SA(0.6) an
 
 The official PiWind model has already completed end to end in the Oasis 2.5.7 model worker container against a Windows bind-mounted workspace. The test produced ground-up, insured and reinsurance outputs and passed the model validation check. This proves the selected local container boundary. It does not yet prove earthquake model correctness, production capacity or platform security; those are explicit workstreams in this plan.
 
-A KRE portfolio snapshot dated 30 June 2026 is now available for controlled testing. It contains 1,353 policy rows and 224 geocoded risk-location rows linked to 213 businesses across Indonesia and Nepal. All location rows have valid coordinate pairs, but 115 require review. `gross_limit` is confirmed as TIV at KRE's share, all monetary values are USD and every policy is assumed to cover earthquake. Total policy TIV is USD 3.328 billion, of which USD 822.817 million belongs to businesses with coordinates. The extract remains incomplete for vulnerability selection because it lacks coverage-component values and building attributes. It is scoped first as an import, hierarchy, geospatial and workflow asset, then as a KRE-share research loss portfolio under explicit allocation and enrichment assumptions. Detailed implementation instructions are in [KRE Geocoded Portfolio Test Dataset Integration Instructions](KRE%20Geocoded%20Portfolio%20Test%20Dataset%20Integration%20Instructions.md).
+A KRE portfolio snapshot dated 30 June 2026 is now available for controlled testing in CASS. It contains 1,353 policy rows and 224 geocoded risk-location rows linked to 213 businesses across Indonesia and Nepal. All location rows have valid coordinate pairs, but 115 require review. `gross_limit` is confirmed as TIV at KRE's share, all monetary values are USD and every policy is assumed to cover earthquake. Total policy TIV is USD 3.328 billion, of which USD 822.817 million belongs to businesses with coordinates. The extract remains incomplete for vulnerability selection because it lacks coverage-component values and building attributes. It is scoped first as an import, hierarchy, geospatial and workflow asset, then as a KRE-share research loss portfolio under explicit allocation and enrichment assumptions. Detailed implementation instructions are in [CASS Geocoded Portfolio Test Dataset Integration Instructions](CASS%20Geocoded%20Portfolio%20Test%20Dataset%20Integration%20Instructions.md).
 
 **Recommended Release Boundary**
 
-Release one is an internal KRE earthquake portfolio analysis platform. It will run centrally on KRE servers or be provided as a controlled Docker package to approved key users for local execution. External client tenancy, public self-service onboarding, billing, real-time event response and non-earthquake perils are deferred until the internal workflow and model governance are proven.
+Release one is the internal CASS earthquake portfolio analysis platform. It will run centrally on KRE servers or be provided as a controlled Docker package to approved key users for local execution. External client tenancy, public self-service onboarding, billing, real-time event response and non-earthquake perils are deferred until the internal workflow and model governance are proven.
 
 **Primary Interface Principle**
 
-The KRE web application is the primary operating interface for release one, not a reporting layer added after the engine work. From the first usable vertical slice, analysts will use KRE screens to prepare exposure, select approved settings, submit OpenQuake and Oasis work, monitor the combined pipeline, resolve permitted exceptions and inspect results. Native OpenQuake and Oasis interfaces and command-line tools remain restricted specialist routes for model development, diagnosis, validation and recovery; routine portfolio users should not need them.
+The CASS web application is the primary operating interface for release one, not a reporting layer added after the engine work. From the first usable vertical slice, analysts will use CASS screens to prepare exposure, select approved settings, submit OpenQuake and Oasis work, monitor the combined pipeline, resolve permitted exceptions and inspect results. Native OpenQuake and Oasis interfaces and command-line tools remain restricted specialist routes for model development, diagnosis, validation and recovery; routine portfolio users should not need them.
 
 ## 2  Product Scope
 
@@ -96,7 +102,7 @@ The KRE web application is the primary operating interface for release one, not 
 
 - Cyclone, flood and other perils, except for the extension points required to add them later.
 
-- Feature-for-feature replication of every native OpenQuake and Oasis administration, development and diagnostic function. Release one will still replace the native interfaces for the complete routine KRE analyst workflow; specialist engine interfaces remain available behind controlled access for capabilities that add no business value to rebuild.
+- Feature-for-feature replication of every native OpenQuake and Oasis administration, development and diagnostic function. Release one will still replace the native interfaces for the complete routine CASS analyst workflow; specialist engine interfaces remain available behind controlled access for capabilities that add no business value to rebuild.
 
 - Real-time post-event loss estimation and live sensor or agency feeds.
 
@@ -110,13 +116,13 @@ The KRE web application is the primary operating interface for release one, not 
 
 1. Create or open a project and select an approved earthquake model version.
 
-1. Import an existing portfolio or create exposure and financial records through guided KRE forms, templates and bulk-edit workflows.
+1. Import an existing portfolio or create exposure and financial records through guided CASS forms, templates and bulk-edit workflows.
 
 1. Review the generated OED location, account and reinsurance views together with validation, geocoding and model-coverage findings; correct or explicitly approve permitted exceptions.
 
 1. Choose analysis options from model-defined settings rather than editing engine configuration files.
 
-1. Submit the analysis and follow a single KRE status view while Django coordinates the OpenQuake, conversion and Oasis tasks.
+1. Submit the analysis and follow a single CASS status view while Django coordinates the OpenQuake, conversion and Oasis tasks.
 
 1. Review scientific and operational checks before results are released to decision users.
 
@@ -160,33 +166,33 @@ The architecture separates the control plane from the scientific data plane. Dja
 
 ### End to end service flow
 
-| KRE React | KRE Django | OpenQuake | KRE Converter | Oasis |
+| CASS React | CASS Django | OpenQuake | CASS Converter | Oasis |
 | --- | --- | --- | --- | --- |
 | Analyst workflow and results | Identity, orchestration, metadata and audit | Earthquake hazard and supported exports | HDF5 to events, occurrence and footprint | Vulnerability, financial terms and loss outputs |
 
-Shared infrastructure: PostgreSQL for KRE application records; an object store for uploads, HDF5, model packages and results; a background task queue; centralized logs and metrics; and a secrets service. The OpenQuake and Oasis internal stores remain engine-owned.
+Shared infrastructure: PostgreSQL for CASS application records; an object store for uploads, HDF5, model packages and results; a background task queue; centralized logs and metrics; and a secrets service. The OpenQuake and Oasis internal stores remain engine-owned.
 
 ### Component responsibilities
 
 | Component | Responsibility | Boundary rule |
 | --- | --- | --- |
-| React TypeScript application | Analyst workflow, validation presentation, mapping, charting and result comparison | Calls only the KRE API; does not call engine APIs directly |
+| React TypeScript application | Analyst workflow, validation presentation, mapping, charting and result comparison | Calls only the CASS API; does not call engine APIs directly |
 | Django REST API | Users, roles, projects, runs, model registry, metadata, approvals and audit | Stores references to large artifacts, not scientific arrays |
 | Portfolio and OED service | Editable exposure and contract records, imports, enrichment, schema validation and immutable OED publication | Business data is authoritative until an OED version is published; generated Oasis kernel files are never edited here |
 | Workflow workers | Execute durable jobs, retries, cancellation and stage transitions | Every task is idempotent and records input and output checksums |
-| OpenQuake adapter | Submit, monitor and export calculations through supported interfaces | No KRE writes to OpenQuake internal tables |
+| OpenQuake adapter | Submit, monitor and export calculations through supported interfaces | No CASS writes to OpenQuake internal tables |
 | Converter service | Translate versioned OpenQuake output into validated Oasis model data | Pinned compatibility matrix and deterministic output |
-| KRE keys service | Map OED locations and coverages to area-peril and vulnerability identifiers | Complete success/failure response and TIV reconciliation for every expected mapping |
+| CASS keys service | Map OED locations and coverages to area-peril and vulnerability identifiers | Complete success/failure response and TIV reconciliation for every expected mapping |
 | Oasis adapter | Register models, upload exposure, run analyses and collect outputs | Use the Platform API rather than modifying the Oasis UI |
 | Artifact store | Hold large immutable and versioned files | Content checksum, retention class and access policy on every object |
-| PostgreSQL | Hold KRE control-plane records | No event-site-IMT observation table |
+| PostgreSQL | Hold CASS control-plane records | No event-site-IMT observation table |
 | Observability stack | Aggregate structured logs, metrics, traces and alerts | Correlation ID follows every run across all services |
 
 ### Recommended technology baseline
 
-- React with TypeScript and a documented KRE component library; MapLibre GL JS for maps; a mature charting library for EP and loss distributions.
+- React with TypeScript and a documented CASS component library; MapLibre GL JS for maps; a mature charting library for EP and loss distributions.
 
-- Django, Django REST Framework and generated OpenAPI contracts; PostgreSQL for the KRE database.
+- Django, Django REST Framework and generated OpenAPI contracts; PostgreSQL for the CASS database.
 
 - Celery-compatible durable background execution. Redis is acceptable for development; RabbitMQ or another production-grade broker should be selected through the deployment decision.
 
@@ -198,7 +204,7 @@ Shared infrastructure: PostgreSQL for KRE application records; an object store f
 
 ### Distribution and deployment model
 
-The same versioned container set should support two approved operating modes. A KRE-server installation provides centralized identity, shared models, managed storage, coordinated updates and multi-user access. An approved local installation provides the React application, Django API, PostgreSQL, object storage, task queue, OpenQuake, the converter and Oasis through Docker Compose on the user's device.
+The same versioned container set should support two approved operating modes. A CASS installation on KRE servers provides centralized identity, shared models, managed storage, coordinated updates and multi-user access. An approved local CASS installation provides the React application, Django API, PostgreSQL, object storage, task queue, OpenQuake, the converter and Oasis through Docker Compose on the user's device.
 
 - The local package must not contain KRE production credentials, unrelated portfolios or unrestricted administrative secrets.
 
@@ -208,11 +214,11 @@ The same versioned container set should support two approved operating modes. A 
 
 - Updates should be distributed as tested release bundles with database migrations, model compatibility information and rollback instructions.
 
-- KRE-server and local installations should produce the same scientific results when given the same inputs, model versions, settings and compute profile.
+- CASS server and local installations should produce the same scientific results when given the same inputs, model versions, settings and compute profile.
 
 ## 5  Application and Data Model
 
-### KRE control-plane records
+### CASS control-plane records
 
 | Record | Purpose | Examples of retained fields |
 | --- | --- | --- |
@@ -237,7 +243,7 @@ The same versioned container set should support two approved operating modes. A 
 | Accepted Oasis model package | Versioned model asset | Immutable release with scientific approval and compatibility record |
 | Portfolio input versions | Business retention policy | Encrypted, access controlled and deletable without damaging model assets |
 | Enriched exposure realizations | Retain with the governed analysis or reconstruct from retained inputs | Preserve TIV, source flags, probability weights, assumption version and reconciliation evidence |
-| Loss result package | Business and regulatory policy | ORD-aligned outputs plus KRE summaries and lineage |
+| Loss result package | Business and regulatory policy | ORD-aligned outputs plus CASS summaries and lineage |
 | Logs and operational metrics | Tiered by usefulness | Short hot retention, longer error and audit retention |
 
 ### File transfer principles
@@ -315,7 +321,7 @@ Before code is written, KRE must decide how an OpenQuake rupture, stochastic occ
 
 The GEM v2026.0.0 Indonesia and Nepal vulnerability functions use PGA, SA(0.3), SA(0.6) and SA(1.0). In each coverage-component XML, Indonesia has 17 PGA-based and 15 SA-based functions; Nepal has 25 PGA-based and 32 SA-based functions. A single undifferentiated Oasis intensity channel cannot be assumed to represent the SA periods correctly, and dropping PGA would leave substantial taxonomy coverage unmodelled unless those classes prove immaterial to KRE or approved replacement functions are developed.
 
-The initial converter implementation is limited to the SA family. The first golden vertical slice will use SA(0.3); SA(0.6) and SA(1.0) will then be added with shared event lineage. Before the production converter is designed, KRE will implement and compare the following bounded prototypes:
+The initial converter implementation is limited to the SA family. The first golden vertical slice will use SA(0.3); SA(0.6) and SA(1.0) will then be added with shared event lineage. Before the production converter is designed, CASS will implement and compare the following bounded prototypes:
 
 1. Correlated Oasis subperil or intensity-measure channels that retain a common event identity and route each vulnerability class to its required IMT.
 
@@ -329,9 +335,9 @@ The SA-only model will report supported and unsupported vulnerability classes an
 
 ## 7  OpenQuake to Oasis Converter
 
-The converter is a KRE product component, not an ad hoc export script. It should be packaged as a stateless container and called by a durable background job. Its public contract is a conversion manifest; its output is a complete candidate Oasis model package plus machine-readable validation evidence.
+The converter is a CASS product component, not an ad hoc export script. It should be packaged as a stateless container and called by a durable background job. Its public contract is a conversion manifest; its output is a complete candidate Oasis model package plus machine-readable validation evidence.
 
-The converter owns only model-level earthquake assets derived from OpenQuake and approved vulnerability sources. It does not create policy-specific `items`, `coverages` or financial-module files. Those are generated later for each portfolio through the supported OasisLMF file-generation library. This boundary avoids duplicating Oasis financial logic in KRE while keeping the scientifically material OpenQuake translation under KRE control.
+The converter owns only model-level earthquake assets derived from OpenQuake and approved vulnerability sources. It does not create policy-specific `items`, `coverages` or financial-module files. Those are generated later for each portfolio through the supported OasisLMF file-generation library. This boundary avoids duplicating Oasis financial logic in CASS while keeping the scientifically material OpenQuake translation under KRE governance.
 
 ### Converter inputs and outputs
 
@@ -347,21 +353,21 @@ The converter owns only model-level earthquake assets derived from OpenQuake and
 
 The production file format—CSV, binary or Parquet—will follow Oasis 2.5.x support and measured performance. Human-reviewable source tables and schemas remain governed artifacts; binary files are compiled derivatives and must never be manually edited.
 
-| Asset | Oasis role | Required position | KRE creation route |
+| Asset | Oasis role | Required position | CASS creation route |
 | --- | --- | --- | --- |
-| `model_settings.json` | Declares model, event, occurrence, footprint and vulnerability set options and supported outputs | Required deployment metadata | Generated from the approved KRE model registry entry and validated against the ODS Tools schema |
+| `model_settings.json` | Declares model, event, occurrence, footprint and vulnerability set options and supported outputs | Required deployment metadata | Generated from the approved CASS model registry entry and validated against the ODS Tools schema |
 | `events.csv` and compiled `events.bin`, or suffixed event-set equivalents | Ordered event identifiers consumed by the event stream | Required | Converter assigns deterministic Oasis IDs from the approved OpenQuake event-identity specification |
 | `occurrence.csv` and compiled `occurrence.bin`, or suffixed equivalents | Maps events to simulation periods and dates for AAL and EP calculations | Required for probabilistic portfolio metrics | Converter applies the approved occurrence policy and reconciles period count and annual frequency to OpenQuake |
 | Governed period-weight source and `periods.bin` | Optional non-neutral period weights | Optional; use only with scientific justification | Generated by the converter in the exact format supported by the pinned worker when period weighting cannot be represented neutrally; otherwise omitted |
 | `footprint.parquet` or `footprint.bin` plus `footprint.idx` | Probability distribution of intensity bin by event and area peril | Required for the standard Oasis GUL path | Converter bins chunked OpenQuake GMFs on the fixed grid and emits the multi-IMT representation selected by the architecture gate |
-| `vulnerability.csv` and compiled `vulnerability.bin`, or Parquet equivalent | Probability of damage bin by vulnerability and intensity bin | Required | Vulnerability builder translates licensed GEM XML or approved KRE functions and numerically discretises their loss-ratio distributions |
-| `damage_bin_dict.csv` and compiled `damage_bin_dict.bin` | Defines damage-ratio bin bounds and interpolation values shared by vulnerability functions | Required | Created once as a versioned KRE modelling standard, then validated against every vulnerability row |
-| Intensity-bin dictionary | Documents the physical intensity represented by each abstract Oasis bin and IMT | Required KRE reference; kernel requirement depends on selected footprint implementation | Generated from approved IMT-specific bin specifications and included in scientific QA |
+| `vulnerability.csv` and compiled `vulnerability.bin`, or Parquet equivalent | Probability of damage bin by vulnerability and intensity bin | Required | Vulnerability builder translates licensed GEM XML or approved proprietary functions and numerically discretises their loss-ratio distributions |
+| `damage_bin_dict.csv` and compiled `damage_bin_dict.bin` | Defines damage-ratio bin bounds and interpolation values shared by vulnerability functions | Required | Created once as a versioned CASS modelling standard, then validated against every vulnerability row |
+| Intensity-bin dictionary | Documents the physical intensity represented by each abstract Oasis bin and IMT | Required CASS reference; kernel requirement depends on selected footprint implementation | Generated from approved IMT-specific bin specifications and included in scientific QA |
 | Area-peril dictionary and spatial lookup assets | Relate stable integer area-peril IDs to grid cells and geometry | Required for lookup and explanation, not always by the calculation kernel | Grid builder publishes geometry, centroids, site parameters, country, IMT/subperil route and stable IDs |
-| Vulnerability dictionary and taxonomy mapping | Relate KRE/GEM taxonomy and coverage type to Oasis vulnerability ID and required IMT | Required for lookup and explanation | Vulnerability builder compiles approved mappings; ambiguous KRE risks are resolved by the enrichment realization before lookup |
-| `ModelVersion.csv` and lookup configuration | Identify the model and configure the keys service | Required by the KRE model deployment contract | Generated from the model registry, compatibility matrix and approved lookup pipeline |
+| Vulnerability dictionary and taxonomy mapping | Relate CASS/GEM taxonomy and coverage type to Oasis vulnerability ID and required IMT | Required for lookup and explanation | Vulnerability builder compiles approved mappings; ambiguous KRE risks are resolved by the enrichment realization before lookup |
+| `ModelVersion.csv` and lookup configuration | Identify the model and configure the keys service | Required by the CASS model deployment contract | Generated from the model registry, compatibility matrix and approved lookup pipeline |
 | `quantile.csv/.bin` | Requests model-supported damage or loss quantiles | Optional | Generated only for approved quantile outputs |
-| `returnperiods.csv/.bin` | Defines requested EP return periods | Optional but recommended as an approved reporting set | Generated from KRE reporting policy rather than user-authored kernel files |
+| `returnperiods.csv/.bin` | Defines requested EP return periods | Optional but recommended as an approved reporting set | Generated from CASS reporting policy rather than user-authored kernel files |
 | `lossfactors.csv/.bin` | Post-loss amplification factors | Deferred unless demand surge or another PLA method is approved | Created by a separate governed PLA workstream, not inferred by the converter |
 
 For CSV-sourced assets, the model-build job will use the Oasis-supported converters to create binaries and indexes, then perform CSV-to-binary-to-CSV or Parquet round-trip checks, row counts, probability sums, identifier coverage and checksums. The published package will contain only the runtime formats and reference dictionaries required by the selected worker, while the complete source and validation evidence remain in model-build storage.
@@ -406,26 +412,59 @@ For CSV-sourced assets, the model-build job will use the Oasis-supported convert
 
 ### Model package
 
-The earthquake model release combines the converted hazard module, a versioned vulnerability module, occurrence definitions, lookup configuration, model settings and supporting dictionaries. Oasis relates events and area perils through the footprint and relates intensities to damage through vulnerability functions. KRE should publish these together as a single governed release even when individual components have separate scientific owners.
+The earthquake model release combines the converted hazard module, a versioned vulnerability module, occurrence definitions, lookup configuration, model settings and supporting dictionaries. Oasis relates events and area perils through the footprint and relates intensities to damage through vulnerability functions. CASS should publish these together as a single governed release even when individual components have separate scientific owners.
 
 ### Platform-created source inputs
 
-KRE will maintain an editable, versioned business representation of portfolios and contracts in the application, then publish immutable OED artifacts for calculation. Users may create records through guided forms, import KRE templates, upload existing OED files or apply controlled bulk transformations. The platform will display the OED interpretation before a run and allow the exact generated files to be downloaded. The supported OED schema version will be pinned in the engine compatibility matrix rather than following a moving development specification.
+CASS will maintain an editable, versioned business representation of portfolios and contracts, then publish immutable OED artifacts for calculation. Users may create records through guided forms, import Klapton Re templates, upload existing OED files or apply controlled bulk transformations. CASS will display the OED interpretation before a run and allow the exact generated files to be downloaded. The supported OED schema version will be pinned in the engine compatibility matrix rather than following a moving development specification.
 
-| Source artifact | When required | What it represents | How KRE creates it |
+| Source artifact | When required | What it represents | How CASS creates it |
 | --- | --- | --- | --- |
 | OED Location file | Always; it is the source for ground-up loss | Locations, geography, perils, coverage values, occupancy/construction attributes and permitted location terms | Built from user entry or imported portfolio data, then geocoded, enriched, currency-normalized and validated by the platform |
 | OED Account file | Insured/direct loss | Accounts, policies, policy perils, deductibles, limits, layers and special conditions | Built in the financial-structure workspace from KRE contract data or an imported account file; unsupported or ambiguous terms require resolution |
 | OED Reinsurance Info file | Reinsurance loss | One record per reinsurance contract, including type, currency, participation, risk and occurrence terms and inuring priority | Built from guided contract forms or import and reconciled to the modelled financial perspective |
 | OED Reinsurance Scope file | Reinsurance loss | Which portfolios, accounts, policies, locations or segments each contract covers, including surplus ceded percentages where applicable | Built through explicit scope filters and previewed as included/excluded risks before publication |
 | Analysis settings JSON | Every run | Samples, event/occurrence/footprint/vulnerability set, outputs, summaries, random-number and execution settings | Compiled from approved model defaults and UI selections; advanced settings are schema-validated and permission-controlled |
-| Currency-conversion evidence | When source and model currencies differ | Rates, valuation date, source and conversion direction | Captured by KRE before Oasis generation because the Oasis Financial Module does not perform multi-currency calculations |
+| Currency-conversion evidence | When source and model currencies differ | Rates, valuation date, source and conversion direction | Captured by CASS before Oasis generation because the Oasis Financial Module does not perform multi-currency calculations |
 
 The location file alone is sufficient only for a ground-up-loss run. The account file is required for insured loss. Reinsurance information and scope are required for reinsurance calculations. Empty placeholder financial files will not be generated to imply a perspective that the source data does not support.
 
+### ODS and OED reference integration
+
+CASS will load the official OED reference JSON as a pinned, immutable application asset. The reference drives field metadata, required and conditional rules, valid-value lists, code descriptions, guided forms, import mappings and immediate validation feedback. It will not be rewritten as a CASS specification or copied into editable business tables.
+
+The first registry will contain:
+
+- **Active:** OED 4.0.0, matching the current CASS exposure contract and fixtures.
+- **Candidate:** OED 5.0.0, retained for a controlled compatibility and migration assessment before adoption.
+
+Each `DataStandardVersion` record will contain the standard name, semantic version, source release and commit, reference-JSON artifact URI, SHA-256 checksum, compatible ODS Tools versions, licence, import time, status and supersession relationship. The JSON will be bundled with the versioned CASS backend image or staged from the governed artifact store during image construction so approved local Docker installations work without Internet access. CASS will never retrieve a moving `latest` schema during startup or analysis.
+
+PostgreSQL will hold the version record and artifact reference, not a mutable row for every upstream field and code. The CASS backend will load the selected JSON through the pinned ODS Tools schema implementation and build read-only indexes by file type, exposure class, canonical field, data type, requirement rule and valid-value set. A memory or Redis cache may hold these derived indexes; the checksummed JSON remains authoritative.
+
+The CASS API will expose a stable, filtered contract for the React interface, including endpoints equivalent to:
+
+- `GET /api/v1/standards/oed/active/`;
+- `GET /api/v1/standards/oed/{version}/fields/?file=Loc&class=Property`;
+- `GET /api/v1/standards/oed/{version}/codes/{code_set}/`;
+- `POST /api/v1/exposure-versions/{id}/validate-oed/`;
+- `GET /api/v1/standards/oed/diff/?from=4.0.0&to=5.0.0`.
+
+The browser will not load the raw reference JSON directly. React will consume the CASS API so permissions, active-version selection, caching and human-readable validation remain consistent. The interface will show the governing OED version beside forms, previews, validation findings and published exposure versions.
+
+CASS-specific concepts will live in a separate versioned `CASS OED Profile` overlay. This overlay will define supported OED fields, stricter publication rules and mappings for internal concepts such as KRE-share TIV, evidence class, coordinate cohort, allocation scenario, assumption-set version and analyst override. The overlay must not alter the upstream JSON. The existing hand-maintained CASS OED subset will become this adapter/profile layer rather than an independent competing schema.
+
+Validation will have three levels:
+
+1. CASS performs immediate UI and import checks using the indexed schema and translates findings into business language.
+2. Pinned ODS Tools performs authoritative OED validation before publication.
+3. The pinned OasisLMF file generator performs the final integration check before analysis admission.
+
+The OED 5 adoption gate will compare Location, Account, Reinsurance Info and Reinsurance Scope fields; property requirements; peril, coverage, currency, occupancy and construction codes; conditional requirements; PiWind; the KRE geocoded extract; and OasisLMF 2.5.7 compatibility. If the test passes, CASS should adopt OED 5 before further importer mappings accumulate. If it does not, OED 4 remains active for the engine vertical slice and OED 5 remains a visible candidate with a documented blocker. The official release JSON and source CSV specification are published by the [ODS Open Exposure Data project](https://github.com/OasisLMF/ODS_OpenExposureData), while runtime interpretation and validation remain the responsibility of pinned [ODS Tools](https://github.com/OasisLMF/ODS_Tools).
+
 ### Model lookup and keys outputs
 
-The KRE keys service is the controlled bridge between published OED exposure and the approved earthquake model. It accepts every location, coverage type and applicable earthquake subperil or IMT route and returns a complete success or failure record. Its principal output is `keys.csv` or an equivalent supported format containing the location identifier, peril, coverage type, area-peril ID, vulnerability ID, status and message.
+The CASS keys service is the controlled bridge between published OED exposure and the approved earthquake model. It accepts every location, coverage type and applicable earthquake subperil or IMT route and returns a complete success or failure record. Its principal output is `keys.csv` or an equivalent supported format containing the location identifier, peril, coverage type, area-peril ID, vulnerability ID, status and message.
 
 The lookup pipeline will:
 
@@ -441,28 +480,28 @@ The lookup pipeline will:
 
 ### Portfolio-specific Oasis files
 
-After keys are accepted, KRE will call the pinned OasisLMF `generate-oasis-files` implementation rather than recreating its business rules. OasisLMF 2.5.7 identifies the following core generated inputs.
+After keys are accepted, CASS will call the pinned OasisLMF `generate-oasis-files` implementation rather than recreating its business rules. OasisLMF 2.5.7 identifies the following core generated inputs.
 
-| Generated artifact | Calculation role | Generation and KRE control |
+| Generated artifact | Calculation role | Generation and CASS control |
 | --- | --- | --- |
 | `items.csv/.bin` | One model item for a location, peril/subperil and coverage mapping; connects coverage value to area peril and vulnerability | Generated from OED plus accepted keys; IDs are deterministic within the published exposure version |
 | `coverages.csv/.bin` | Associates each coverage ID with its TIV | Generated from OED coverage values; totals must reconcile by coverage type and portfolio |
-| `gulsummaryxref.csv/.bin` | Maps GUL coverage records into requested output summary groups | Generated from KRE-approved summary definitions such as portfolio, cedant, country, region and occupancy |
+| `gulsummaryxref.csv/.bin` | Maps GUL coverage records into requested output summary groups | Generated from CASS-governed summary definitions such as portfolio, cedant, country, region and occupancy |
 | `correlations.csv/.bin` | Optional item-level hazard and damage correlation groups and coefficients | Generated only from approved earthquake correlation policy; defaults and unsupported combinations are explicit |
 | `amplifications.csv/.bin` | Optional item-level post-loss amplification reference | Omitted in release one unless a governed amplification model is approved |
-| `fm_programme.csv/.bin` | Defines the hierarchical aggregation of coverages into insurance programme levels | Generated by OasisLMF from Location and Account data; KRE validates hierarchy and orphan nodes |
-| `fm_profile.csv/.bin` or `fm_profile_step.csv/.bin` | Defines financial calculation rules and term values | Generated from supported OED deductibles, limits, attachments and shares; KRE rejects or flags unsupported rules rather than approximating silently |
+| `fm_programme.csv/.bin` | Defines the hierarchical aggregation of coverages into insurance programme levels | Generated by OasisLMF from Location and Account data; CASS validates hierarchy and orphan nodes |
+| `fm_profile.csv/.bin` or `fm_profile_step.csv/.bin` | Defines financial calculation rules and term values | Generated from supported OED deductibles, limits, attachments and shares; CASS rejects or flags unsupported rules rather than approximating silently |
 | `fm_policytc.csv/.bin` | Assigns financial profiles to programme nodes and layers | Generated by OasisLMF; completeness and layer consistency are validated |
 | `fm_xref.csv/.bin` | Maps financial-module output nodes to output IDs | Generated by OasisLMF and retained with dictionaries needed to interpret results |
-| `fmsummaryxref.csv/.bin` | Maps insured-loss output IDs into requested summary groups | Generated from KRE-approved summary definitions |
-| `ri_layers.json` and `RI_n/` directories | Declare reinsurance execution order and hold the FM files for each reinsurance layer or inuring stage | Generated by OasisLMF from Reinsurance Info and Scope; KRE previews scope, tests inuring and reconciles each stage |
-| Exposure summary and mapping reports | Diagnostic TIV, peril, coverage and lookup summaries | Generated and retained as run QA; KRE adds its own source-to-OED-to-items reconciliation report |
+| `fmsummaryxref.csv/.bin` | Maps insured-loss output IDs into requested summary groups | Generated from CASS-governed summary definitions |
+| `ri_layers.json` and `RI_n/` directories | Declare reinsurance execution order and hold the FM files for each reinsurance layer or inuring stage | Generated by OasisLMF from Reinsurance Info and Scope; CASS previews scope, tests inuring and reconciles each stage |
+| Exposure summary and mapping reports | Diagnostic TIV, peril, coverage and lookup summaries | Generated and retained as run QA; CASS adds its own source-to-OED-to-items reconciliation report |
 
 CSV or Parquet outputs are retained for audit where useful; the calculation worker compiles the required binary files. The source OED, accepted keys and generator version are the authoritative inputs. Portfolio-specific kernel files are deterministic derived artifacts that may be regenerated and should not be edited by users.
 
 ### Input-generation workflow and gates
 
-1. Capture or import portfolio, policy and reinsurance data into a draft KRE exposure version.
+1. Capture or import portfolio, policy and reinsurance data into a draft CASS exposure version.
 
 1. Validate identifiers, hierarchy, code lists, dates, coordinates, currencies, TIV and financial terms; present errors in business language.
 
@@ -484,7 +523,7 @@ The platform will expose each stage and its evidence. A user can return to the b
 
 ### Vulnerability workstream
 
-- Define the KRE exposure taxonomy and an explicit mapping from OED occupancy, construction, height, age and other attributes.
+- Define the CASS exposure taxonomy and an explicit mapping from OED occupancy, construction, height, age and other attributes.
 
 - Acquire or develop vulnerability functions with documented provenance and permitted commercial use.
 
@@ -540,7 +579,7 @@ The 30 June 2026 KRE extract is the first representative portfolio source for th
 
 The source will be divided into governed coordinate cohorts rather than filtered only on coordinate presence. Cohort A contains 63 no-review parcel, street or embedded locations and is the automated geospatial test set. Cohort B contains 46 no-review locality, postcode or administrative-level locations and is the geocoding sensitivity set. Cohort C contains 115 review-required locations and remains outside the automated benchmark until reviewed or explicitly approved. The first physical-damage benchmark requires every location of a selected business to qualify: it contains 42 Cohort A Fire businesses and locations, 39 in Indonesia and 3 in Nepal, with USD 147.045 million of KRE-share TIV. Engineering remains a separate classification workstream and Liability is excluded from physical-damage testing.
 
-The extract's `gross_limit` is confirmed as TIV at KRE's share, all monetary fields are USD and earthquake is assumed covered throughout. The full extract contains USD 3.328 billion of reported KRE-share TIV; geocoded businesses contain USD 822.817 million. This supports a real-valued research loss test, but KRE must not apply the share again or call the output 100%-of-risk ground-up loss. The source does not split TIV by building, contents, machinery, stock or business interruption. Ten multi-location businesses hold USD 55.176 million of geocoded TIV. In the absence of site-value evidence, the baseline allocates each policy's TIV equally across all its locations; required sensitivities concentrate 70% at the primary site and calculate a 100%-at-each-site loss envelope. Every scenario reconciles to the policy TIV using deterministic decimal rounding. Geometry-only, KRE-share research and decision-use modes remain distinct. Portfolio coordinates map to the fixed country grids; portfolio-specific OpenQuake sites are used only for validation. Source protection, mappings, cohort rules, allocation scenarios, platform work packages and acceptance tests are specified in the linked dataset integration instructions.
+The extract's `gross_limit` is confirmed as TIV at KRE's share, all monetary fields are USD and earthquake is assumed covered throughout. The full extract contains USD 3.328 billion of reported KRE-share TIV; geocoded businesses contain USD 822.817 million. This supports a real-valued research loss test, but CASS must not apply the share again or call the output 100%-of-risk ground-up loss. The source does not split TIV by building, contents, machinery, stock or business interruption. Ten multi-location businesses hold USD 55.176 million of geocoded TIV. In the absence of site-value evidence, the baseline allocates each policy's TIV equally across all its locations; required sensitivities concentrate 70% at the primary site and calculate a 100%-at-each-site loss envelope. Every scenario reconciles to the policy TIV using deterministic decimal rounding. Geometry-only, KRE-share research and decision-use modes remain distinct. Portfolio coordinates map to the fixed country grids; portfolio-specific OpenQuake sites are used only for validation. Source protection, mappings, cohort rules, allocation scenarios, platform work packages and acceptance tests are specified in the linked dataset integration instructions.
 
 ### Exposure quality and review workflow
 
@@ -576,7 +615,7 @@ Business interruption, machinery breakdown, stock, consequential loss, demand su
 
 - Prefer current ORD-aligned result outputs for downstream analytics and exports.
 
-- Preserve the native Oasis result package alongside KRE summaries so advanced users can independently inspect outputs.
+- Preserve the native Oasis result package alongside CASS summaries so advanced users can independently inspect outputs.
 
 ### Analysis perspectives
 
@@ -660,7 +699,7 @@ Every decision view and export will identify model version, valuation date, fina
 
 ### Licensing
 
-OpenQuake is distributed under the GNU Affero General Public License version 3, while the main OasisLMF repository uses a BSD licence. KRE should obtain legal review before offering the platform to external network users, distributing modified engine containers or embedding third-party hazard and vulnerability data. The design should prefer unmodified upstream engine containers and separate KRE adapters, but service separation must not be treated as a substitute for licence analysis.
+OpenQuake is distributed under the GNU Affero General Public License version 3, while the main OasisLMF repository uses a BSD licence. KRE should obtain legal review before offering CASS to external network users, distributing modified engine containers or embedding third-party hazard and vulnerability data. The design should prefer unmodified upstream engine containers and separate CASS adapters, but service separation must not be treated as a substitute for licence analysis.
 
 The public GEM Global Exposure and Global Vulnerability Models are published under CC BY-NC-SA terms. KRE's intended internal use supports commercial reinsurance decisions and must therefore remain a research/evaluation activity until GEM confirms the permitted commercial use in writing. The licence record must address use of original data, transformed vulnerability and Oasis model packages, derived priors, attribution, internal server deployment, approved local Docker distribution, retention and deletion.
 
@@ -706,7 +745,7 @@ During the internal pilot, the service level should prioritize recoverability an
 | Unit | Verify local transformation and business rules | Binning boundaries, IDs, status transitions, permissions and financial mappings |
 | Contract | Detect upstream API and schema change | Pinned OpenQuake and Oasis request, response and export fixtures |
 | Component | Verify each container with real dependencies | HDF5 chunking, keys lookup, model packaging and result ingestion |
-| End to end | Prove the complete analyst workflow | PiWind baseline and a small earthquake golden model through the KRE UI and APIs |
+| End to end | Prove the complete analyst workflow | PiWind baseline and a small earthquake golden model through the CASS UI and APIs |
 | Scientific | Establish model credibility | Hazard benchmarks, event frequency, spatial checks, vulnerability sensitivity and loss comparisons |
 | Exposure enrichment | Prove assumptions are controlled and reversible | Missingness profiles, TIV reconciliation, source lineage, scenario ordering, override audit and manual-review samples |
 | Performance | Set safe limits and capacity | Large GMF, portfolio and result tests with CPU, memory, I/O and duration |
@@ -717,7 +756,7 @@ During the internal pilot, the service level should prioritize recoverability an
 
 - A fresh environment can be built from version-controlled configuration and pinned images.
 
-- An approved routine user can complete the full journey through the KRE web application without opening a native engine interface, editing engine files or using a command line.
+- An approved routine user can complete the full journey through the CASS web application without opening a native engine interface, editing engine files or using a command line.
 
 - Every result is traceable to immutable exposure, model, engine, converter and settings versions.
 
@@ -743,13 +782,13 @@ During the internal pilot, the service level should prioritize recoverability an
 
 The roadmap is organized around working vertical slices. Durations are planning ranges for a core team of approximately five to seven people with dedicated catastrophe modelling input. Scientific data acquisition, licensing or independent validation can extend the schedule and should be tracked separately from software delivery.
 
-The phases describe increasing capability, not a sequence in which the user interface waits until phase six. Every engine capability will first be exposed through a thin KRE workflow and then expanded as its scientific and operational controls mature. Phase six completes the analyst experience, visualization and comparison functions already established in phases one and two.
+The phases describe increasing capability, not a sequence in which the user interface waits until phase six. Every engine capability will first be exposed through a thin CASS workflow and then expanded as its scientific and operational controls mature. Phase six completes the analyst experience, visualization and comparison functions already established in phases one and two.
 
 | Phase | Indicative duration | Outcome and exit gate |
 | --- | --- | --- |
 | 0 Direction and model charter | 2 to 3 weeks | Confirm Indonesia and Nepal model sources, GEM commercial rights, model asset inventory, peril scope, adaptive-grid specifications, event semantics, multi-IMT study, exposure evidence hierarchy, local distribution controls and acceptance authority |
 | 1 Platform foundation | 3 to 5 weeks | Usable React and Django workflow, identity, projects, guided Location-file creation/import, OED validation, job status, PostgreSQL, object storage, queue, observability and automated environments |
-| 2 Engine vertical slice | 4 to 6 weeks | KRE publishes PiWind OED, runs keys and Oasis file generation, then submits and monitors the loss job without native-engine UI use; artifacts, errors, reconciliation and lineage are visible |
+| 2 Engine vertical slice | 4 to 6 weeks | CASS publishes PiWind OED, runs keys and Oasis file generation, then submits and monitors the loss job without native-engine UI use; artifacts, errors, reconciliation and lineage are visible |
 | 3 Earthquake hazard prototype | 6 to 10 weeks | Pilot source model, stable grid, site-condition policy, secondary-peril scope, OpenQuake settings, benchmark calculation and capacity measurements approved |
 | 4 Converter and model package | 8 to 12 weeks | SA(0.3) vertical slice followed by correlated SA(0.6) and SA(1.0) routing, chunked HDF5 conversion, event and occurrence mapping, vulnerability discretisation, footprint generation, unsupported-PGA coverage report, QA and golden prototype approved |
 | 5 Exposure, vulnerability and loss workflow | 7 to 11 weeks | Full Location, Account, RI Info and RI Scope creation/import, portfolio missingness audit, conditional-prior engine, assumption scenarios, taxonomy mapping, keys service, Oasis file generation, ground-up loss and supported financial calculations validated |
@@ -763,8 +802,8 @@ With overlap between platform, interface and model work, an internal earthquake 
 
 | Milestone | Demonstration |
 | --- | --- |
-| M1 Foundation | Sign in to KRE, create or import a small Location portfolio, preview valid OED and observe a durable background task through the web interface |
-| M2 Engine integration | Generate PiWind keys, GUL/IL/RI files and settings, run end to end from KRE, inspect reconciliation and outputs, and complete the workflow without opening the native Oasis interface |
+| M1 Foundation | Sign in to CASS, create or import a small Location portfolio, preview valid OED and observe a durable background task through the web interface |
+| M2 Engine integration | Generate PiWind keys, GUL/IL/RI files and settings, run end to end from CASS, inspect reconciliation and outputs, and complete the workflow without opening the native Oasis interface |
 | M3 Hazard | Run the pilot OpenQuake model on the stable grid, validate site-condition treatment and compare benchmark hazard |
 | M4 Conversion | Produce and validate the SA-family Oasis representation without CSV staging or database array ingestion and quantify exposure requiring deferred PGA functions |
 | M5 Loss | Enrich one approved portfolio under alternative assumption sets and run ground-up and insured loss with full reconciliation |
@@ -775,7 +814,7 @@ With overlap between platform, interface and model work, an internal earthquake 
 
 | Role | Core accountability | Indicative involvement |
 | --- | --- | --- |
-| KRE product owner | Scope, priorities, business acceptance and stakeholder decisions | Dedicated |
+| CASS product owner at KRE | Scope, priorities, business acceptance and stakeholder decisions | Dedicated |
 | Catastrophe model owner | Scientific requirements, assumptions, validation and model approval | Dedicated during model phases |
 | Technical lead | Architecture, contracts, code quality, security and release design | Dedicated |
 | Backend engineer | Django API, workflow, engine adapters, lineage and operations | One to two dedicated |
@@ -797,7 +836,7 @@ With overlap between platform, interface and model work, an internal earthquake 
 
 - Treat model packages as releases with changelogs, compatibility, evidence and rollback—not as folders copied between machines.
 
-- Keep upstream contributions separate from KRE product delivery; propose general fixes upstream where practical.
+- Keep upstream contributions separate from CASS product delivery; propose general fixes upstream where practical.
 
 ## 15  Risk Register
 
@@ -817,14 +856,14 @@ With overlap between platform, interface and model work, an internal earthquake 
 | Local installations drift or retain sensitive data | Inconsistent results, licensing breach or data exposure | Signed release bundles, version checks, encrypted storage, controlled updates, audit export and secure removal procedures |
 | OpenQuake or Oasis upgrade breaks integration | Interrupted releases or changed results | Pin image digests, maintain contract tests and upgrade through a compatibility environment |
 | Large files pass through Django or CSV | Poor performance, memory pressure and fragile workflows | Direct object uploads and chunked HDF5 or Parquet processing |
-| KRE independently recreates Oasis file-generation rules | Divergence from Oasis, financial errors and costly upgrades | Use the pinned OasisLMF library/API for keys-to-kernel generation and keep KRE logic in OED preparation, adapters and validation |
+| CASS independently recreates Oasis file-generation rules | Divergence from Oasis, financial errors and costly upgrades | Use the pinned OasisLMF library/API for keys-to-kernel generation and keep CASS logic in OED preparation, adapters and validation |
 | Users edit generated kernel files | Untraceable results and broken references | Make kernel files read-only derived artifacts; corrections occur in business records and create a new OED version |
 | Keys failures or not-at-risk values are hidden | Exposure is silently omitted from loss | Require complete lookup responses and record/TIV reconciliation before run approval |
 | Unsupported financial terms are approximated silently | Material insured or ceded loss error | Maintain a supported-term matrix and block or explicitly approve documented approximations |
 | Multiple currencies reach the Oasis FM | Incorrect aggregation because the FM does not calculate multi-currency terms | Normalize to the run currency with governed rates and valuation-date evidence before file generation |
 | Scientific validation is treated as software QA | Technically correct but unreliable model | Separate approval gates and independent reviewers |
 | Unbounded concurrency exhausts the host | Failed jobs and poor user experience | Resource profiles, queue limits, admission control and measured capacity |
-| Custom engine forks accumulate | Expensive maintenance and delayed security upgrades | Use supported APIs and isolate KRE logic in adapters and converter services |
+| Custom engine forks accumulate | Expensive maintenance and delayed security upgrades | Use supported APIs and isolate CASS logic in adapters and converter services |
 | Financial terms are assumed rather than tested | Material insured or ceded loss errors | Representative OED contract fixtures and actuarial review |
 | Result interface hides uncertainty | Overconfident decisions | Display model version, uncertainty, data quality and limitations beside decision metrics |
 
@@ -834,6 +873,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 
 | Decision | Current position | Status | Why it matters |
 | --- | --- | --- | --- |
+| Product identity | CASS is the application and technical namespace; KRE is the company and data/model owner | Confirmed | Prevents company initials from becoming the product name while preserving correct legal and economic attribution |
 | Release users | KRE staff and approved key users | Confirmed | Defines an internal security and support model without external tenancy |
 | Pilot countries | Indonesia and Nepal using GEM earthquake source models | Confirmed | Establishes the first two scientific validation workstreams |
 | Hazard spatial basis | Fixed, versioned, adaptive area-peril grid for each country; portfolio-specific sites reserved for validation and specialist studies | Confirmed | Enables reusable footprints while controlling storage and spatial approximation |
@@ -842,9 +882,9 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 | Initial IMT scope | SA-only converter prototype: SA(0.3) first, then SA(0.6) and SA(1.0); PGA deferred from the prototype but not assumed unnecessary for production | Confirmed | Narrows early engineering while preventing incomplete taxonomy coverage from being presented as a full country model |
 | Deployment | KRE servers or controlled Docker installations on approved devices | Confirmed | Requires equivalent results, secure packaging, upgrades and local support procedures |
 | Portfolio scale | The first extract contains 1,353 policies and 224 geocoded locations; larger and non-geocoded portfolios still require measurement | Partially confirmed | Provides a realistic small pilot while leaving median, maximum and enrichment workloads to be measured |
-| OED compatibility baseline | Pin the OED schema and ODS Tools version tested with the selected Oasis 2.5.x worker | Open | Controls generated fields, validation semantics and upgrade behavior |
+| OED compatibility baseline | Load the official reference JSON through pinned ODS Tools; register OED 4.0.0 as active and OED 5.0.0 as candidate, then select the production baseline through PiWind, KRE-extract and OasisLMF 2.5.7 tests | In progress | Controls generated fields, dynamic CASS forms, validation semantics and upgrade behavior without creating a competing schema |
 | Oasis static storage format | Retain governed source tables and select Parquet or binary runtime assets through performance tests | Open | Earthquake footprints may be too large for uncompressed CSV or unsuitable storage choices |
-| Input-file ownership | KRE creates business records and immutable OED; KRE keys maps exposure; pinned OasisLMF creates portfolio kernel and financial files | Proposed | Prevents duplicated Oasis logic while keeping a complete user-facing workflow |
+| Input-file ownership | CASS creates business records and immutable OED; CASS keys maps exposure; pinned OasisLMF creates portfolio kernel and financial files | Proposed | Prevents duplicated Oasis logic while keeping a complete user-facing workflow |
 | Exposure enrichment | Reported data first; GEM-derived conditional priors only for missing fields; compare approved assumption scenarios | Proposed | Prevents false precision while allowing incomplete facultative portfolios to be modelled |
 | GEM model baseline | Matched v2026.0.0 exposure and vulnerability; public repositories pinned, licensed spatial/mapping assets outstanding | Partially confirmed | Prevents taxonomy-version mismatch and records the remaining acquisition gate |
 | Vulnerability source | Use only functions with documented provenance and commercial rights; validate multi-IMT and damage-bin translation | Open | Controls model credibility, cost and publication rights |
@@ -864,13 +904,15 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 
 1. Approve the exposure evidence hierarchy and prototype Baseline, More Robust and More Vulnerable conditional-prior assumption sets with exact TIV reconciliation.
 
-1. Create the version-controlled repository structure for the KRE web application, engine adapters, converter, deployment configuration, model specifications and test fixtures.
+1. Complete the CASS namespace migration across the version-controlled web application, engine adapters, converter, deployment configuration, model specifications and test fixtures; retain KRE only for company ownership, data and economic-share meaning.
 
 1. Approve the Oasis input ownership matrix, pin the OED/ODS Tools compatibility baseline and define schemas for the static model manifest, accepted keys, generated portfolio files and run manifest.
 
+1. Register the official OED 4.0.0 and 5.0.0 reference JSON artifacts with checksums, implement `DataStandardVersion` and the separate CASS OED Profile overlay, expose the filtered schema API and complete the version-difference and compatibility tests.
+
 1. Build the Docker Compose foundation with Django, React, PostgreSQL, artifact storage, queue, OpenQuake and Oasis services.
 
-1. Turn the successful PiWind command-line test into an automated integration test and trigger it through a minimal KRE workflow.
+1. Turn the successful PiWind command-line test into an automated integration test and trigger it through a minimal CASS workflow.
 
 1. Run an OpenQuake API and HDF5 export spike using a small event-based earthquake calculation containing SA(0.3), followed by SA(0.6) and SA(1.0) as the converter prototype expands.
 
@@ -878,7 +920,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 
 1. Define and prototype the fixed adaptive area-peril grids for Indonesia and Nepal, including refinement rules, site-condition treatment, tiling, mapping tolerances and version identifiers.
 
-1. Define the KRE run state machine, artifact manifest, engine adapter interfaces and compatibility matrix.
+1. Define the CASS run state machine, artifact manifest, engine adapter interfaces and compatibility matrix.
 
 1. Create the first clickable React workflow for project, guided Location record creation/import, OED preview, validation, analysis submission, run monitoring and result navigation.
 
@@ -892,7 +934,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 
 - A clean-machine setup can launch the development platform from documented commands.
 
-- KRE can submit one Oasis smoke analysis and one small OpenQuake calculation through service adapters.
+- CASS can submit one Oasis smoke analysis and one small OpenQuake calculation through service adapters.
 
 - All produced artifacts have a recorded URI, checksum, owner, status and retention class.
 
@@ -906,7 +948,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 
 ## 18  Reference Baseline
 
-The following upstream sources define the initial implementation boundary. KRE should pin exact releases and container digests after compatibility testing rather than following moving latest tags.
+The following upstream sources define the initial implementation boundary. CASS should pin exact releases and container digests after compatibility testing rather than following moving latest tags.
 
 - [OpenQuake Engine repository and release baseline](https://github.com/gem/oq-engine). At the planning date, the project identifies 3.23 as the long-term-support line and 3.26 as the latest stable line.
 
@@ -920,7 +962,7 @@ The following upstream sources define the initial implementation boundary. KRE s
 
 - [Oasis Platform API reference](https://oasislmf.github.io/2.5.7/platform/reference/index.html). Documents the Platform REST APIs and OpenAPI schemas.
 
-- [Oasis Model Development Kit workflow](https://oasislmf.github.io/2.5.7/oasislmf/how-to/model-development-kit.html). Defines the supported separation of keys generation, Oasis-file generation and loss generation used by the KRE workflow.
+- [Oasis Model Development Kit workflow](https://oasislmf.github.io/2.5.7/oasislmf/how-to/model-development-kit.html). Defines the supported separation of keys generation, Oasis-file generation and loss generation used by the CASS workflow.
 
 - [Oasis model data formats](https://oasislmf.github.io/2.5.7/oasislmf/reference/Oasis-model-data-formats.html). Defines events, area perils, footprints, intensity, vulnerability and occurrence concepts.
 
@@ -930,7 +972,11 @@ The following upstream sources define the initial implementation boundary. KRE s
 
 - [OED property input structure](https://oasislmf.github.io/sections/OED.html). Defines Location, Account, Reinsurance Info and Reinsurance Scope source inputs and their purposes.
 
-- [ODS model settings schema](https://oasislmf.github.io/2.5.7/ods-tools/reference/model-settings.html). Defines selectable event, occurrence, footprint and vulnerability sets and valid outputs exposed through governed KRE settings.
+- [ODS Open Exposure Data releases](https://github.com/OasisLMF/ODS_OpenExposureData/releases). Provides the official versioned OED reference JSON, generated specification and release history loaded by CASS.
+
+- [ODS Tools](https://github.com/OasisLMF/ODS_Tools). Provides the authoritative runtime interpretation, exposure validation and version conversion used behind the CASS schema API.
+
+- [ODS model settings schema](https://oasislmf.github.io/2.5.7/ods-tools/reference/model-settings.html). Defines selectable event, occurrence, footprint and vulnerability sets and valid outputs exposed through governed CASS settings.
 
 - [Oasis PiWind reference model](https://github.com/OasisLMF/OasisPiWind). Provides a small official model package and OED fixture for automated input-generation and end-to-end regression tests.
 
