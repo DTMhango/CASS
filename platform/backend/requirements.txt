@@ -10,4 +10,6 @@ celery==5.4.0
 redis==5.2.1
 boto3==1.35.99
 requests==2.32.3
+# Reads the KRE geocoded policy extract. MIT licensed.
+openpyxl==3.1.5
 gunicorn==23.0.0

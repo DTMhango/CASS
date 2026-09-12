@@ -34,6 +34,7 @@ setup-backend: ## Create the backend virtualenv and install every package
 	$(PY) -m pip install -r $(BACKEND)/requirements-dev.txt
 	$(PY) -m pip install -e $(BACKEND)/packages/cass_core \
 		-e $(BACKEND)/packages/cass_oed \
+		-e $(BACKEND)/packages/cass_extract \
 		-e $(BACKEND)/services/keys \
 		-e $(BACKEND)/services/converter
 

@@ -8,7 +8,7 @@ ignore = ["E501"]
 [lint.isort]
 # Without this, the shared packages and the Django apps are treated as
 # third-party and sorted above django and rest_framework.
-known-first-party = ["apps", "cass", "cass_core", "cass_oed", "cass_converter", "cass_keys", "cass_adapters"]
+known-first-party = ["apps", "cass", "cass_core", "cass_oed", "cass_extract", "cass_converter", "cass_keys", "cass_adapters"]
 
 [lint.per-file-ignores]
 "*/migrations/*" = ["E", "F", "I", "UP", "B", "DJ"]

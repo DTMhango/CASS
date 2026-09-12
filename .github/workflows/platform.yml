@@ -44,6 +44,7 @@ jobs:
           pip install -r backend/requirements-dev.txt
           pip install -e backend/packages/cass_core \
                       -e backend/packages/cass_oed \
+                      -e backend/packages/cass_extract \
                       -e backend/services/keys \
                       -e backend/services/converter
 
