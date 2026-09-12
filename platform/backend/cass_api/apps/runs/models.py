@@ -18,6 +18,7 @@ from django.utils import timezone
 from apps.common.models import BaseModel
 from cass_core.runs import (
     ACTIVE_STATES,
+    IllegalStageSequence,
     RunState,
     check_transition,
     is_retryable,
@@ -126,6 +127,52 @@ class Run(BaseModel):
         if not self.stage:
             return ""
         return self.pipeline.stage(self.stage).label
+
+    # -- progress ----------------------------------------------------------
+    def advance(
+        self,
+        stage: str,
+        *,
+        actor=None,
+        message: str = "",
+        metrics: dict | None = None,
+        save: bool = True,
+    ) -> Run:
+        """Move to the next stage without changing the lifecycle state.
+
+        A run spends its whole execution in ``RUNNING`` while working through
+        the pipeline, and the state machine rightly refuses ``RUNNING`` to
+        ``RUNNING``. Stage progress therefore needs its own path, and this is
+        it: the stage, the progress fraction and an append-only event, with no
+        lifecycle change.
+
+        A pipeline may skip forward over a stage that a given run does not
+        perform, but it may never move backwards. Backwards is not a retry --
+        a retry is a new run -- it is lost lineage, so it is refused here
+        rather than silently recorded.
+        """
+        target = self.pipeline.index_of(stage)
+        if self.stage:
+            current = self.pipeline.index_of(self.stage)
+            if target < current:
+                raise IllegalStageSequence(
+                    f"cannot move run {self.id} back from {self.stage!r} to {stage!r}"
+                )
+
+        self.stage = stage
+        self.progress = self.pipeline.progress(stage)
+        if save:
+            self.save(update_fields=["stage", "progress", "updated_at"])
+
+        RunStageEvent.objects.create(
+            run=self,
+            stage=stage,
+            state=self.state,
+            message=message[:500],
+            metrics=metrics or {},
+            created_by=actor,
+        )
+        return self
 
     # -- transitions -------------------------------------------------------
     def transition(
