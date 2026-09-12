@@ -39,7 +39,22 @@ class Bin:
     upper: Decimal
     interpolation: Decimal
 
+    @property
+    def is_point(self) -> bool:
+        """Whether this bin is a single value rather than an interval.
+
+        Damage has two of these and hazard has none. "No damage" and "total
+        loss" are exact outcomes with their own probability, not thin slices of
+        a continuum, and a bin spanning [0, 0.05) cannot express either: its
+        interpolation point is 0.025, so undamaged buildings would read back as
+        2.5% damaged. Against a real portfolio that is a fabricated loss at
+        every intensity below the damage threshold.
+        """
+        return self.lower == self.upper
+
     def contains(self, value: Decimal) -> bool:
+        if self.is_point:
+            return value == self.lower
         return self.lower <= value < self.upper
 
     def as_dict(self) -> dict[str, Any]:
@@ -51,7 +66,9 @@ class Bin:
         }
 
 
-def _validate_tiling(bins: Sequence[Bin], *, what: str) -> None:
+def _validate_tiling(
+    bins: Sequence[Bin], *, what: str, allow_points: bool = False
+) -> None:
     if not bins:
         raise BinError(f"{what} has no bins")
 
@@ -62,15 +79,25 @@ def _validate_tiling(bins: Sequence[Bin], *, what: str) -> None:
         )
 
     for item in bins:
-        if item.upper <= item.lower:
+        if item.upper < item.lower:
             raise BinError(
                 f"{what} bin {item.bin_index} has upper bound {item.upper} "
-                f"at or below its lower bound {item.lower}"
+                f"below its lower bound {item.lower}"
+            )
+        if item.is_point and not allow_points:
+            raise BinError(
+                f"{what} bin {item.bin_index} is a point at {item.lower}. Only "
+                "damage takes point bins; a ground motion of exactly one value "
+                "has no probability to hold."
             )
         if not (item.lower <= item.interpolation <= item.upper):
             raise BinError(
                 f"{what} bin {item.bin_index} has an interpolation point outside its bounds"
             )
+
+    interval_bins = [item for item in bins if not item.is_point]
+    if not interval_bins:
+        raise BinError(f"{what} has no bin with any width")
 
     for previous, current in zip(bins, bins[1:], strict=False):
         if current.lower != previous.upper:
@@ -142,11 +169,32 @@ class DamageBinSet:
     bins: tuple[Bin, ...]
 
     def __post_init__(self) -> None:
-        _validate_tiling(self.bins, what="damage bin set")
+        _validate_tiling(self.bins, what="damage bin set", allow_points=True)
         if self.bins[0].lower != Decimal(0):
             raise BinError("damage bins must start at a damage ratio of 0")
         if self.bins[-1].upper != Decimal(1):
             raise BinError("damage bins must end at a damage ratio of 1")
+        for item in self.bins[1:-1]:
+            if item.is_point:
+                raise BinError(
+                    f"damage bin {item.bin_index} is a point at {item.lower}. Only "
+                    "the ends may be points: no damage and total loss are exact "
+                    "outcomes, and a point in the middle would be a damage ratio "
+                    "that can occur but not be approached."
+                )
+
+    @property
+    def has_no_damage_bin(self) -> bool:
+        """Whether an undamaged building has a bin of its own.
+
+        Without one it lands in the first interval, whose interpolation point
+        is above zero, and every undamaged risk reads back as slightly damaged.
+        """
+        return self.bins[0].is_point
+
+    @property
+    def has_total_loss_bin(self) -> bool:
+        return self.bins[-1].is_point
 
     @property
     def reference(self) -> str:
@@ -155,21 +203,33 @@ class DamageBinSet:
     def find(self, damage_ratio: Decimal) -> Bin:
         """Return the bin for a damage ratio.
 
-        Total loss sits in the top bin rather than falling outside: a ratio of
-        exactly 1 is meaningful, unlike a ground motion above the dictionary.
+        Point bins match exactly and win over the interval beside them, which
+        is the whole reason they exist: a ratio of exactly 0 belongs in the
+        no-damage bin, not in the first slice of the continuum that starts
+        there. Total loss sits in the top bin rather than falling outside --
+        a ratio of exactly 1 is meaningful, unlike a ground motion above the
+        dictionary.
         """
-        if damage_ratio >= Decimal(1):
-            return self.bins[-1]
         if damage_ratio < Decimal(0):
             raise BinError(f"damage ratio {damage_ratio} is negative")
-        position = bisect.bisect_right([item.lower for item in self.bins], damage_ratio) - 1
-        return self.bins[position]
+        if damage_ratio >= Decimal(1):
+            return self.bins[-1]
+        if self.bins[0].is_point and damage_ratio == self.bins[0].lower:
+            return self.bins[0]
+
+        intervals = [item for item in self.bins if not item.is_point]
+        position = (
+            bisect.bisect_right([item.lower for item in intervals], damage_ratio) - 1
+        )
+        return intervals[position]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "reference": self.reference,
             "bin_count": len(self.bins),
+            "has_no_damage_bin": self.has_no_damage_bin,
+            "has_total_loss_bin": self.has_total_loss_bin,
             "bins": [item.as_dict() for item in self.bins],
         }
 
@@ -244,3 +304,26 @@ def log_bins(
         )
         for index in range(count)
     )
+
+
+def oasis_damage_bins(interior: int) -> tuple[Bin, ...]:
+    """Damage bins in the shape Oasis expects: a point at 0, a spread, a point at 1.
+
+    The two point bins are not decoration. A vulnerability function's most
+    common outcome at low intensity is no damage at all, and its outcome at
+    high intensity is total loss; both are exact, and a set of equal intervals
+    can represent neither. Without them the reconstruction of a GEM function
+    is wrong by half a bin width at both ends -- 2.5% of every insured value at
+    the bottom of the curve, on twenty interior bins.
+    """
+    if interior < 1:
+        raise BinError("a damage bin set needs at least one interior bin")
+
+    spread = linear_bins("0", "1", interior)
+    bins = [Bin(1, Decimal(0), Decimal(0), Decimal(0))]
+    bins.extend(
+        Bin(item.bin_index + 1, item.lower, item.upper, item.interpolation)
+        for item in spread
+    )
+    bins.append(Bin(interior + 2, Decimal(1), Decimal(1), Decimal(1)))
+    return tuple(bins)
