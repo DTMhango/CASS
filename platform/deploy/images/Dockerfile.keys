@@ -17,6 +17,10 @@ COPY backend/packages ./packages
 COPY backend/services/keys ./services/keys
 RUN pip install --no-cache-dir ./packages/cass_core ./packages/cass_oed ./services/keys
 
+# Prove the package imports at build time rather than at container start. The
+# CMD below does the same thing, but by then the image has shipped.
+RUN python -c "import cass_keys, cass_keys.lookup, cass_keys.grids"
+
 RUN useradd --create-home --uid 10002 cass && chown -R cass:cass /app
 USER cass
 

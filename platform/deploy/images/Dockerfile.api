@@ -23,8 +23,25 @@ WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Every CASS package the control plane imports, installed rather than put on
+# the path: they carry their own dependencies and a missing one should fail
+# here, at build time, rather than at the first request that touches it.
+#
+# The keys service and the converter are libraries to the control plane as well
+# as services in their own right. The API resolves keys inline and reads model
+# packages inline, so both are needed here even though each also has its own
+# image.
+#
+# The converter is installed without its hdf5 extra. Nothing in it imports h5py
+# yet, and the extra pulls numpy into an image that has no use for it.
 COPY backend/packages ./packages
-RUN pip install --no-cache-dir ./packages/cass_core ./packages/cass_oed
+COPY backend/services ./services
+RUN pip install --no-cache-dir \
+    ./packages/cass_core \
+    ./packages/cass_oed \
+    ./packages/cass_extract \
+    ./services/keys \
+    ./services/converter
 
 COPY backend/cass_api ./cass_api
 COPY backend/adapters ./adapters
@@ -41,6 +58,24 @@ USER cass
 
 WORKDIR /app/cass_api
 ENV PYTHONPATH=/app/cass_api:/app/adapters
+
+# Prove the application imports, at build time.
+#
+# This exists because it did not. The image installed cass_core and cass_oed
+# while the control plane had grown to import cass_extract, cass_keys and
+# cass_converter as well, and every layer built cleanly: nothing in a build
+# imports Django's URLconf, so the first request found out instead. CI builds
+# these images on every change and reported success throughout.
+#
+# `check` loads the settings, the app registry and every URL pattern, and needs
+# no database to do it -- so a missing dependency, a broken import or an
+# unresolvable route fails here rather than at the first request. The settings
+# are told nothing about infrastructure beyond a throwaway key, which keeps
+# this a check on the code rather than on the environment.
+RUN DJANGO_SETTINGS_MODULE=cass.settings \
+    CASS_SECRET_KEY=build-time-check \
+    CASS_DEBUG=false \
+    python manage.py check --fail-level WARNING
 
 EXPOSE 8000
 
