@@ -84,6 +84,7 @@ const ANALYSIS: AnalysisRun = {
   enrichment_run: null,
   model_version: "66666666-6666-6666-6666-666666666666",
   perspectives: ["ground_up"],
+  mode: "technical",
   analysis_settings: {},
   run_currency: "USD",
   oasis_analysis_id: "7",

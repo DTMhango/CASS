@@ -37,6 +37,7 @@ from apps.modelregistry.models import ModelVersion
 from apps.projects.models import Project
 from cass_extract import profile as intake_profile
 from cass_extract import template as intake_template
+from cass_oed import structure as oed_structure
 from cass_oed.schema import FileKind
 
 from . import editing, promotion, review, scenarios, services
@@ -422,6 +423,32 @@ class ExposureVersionViewSet(viewsets.ModelViewSet):
                     }
                     for kind, result in files.present().items()
                 },
+            }
+        )
+
+    @action(detail=True, methods=["get"], url_path="financial-structure")
+    def financial_structure(self, request, pk=None, version=None):
+        """Accounts, layers, contracts, inuring order and what they reach.
+
+        Section 3 asks for a financial structure workspace with a scope preview
+        and a reconciliation. This reads the structure out of the portfolio's
+        own files and states what does not add up -- a layer with no term, a
+        contract whose scope reaches nothing, value no contract covers -- rather
+        than repairing any of it, because a structure that quietly fixed itself
+        would produce a ceded loss nobody could tie back to a treaty.
+        """
+        exposure = self.get_object()
+        try:
+            files = services.load_files(exposure)
+        except services.ExposureError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        structure = oed_structure.read(files)
+        return Response(
+            {
+                "exposure_version": str(exposure.id),
+                "currency": exposure.run_currency,
+                **structure.as_dict(),
             }
         )
 

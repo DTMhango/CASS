@@ -1,0 +1,63 @@
+/* The financial structure workspace: accounts, contracts and what they reach. */
+
+.structure {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.structure__findings {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.structure__step {
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.structure__step:first-of-type {
+  border-top: 0;
+}
+
+.structure__step-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--grey-600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.structure__contract {
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  margin-bottom: var(--space-2);
+}
+
+.structure__contract-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.structure__terms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.structure__term dt {
+  font-size: var(--text-sm);
+  color: var(--grey-600);
+}
+
+.structure__term dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

@@ -27,6 +27,7 @@ import type {
   EngineStatus,
   EventLossPage,
   ExposurePreview,
+  FinancialStructureSummary,
   ConfiguredRun,
   ExposureVersion,
   HazardJobSpec,
@@ -72,6 +73,8 @@ export const keys = {
   exposure: (id: UUID) => ["exposure-versions", id] as const,
   exposurePreview: (id: UUID) => ["exposure-versions", id, "preview"] as const,
   exposureFindings: (id: UUID) => ["exposure-versions", id, "findings"] as const,
+  financialStructure: (id: UUID) =>
+    ["exposure-versions", id, "financial-structure"] as const,
   catalogue: ["model-versions", "catalogue"] as const,
   runs: (projectId?: UUID) => ["runs", projectId ?? "all"] as const,
   run: (id: UUID) => ["runs", id] as const,
@@ -210,6 +213,23 @@ export function useExposureFindings(id: UUID | undefined) {
     queryKey: keys.exposureFindings(id ?? ""),
     queryFn: () => api.get<ValidationSummary>(`/exposure-versions/${id}/findings/`),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * The financial structure of one published portfolio.
+ *
+ * Read rather than assembled here: the structure is part of the exposure
+ * version, and the version is immutable, so a correction is a new version
+ * exactly as it is for a location.
+ */
+export function useFinancialStructure(id: UUID | undefined) {
+  return useQuery({
+    queryKey: keys.financialStructure(id ?? ""),
+    queryFn: () =>
+      api.get<FinancialStructureSummary>(`/exposure-versions/${id}/financial-structure/`),
+    enabled: Boolean(id),
+    retry: false,
   });
 }
 

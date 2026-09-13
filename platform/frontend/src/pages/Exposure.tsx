@@ -11,6 +11,7 @@ import { Tabs } from "@/components/Tabs";
 import { PageHeader } from "@/components/primitives";
 
 import { ExposureWorkspace } from "./ExposureWorkspace";
+import { FinancialStructure } from "./FinancialStructure";
 import { ImportReview } from "./ImportReview";
 
 export function Exposure() {
@@ -32,6 +33,11 @@ export function Exposure() {
             id: "import-review",
             label: "Import review",
             content: () => <ImportReview embedded />,
+          },
+          {
+            id: "financial-structure",
+            label: "Financial structure",
+            content: () => <FinancialStructure embedded />,
           },
         ]}
       />

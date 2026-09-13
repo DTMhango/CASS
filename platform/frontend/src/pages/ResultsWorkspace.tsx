@@ -556,7 +556,9 @@ function ExceedanceChart({
     .map(([period, loss]) => ({ period: Number(period), loss: Number(loss) }))
     .filter((point) => Number.isFinite(point.period) && Number.isFinite(point.loss))
     .sort((a, b) => a.period - b.period);
-  if (points.length < 2) return null;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (points.length < 2 || !first || !last) return null;
 
   const width = 640;
   const height = 220;
@@ -564,8 +566,8 @@ function ExceedanceChart({
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
 
-  const minPeriod = Math.log10(points[0].period);
-  const maxPeriod = Math.log10(points[points.length - 1].period);
+  const minPeriod = Math.log10(first.period);
+  const maxPeriod = Math.log10(last.period);
   const maxLoss = Math.max(...points.map((point) => point.loss));
   const span = maxPeriod - minPeriod || 1;
 
@@ -584,7 +586,7 @@ function ExceedanceChart({
         viewBox={`0 0 ${width} ${height}`}
         className="ep-chart__plot"
         role="img"
-        aria-label={`Exceedance probability curve for ${label}, ${points.length} return periods from ${points[0].period} to ${points[points.length - 1].period} years, peaking at ${formatMoney(String(maxLoss))} ${currency}.`}
+        aria-label={`Exceedance probability curve for ${label}, ${points.length} return periods from ${first.period} to ${last.period} years, peaking at ${formatMoney(String(maxLoss))} ${currency}.`}
       >
         <line
           x1={pad.left}

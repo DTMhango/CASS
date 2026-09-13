@@ -1013,3 +1013,66 @@ export interface RowPage {
   attached: string[];
 }
 
+
+// -- the financial structure workspace ---------------------------------------
+
+/** One layer of one policy, as the account file states it. */
+export interface StructureLayer {
+  account: string;
+  policy: string;
+  layer_number: number | null;
+  participation: string | null;
+  limit: string | null;
+  attachment: string | null;
+  deductible: string | null;
+  policy_limit: string | null;
+  perils: string[];
+  inception: string;
+  expiry: string;
+}
+
+/** One reinsurance contract, with the scope it reaches. */
+export interface StructureContract {
+  number: number | null;
+  layer_number: number | null;
+  name: string;
+  type: string;
+  type_label: string;
+  perils: string[];
+  inuring_priority: number | null;
+  ceded_percent: string | null;
+  placed_percent: string | null;
+  risk_limit: string | null;
+  risk_attachment: string | null;
+  occurrence_limit: string | null;
+  occurrence_attachment: string | null;
+  currency: string;
+  scope_rows: number;
+  scope_tiv: string;
+  locations_reached: number;
+  /** False where CASS reads and reconciles the contract but the engine will not apply it. */
+  applied_by_the_engine: boolean;
+  notes: string[];
+}
+
+export interface StructureFinding {
+  code: string;
+  subject: string;
+  message: string;
+  blocking: boolean;
+}
+
+export interface FinancialStructureSummary {
+  exposure_version: UUID;
+  currency: string;
+  total_tiv: string;
+  location_count: number;
+  layers: StructureLayer[];
+  contracts: StructureContract[];
+  inuring_order: { priority: number; contracts: number[] }[];
+  uncovered_locations: number;
+  uncovered_tiv: string;
+  findings: StructureFinding[];
+  has_accounts: boolean;
+  has_contracts: boolean;
+}

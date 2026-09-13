@@ -2041,6 +2041,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureVersion'
           description: ''
+  /api/v1/exposure-versions/{id}/financial-structure/:
+    get:
+      operationId: api_v1_exposure_versions_financial_structure_retrieve
+      description: |-
+        Accounts, layers, contracts, inuring order and what they reach.
+
+        Section 3 asks for a financial structure workspace with a scope preview
+        and a reconciliation. This reads the structure out of the portfolio's
+        own files and states what does not add up -- a layer with no term, a
+        contract whose scope reaches nothing, value no contract covers -- rather
+        than repairing any of it, because a structure that quietly fixed itself
+        would produce a ceded loss nobody could tie back to a treaty.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExposureVersion'
+          description: ''
   /api/v1/exposure-versions/{id}/findings/:
     get:
       operationId: api_v1_exposure_versions_findings_retrieve

@@ -241,3 +241,70 @@ def test_the_journey_is_written_to_the_audit_trail(
     assert publication.project == project
     assert publication.after_reference["state"] == ExposureState.PUBLISHED
     assert publication.correlation_id
+
+
+# -- the financial structure workspace (section 3) ---------------------------
+
+REINS_INFO = (
+    b"ReinsNumber,ReinsLayerNumber,ReinsName,ReinsPeril,CededPercent,RiskLimit,"
+    b"RiskAttachment,OccLimit,OccAttachment,PlacedPercent,ReinsCurrency,"
+    b"InuringPriority,ReinsType\n"
+    b"1,1,Indonesia cat XL,QEQ,0.9,,,5000000,2000000,1.0,IDR,1,CXL\n"
+)
+
+REINS_SCOPE = (
+    b"ReinsNumber,PortNumber,AccNumber,PolNumber,LocGroup,LocNumber,CededPercent\n"
+    b"1,1,,,,LOC-1,0.9\n"
+)
+
+
+def test_the_financial_structure_is_read_from_the_published_portfolio(
+    api, project, earthquake_location_csv
+):
+    """Section 3: contracts, what they reach, and what nothing reaches."""
+    exposure_id = create_version(api, project)
+    upload(api, exposure_id, "location", earthquake_location_csv)
+    upload(api, exposure_id, "reins_info", REINS_INFO, filename="reins_info.csv")
+    upload(api, exposure_id, "reins_scope", REINS_SCOPE, filename="reins_scope.csv")
+
+    structure = api.get(f"{API}/exposure-versions/{exposure_id}/financial-structure/")
+
+    assert structure.status_code == 200
+    contract = structure.data["contracts"][0]
+    assert contract["type_label"] == "Catastrophe excess of loss"
+    assert contract["locations_reached"] == 1
+    assert contract["applied_by_the_engine"] is True
+    assert structure.data["inuring_order"] == [{"priority": 1, "contracts": [1]}]
+    # Two of the three locations are named by no contract, and their loss is
+    # retained in full. The number, not just the fact, is what a reader needs.
+    assert structure.data["uncovered_locations"] == 2
+    assert any(
+        finding["code"] == "locations_outside_every_contract"
+        for finding in structure.data["findings"]
+    )
+
+
+def test_a_portfolio_with_locations_only_has_no_structure_to_show(
+    api, project, earthquake_location_csv
+):
+    exposure_id = create_version(api, project)
+    upload(api, exposure_id, "location", earthquake_location_csv)
+
+    structure = api.get(f"{API}/exposure-versions/{exposure_id}/financial-structure/")
+
+    assert structure.data["has_accounts"] is False
+    assert structure.data["has_contracts"] is False
+    assert structure.data["total_tiv"] == "9900000"
+
+
+def test_the_structure_of_a_portfolio_in_another_project_is_not_readable(
+    client_for, outsider, project, api, earthquake_location_csv
+):
+    exposure_id = create_version(api, project)
+    upload(api, exposure_id, "location", earthquake_location_csv)
+
+    refused = client_for(outsider).get(
+        f"{API}/exposure-versions/{exposure_id}/financial-structure/"
+    )
+
+    assert refused.status_code == 404
