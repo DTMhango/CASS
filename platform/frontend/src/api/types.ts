@@ -220,12 +220,44 @@ export interface Run {
   /** Why a run is waiting at a governance gate. A blocked run has not failed. */
   gate_summary: string;
   gate_detail: string;
+  /** What the run has recorded so far: stage evidence, checks and lineage. */
+  manifest: Record<string, unknown>;
   settings_hash: string;
   retry_of: UUID | null;
   may_retry: boolean;
   may_publish_results: boolean;
   is_active: boolean;
   created_at: string;
+}
+
+/** One operational check the review stage made of a published result. */
+export interface ReviewCheck {
+  check: string;
+  /** Null where there was nothing to evaluate, which is not the same as a pass. */
+  passed: boolean | null;
+  detail: string;
+}
+
+/** What the review stage recorded on the run manifest. */
+export interface ReviewRecord {
+  checks: ReviewCheck[];
+  failed: number;
+  approved_exception?: string;
+  model_version?: {
+    reference: string;
+    publication_state: string;
+    research_prototype: boolean;
+  };
+}
+
+/** What the pre-loss smoke check recorded on the run manifest. */
+export interface SmokeRecord {
+  performed: boolean;
+  reason?: string;
+  event_ids?: number[];
+  evaluated?: boolean;
+  problems?: string[];
+  perspectives?: Record<string, { rows: number; events_with_loss: number }>;
 }
 
 export interface RunStageEvent {
@@ -612,7 +644,7 @@ export interface AuditEvent {
 export interface Approval {
   id: UUID;
   gate: string;
-  decision: "pending" | "approved" | "rejected";
+  decision: "requested" | "approved" | "rejected" | "withdrawn";
   subject_type: string;
   subject_id: UUID | null;
   requested_by: UUID | null;

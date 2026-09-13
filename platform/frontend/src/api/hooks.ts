@@ -709,6 +709,51 @@ export function useDecideApproval() {
   });
 }
 
+// -- gates a run reaches -----------------------------------------------------
+
+/** The exceptions asked for on one analysis run, newest first. */
+export function useRunExceptions(analysisId: UUID | undefined) {
+  return useQuery({
+    queryKey: [...keys.approvals, "run-exception", analysisId ?? ""],
+    queryFn: async () =>
+      rows(
+        await api.get<Paginated<Approval>>("/approvals/", {
+          gate: "run_exception",
+          subject_id: analysisId,
+        }),
+      ),
+    enabled: Boolean(analysisId),
+  });
+}
+
+/**
+ * Ask a reviewer to let a run held at a gate continue.
+ *
+ * Asked on the run rather than through the approvals endpoint: the person whose
+ * analysis is waiting is usually an analyst, and requesting a model gate is a
+ * modeller's act.
+ */
+export function useRequestRunException(analysisId: UUID) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (rationale: string) =>
+      api.post<Approval>(`/analysis-runs/${analysisId}/request-exception/`, { rationale }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.approvals }),
+  });
+}
+
+/** Put a run whose gate has been cleared back in the queue. */
+export function useResumeAnalysis(analysisId: UUID) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<AnalysisRun>(`/analysis-runs/${analysisId}/resume/`),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["runs"] });
+      client.invalidateQueries({ queryKey: keys.approvals });
+    },
+  });
+}
+
 // -- saved hazard job specifications -----------------------------------------
 
 export function useHazardSpecs(modelId: UUID | undefined) {

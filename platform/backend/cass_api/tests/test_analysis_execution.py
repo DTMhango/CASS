@@ -332,11 +332,15 @@ def test_the_manifest_says_which_stages_were_not_performed(analysis_run, analyst
     run_it(analysis_run, session, actor=analyst)
     manifest = Run.objects.get(id=analysis_run.run_id).manifest
 
-    assert manifest["stages_not_performed"] == UNPERFORMED_STAGES
-    assert "smoke" in manifest["stages_not_performed"]
-    # keys and reconcile_keys are performed now, so they must not be listed.
-    assert "keys" not in manifest["stages_not_performed"]
-    assert "reconcile_keys" not in manifest["stages_not_performed"]
+    not_performed = manifest["stages_not_performed"]
+    assert set(UNPERFORMED_STAGES) <= set(not_performed)
+    assert "enrich" in not_performed
+    # No model package is readable from the test process, so the smoke check
+    # could not choose any events, and it says so rather than passing.
+    assert "footprint index" in not_performed["smoke"]
+    # Stages that ran must not be listed.
+    for performed in ("validate_exposure", "keys", "reconcile_keys", "review"):
+        assert performed not in not_performed
 
 
 def test_the_output_package_is_registered_as_a_linked_artifact(analysis_run, analyst):
@@ -1209,15 +1213,21 @@ def ord_package(
     perspectives=("gul",),
     aal="232122.90",
     sd="623738.00",
+    top_loss="9000000.000000",
+    melt_rows=None,
 ) -> bytes:
-    """An Oasis output package in the shape the engine actually serves one."""
+    """An Oasis output package in the shape the engine actually serves one.
+
+    ``melt_rows`` adds the moment event loss table a smoke run asks for, in the
+    column order a real PiWind package writes it.
+    """
     import io
     import tarfile
 
     ept_rows = [
         "SummaryId,EPCalc,EPType,ReturnPeriod,Loss",
         # The requested basis: mean sample (4), AEP (3).
-        "1,4,3,250.000000,9000000.000000",
+        f"1,4,3,250.000000,{top_loss}",
         "1,4,3,100.000000,5000000.000000",
         "1,4,3,10.000000,633300.000000",
         # A different calculation and type in the same file, which must not be
@@ -1231,10 +1241,14 @@ def ord_package(
         f"1,2,{aal},{sd}",
     ]
 
+    tables = [("ept", ept_rows), ("palt", palt_rows)]
+    if melt_rows is not None:
+        tables.append(("melt", [MELT_HEADER, *melt_rows]))
+
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         for prefix in perspectives:
-            for table, rows in (("ept", ept_rows), ("palt", palt_rows)):
+            for table, rows in tables:
                 payload = ("\n".join(rows) + "\n").encode("utf-8")
                 info = tarfile.TarInfo(f"output/{prefix}_S1_{table}.csv")
                 info.size = len(payload)
@@ -1359,3 +1373,411 @@ def test_an_unreadable_package_does_not_fail_a_completed_run(
     assert run.state == RunState.SUCCEEDED
     assert not ResultSet.objects.filter(run=run).exists()
     assert "results_not_published" in run.manifest["output"]
+
+
+#: The moment event loss table's columns, as a real PiWind package writes them.
+MELT_HEADER = (
+    "EventId,SummaryId,SampleType,EventRate,ChanceOfLoss,MeanLoss,SDLoss,MaxLoss,"
+    "FootprintExposure,MeanImpactedExposure,MaxImpactedExposure"
+)
+
+
+@pytest.fixture(autouse=True)
+def no_served_package(settings, tmp_path):
+    """Nothing is served unless a test says so.
+
+    The deployment default is a volume path that may or may not exist on the
+    machine running the tests, and a test whose outcome depended on that would
+    pass on one laptop and fail on the next.
+    """
+    settings.CASS_OASIS_MODEL_ROOT = str(tmp_path / "no-package-served")
+
+
+@pytest.fixture()
+def package_root(settings, tmp_path):
+    """A served model package the control plane can read."""
+    root = tmp_path / "oasis-model"
+    settings.CASS_OASIS_MODEL_ROOT = str(root)
+    return root
+
+
+def serve_package(root, *, model_version: str, footprint_rows: dict[int, int]) -> None:
+    """Write the manifest and footprint index a CASS-built package carries.
+
+    ``footprint_rows`` is event to the number of footprint rows it has, which is
+    what the smoke check ranks events by.
+    """
+    import io
+    import json
+
+    from cass_converter.oasis_package import write_footprint
+
+    (root / "model_data").mkdir(parents=True, exist_ok=True)
+    footprint, index = io.BytesIO(), io.BytesIO()
+    write_footprint(
+        (
+            (event_id, [(10 + row, 1, 1.0) for row in range(rows)])
+            for event_id, rows in sorted(footprint_rows.items())
+        ),
+        footprint,
+        index,
+    )
+    (root / "model_data" / "footprint.idx").write_bytes(index.getvalue())
+    (root / "MANIFEST.json").write_text(
+        json.dumps({"package_version": "1.0.0", "provenance": {"model_version": model_version}}),
+        encoding="utf-8",
+    )
+
+
+@pytest.fixture()
+def attached_hazard(model_version, modeller):
+    """Give the model version a CASS hazard set, so its package is CASS-built."""
+    from apps.modelregistry.models import HazardSet
+
+    hazard_set = HazardSet.objects.create(
+        country_code="ID",
+        version="2024.0.0",
+        label="Jakarta-Bandung test hazard",
+        source_model="PuSGeN 2024",
+        grid=model_version.grid,
+        imts=["SA(0.3)"],
+        investigation_time=50.0,
+        stochastic_event_sets=20,
+        created_by=modeller,
+    )
+    model_version.hazard_set = hazard_set
+    model_version.save()
+    return hazard_set
+
+
+def settings_documents(session) -> list[dict]:
+    return [call["json"] for call in session.calls if call["path"] == "v2/analyses/7/settings/"]
+
+
+# -- validating the exposure inside the run ----------------------------------
+
+def test_the_run_validates_the_published_exposure_before_the_engine(analysis_run, analyst):
+    manifest = run_oasis(analysis_run, oasis_server(), analyst)
+
+    validation = manifest["exposure_validation"]
+    assert validation["locations"] == 3
+    assert Decimal(validation["total_tiv"]) == Decimal("9900000")
+    assert validation["currency"] == "IDR"
+    assert set(validation["inputs"]) == {"oed_location"}
+
+
+def test_files_that_no_longer_match_their_record_do_not_reach_the_engine(
+    analysis_run, analyst
+):
+    ExposureVersion.objects.filter(id=analysis_run.exposure_version_id).update(
+        total_tiv=Decimal("1.00")
+    )
+    reloaded = AnalysisRun.objects.get(id=analysis_run.id)
+    session = oasis_server()
+
+    with pytest.raises(AnalysisExecutionError, match="come apart"):
+        run_it(reloaded, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.FAILED
+    assert run.failure_stage == "validate_exposure"
+    assert session.calls == []
+
+
+def test_a_blocking_finding_found_at_run_time_stops_the_run(
+    analysis_run, analyst, monkeypatch
+):
+    """A validator that learned something since publication is listened to."""
+    from cass_oed import findings as fnd
+    from cass_oed.validation import validate as real_validate
+
+    def stricter(files):
+        report = real_validate(files)
+        report.findings.add(
+            fnd.make(
+                "unsupported_financial_term",
+                "StepTriggerType carries a value.",
+                file_kind="location",
+                row_number=2,
+                field="StepTriggerType",
+            )
+        )
+        return report
+
+    monkeypatch.setattr("apps.runs.services.validate_portfolio", stricter)
+
+    with pytest.raises(AnalysisExecutionError, match="blocking validation finding"):
+        run_it(analysis_run, oasis_server(), actor=analyst)
+    assert Run.objects.get(id=analysis_run.run_id).failure_stage == "validate_exposure"
+
+
+# -- the package the worker serves -------------------------------------------
+
+def test_a_worker_serving_another_versions_package_is_refused(
+    analysis_run, analyst, attached_hazard, package_root
+):
+    """ADR 9: one package at a time, and it has to be this version's."""
+    serve_package(package_root, model_version="id-qeq-9.9.9", footprint_rows={1: 2})
+    session = oasis_server()
+
+    with pytest.raises(AnalysisExecutionError, match="serving the package built for id-qeq-9.9.9"):
+        run_it(analysis_run, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.failure_stage == "publish_oed"
+    assert "v2/portfolios/" not in session.paths("POST")
+
+
+def test_the_served_package_is_confirmed_and_recorded(
+    analysis_run, analyst, attached_hazard, package_root
+):
+    serve_package(
+        package_root,
+        model_version=analysis_run.model_version.reference,
+        footprint_rows={1: 2},
+    )
+    manifest = run_oasis(analysis_run, oasis_server(), analyst)
+
+    assert manifest["package"]["checked"] is True
+    assert manifest["package"]["model_version"] == analysis_run.model_version.reference
+
+
+def test_an_unreadable_package_is_recorded_as_unconfirmed_not_passed(
+    analysis_run, analyst, attached_hazard
+):
+    manifest = run_oasis(analysis_run, oasis_server(), analyst)
+
+    assert manifest["package"]["checked"] is False
+    assert "could not be confirmed" in manifest["package"]["reason"]
+
+
+# -- the smoke check ----------------------------------------------------------
+
+def test_the_smoke_check_chooses_the_events_with_the_largest_footprints(package_root):
+    from apps.runs.services import smoke_event_ids
+
+    serve_package(package_root, model_version="any", footprint_rows={1: 1, 2: 5, 3: 3, 4: 5})
+
+    # Largest first, ties to the lower identifier, returned in identifier order.
+    assert smoke_event_ids(package_root, count=2) == [2, 4]
+    assert smoke_event_ids(package_root, count=3) == [2, 3, 4]
+
+
+def test_a_smoke_run_goes_before_the_full_event_set_and_restores_its_settings(
+    analysis_run, analyst, package_root
+):
+    serve_package(package_root, model_version="any", footprint_rows={1: 1, 2: 5, 3: 3})
+    session = oasis_server(
+        output=ord_package(melt_rows=["2,1,1,nan,0.1,120000.0,0.0,3000000.0,3000000.0,3000000.0,3000000.0"])
+    )
+
+    run_it(analysis_run, session, actor=analyst)
+
+    full, reduced, restored = settings_documents(session)
+    assert "event_ids" not in full
+    assert reduced["event_ids"] == [1, 2, 3]
+    assert reduced["gul_summaries"][0]["ord_output"] == {"elt_moment": True}
+    # The loss run uses exactly the document the settings hash was taken of.
+    assert restored == full
+    assert session.paths("POST").count("v2/analyses/7/run/") == 2
+
+    manifest = Run.objects.get(id=analysis_run.run_id).manifest
+    assert manifest["smoke"]["performed"] is True
+    assert manifest["smoke"]["perspectives"]["ground_up"]["events_with_loss"] == 1
+    assert "smoke" not in manifest["stages_not_performed"]
+
+
+def test_an_engine_failure_in_the_smoke_run_stops_before_the_full_event_set(
+    analysis_run, analyst, package_root
+):
+    serve_package(package_root, model_version="any", footprint_rows={1: 2})
+    session = oasis_server(loss_status="RUN_ERROR")
+    session.route(
+        "GET",
+        "v2/analyses/7/run_traceback_file/",
+        FakeResponse(200, text="IndexError: index 12 is out of bounds"),
+    )
+
+    with pytest.raises(AnalysisExecutionError, match="smoke check"):
+        run_it(analysis_run, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.failure_stage == "smoke"
+    assert "IndexError" in run.failure_detail
+    assert session.paths("POST").count("v2/analyses/7/run/") == 1
+
+
+def test_a_smoke_loss_above_the_whole_portfolio_stops_the_run(
+    analysis_run, analyst, package_root
+):
+    serve_package(package_root, model_version="any", footprint_rows={1: 2})
+    session = oasis_server(
+        output=ord_package(melt_rows=["1,1,1,nan,1.0,120000.0,0.0,50000000.0,1.0,1.0,1.0"])
+    )
+
+    with pytest.raises(AnalysisExecutionError, match="insured value of the whole portfolio"):
+        run_it(analysis_run, session, actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.failure_stage == "smoke"
+    assert session.paths("POST").count("v2/analyses/7/run/") == 1
+
+
+def test_a_perspective_the_smoke_run_wrote_nothing_for_stops_the_run(
+    analysis_run, analyst, package_root
+):
+    """A readable package with no event losses is a perspective that produced nothing."""
+    serve_package(package_root, model_version="any", footprint_rows={1: 2})
+    session = oasis_server(output=ord_package())
+
+    with pytest.raises(AnalysisExecutionError, match="wrote no ground-up loss event losses"):
+        run_it(analysis_run, session, actor=analyst)
+    assert Run.objects.get(id=analysis_run.run_id).failure_stage == "smoke"
+
+
+# -- reviewing the results, and releasing a run held at a gate ----------------
+
+def request_exception(api, analysis_run, rationale="Accepted for this research run; recorded."):
+    return api.post(
+        f"{API}/analysis-runs/{analysis_run.id}/request-exception/",
+        {"rationale": rationale},
+        format="json",
+    )
+
+
+def decide(client, approval_id, decision="approved"):
+    return client.post(
+        f"{API}/approvals/{approval_id}/decide/",
+        {"decision": decision, "rationale": "Reviewed against the gate detail."},
+        format="json",
+    )
+
+
+def test_results_that_pass_their_checks_complete_the_run_at_review(
+    analysis_run, oasis_is, api
+):
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.SUCCEEDED
+    assert run.stage == "review"
+    review = run.manifest["review"]
+    assert review["failed"] == 0
+    assert not any(item["passed"] is False for item in review["checks"])
+    # The monitor reads the checks from the run itself.
+    shown = api.get(f"{API}/runs/{run.id}/").data
+    assert shown["manifest"]["review"]["checks"] == review["checks"]
+
+
+def test_a_loss_above_the_insured_value_holds_the_results_at_review(
+    analysis_run, oasis_is, api
+):
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package(top_loss="50000000.000000")))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.BLOCKED
+    assert run.stage == "review"
+    assert "result check" in run.gate_summary
+    assert "insured value" in run.gate_detail
+    assert run.may_publish_results is False
+    # The result exists and is held, and the evidence before the gate is kept.
+    assert ResultSet.objects.filter(run=run).exists()
+    assert run.manifest["output"]["published"]
+
+
+def test_a_held_result_is_released_by_an_exception_a_reviewer_decides(
+    analysis_run, oasis_is, api, client_for, reviewer
+):
+    session = oasis_is(oasis_server(output=ord_package(top_loss="50000000.000000")))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    asked = request_exception(api, analysis_run)
+    assert asked.status_code == 201, asked.data
+    assert asked.data["evidence"]["stage"] == "review"
+    assert decide(client_for(reviewer), asked.data["id"]).status_code == 200
+
+    resumed = api.post(f"{API}/analysis-runs/{analysis_run.id}/resume/")
+    assert resumed.status_code == 202, resumed.data
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.SUCCEEDED
+    assert run.manifest["review"]["approved_exception"] == asked.data["id"]
+    # Resumed at the gate rather than rerun: the losses were calculated once,
+    # and the evidence recorded before the gate survived the resume.
+    assert session.paths("POST").count("v2/analyses/7/run/") == 1
+    assert run.manifest["output"]["published"]
+
+
+def test_resuming_before_the_gate_is_cleared_is_refused(analysis_run, oasis_is, api):
+    oasis_is(oasis_server(output=ord_package(top_loss="50000000.000000")))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    request_exception(api, analysis_run)
+
+    refused = api.post(f"{API}/analysis-runs/{analysis_run.id}/resume/")
+
+    assert refused.status_code == 409
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.BLOCKED
+
+
+def test_an_exception_needs_a_reason(analysis_run, oasis_is, api):
+    oasis_is(oasis_server(output=ord_package(top_loss="50000000.000000")))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    response = request_exception(api, analysis_run, rationale="ok")
+    assert response.status_code == 400
+
+
+def test_asking_twice_returns_the_request_that_stands(analysis_run, oasis_is, api):
+    oasis_is(oasis_server(output=ord_package(top_loss="50000000.000000")))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    first = request_exception(api, analysis_run)
+    second = request_exception(api, analysis_run)
+
+    assert second.status_code == 200
+    assert second.data["id"] == first.data["id"]
+    assert Approval.objects.filter(gate=Approval.Gate.RUN_EXCEPTION).count() == 1
+
+
+def test_only_a_run_held_at_a_gate_can_ask_for_an_exception(analysis_run, api):
+    response = request_exception(api, analysis_run)
+    assert response.status_code == 409
+
+
+def test_the_keys_gate_is_released_through_the_run_as_well(
+    analysis_run, partial_grid, oasis_is, api, client_for, reviewer
+):
+    session = oasis_is(oasis_server())
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    assert Run.objects.get(id=analysis_run.run_id).stage == "reconcile_keys"
+
+    asked = request_exception(api, analysis_run)
+    assert asked.data["evidence"]["stage"] == "reconcile_keys"
+    assert decide(client_for(reviewer), asked.data["id"]).status_code == 200
+    assert api.post(f"{API}/analysis-runs/{analysis_run.id}/resume/").status_code == 202
+
+    analysis_run.refresh_from_db()
+    assert analysis_run.run.state == RunState.SUCCEEDED
+    assert str(analysis_run.exception_approval_id) == asked.data["id"]
+    assert session.paths("POST").count("v2/portfolios/") == 1
+
+
+def test_an_exception_cleared_at_one_gate_does_not_release_another(
+    analysis_run, partial_grid, oasis_is, api, client_for, reviewer
+):
+    """Accepting unmapped value says nothing about a loss curve."""
+    oasis_is(oasis_server(output=ord_package(top_loss="50000000.000000")))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    keys_request = request_exception(api, analysis_run)
+    decide(client_for(reviewer), keys_request.data["id"])
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/resume/")
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.BLOCKED
+    assert run.stage == "review"
+    refused = api.post(f"{API}/analysis-runs/{analysis_run.id}/resume/")
+    assert refused.status_code == 409

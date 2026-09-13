@@ -189,6 +189,89 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/analysis-runs/{id}/request-exception/:
+    post:
+      operationId: api_v1_analysis_runs_request_exception_create
+      description: |-
+        Ask a reviewer to let a run held at a gate go on.
+
+        The person whose run is held asks, with a reason; a reviewer who did not
+        ask decides. That is the independence rule every gate keeps, applied to
+        the gates a run itself reaches. The approvals endpoint could not serve
+        it: requesting there is a modeller's act, and the person whose analysis
+        is waiting is usually an analyst.
+
+        The request is tagged with the stage it was asked at. A run can reach
+        more than one gate, and clearing unmapped value at the keys gate says
+        nothing about a loss curve that falls with return period. Asking twice
+        returns the request that already stands rather than making a second.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this analysis run.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunExceptionRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RunExceptionRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RunExceptionRequestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+          description: ''
+  /api/v1/analysis-runs/{id}/resume/:
+    post:
+      operationId: api_v1_analysis_runs_resume_create
+      description: |-
+        Put a run whose gate has been cleared back in the queue.
+
+        Resumed from the gate rather than restarted. Everything before it stands
+        and its evidence is on the run; redoing it would republish the portfolio
+        and leave an orphan on the engine.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this analysis run.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRun'
+          description: ''
   /api/v1/analysis-runs/{id}/submit/:
     post:
       operationId: api_v1_analysis_runs_submit_create
@@ -7773,6 +7856,8 @@ components:
         gate_detail:
           type: string
           readOnly: true
+        manifest:
+          readOnly: true
         settings_hash:
           type: string
           readOnly: true
@@ -7809,6 +7894,7 @@ components:
       - is_active
       - kind
       - label
+      - manifest
       - may_publish_results
       - may_retry
       - peak_memory_mb
@@ -7822,6 +7908,14 @@ components:
       - stage_label
       - started_at
       - state
+    RunExceptionRequestRequest:
+      type: object
+      properties:
+        rationale:
+          type: string
+          minLength: 1
+      required:
+      - rationale
     RunStateEnum:
       enum:
       - draft

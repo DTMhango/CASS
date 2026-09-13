@@ -1027,7 +1027,7 @@ This section is a summary at 13 September 2026. The working tracker, which moves
 | Milestone | Position | Principal gap |
 | --- | --- | --- |
 | M1 Foundation | Met | — |
-| M2 Engine integration | Met except the pre-loss smoke check | Reduced-event check before losses |
+| M2 Engine integration | Met, including the pre-loss smoke check | — |
 | M3 Hazard | Partly met: PuSGeN 2024 run on the Jakarta–Bandung region with published Vs30 | Benchmark gate, full-country run, realisation weighting, Nepal source model |
 | M4 Conversion | Partly met: four-measure footprints, frequency preserved, package built under approval | HDF5 datastore reading, QA gate, OpenQuake reference comparison |
 | M5 Loss | Not met: ground-up, insured and reinsurance run with keys reconciliation | Assumption sets applied within a run, currency evidence |
@@ -1048,6 +1048,6 @@ This section is a summary at 13 September 2026. The working tracker, which moves
 
 ### What remains
 
-Buildable in code: the `enrich`, `smoke` and `review` analysis stages; run modes; currency evidence; event loss tables, geographic summaries, EP charts and maps; the financial structure workspace; the OED standards registry; HDF5 datastore reading; benchmark and QA gate machinery; the OpenQuake reference comparison; Cohort B sensitivity; completed direct uploads with scanning; enforced execution profiles; keys and converter services; retention expiry; administration of users, queues, storage and retention with a support bundle; observability; MFA and single sign-on; backup and restore; CI coverage of the patched worker with SBOMs; pinned digests and a release bundle.
+Buildable in code: the `enrich` analysis stage; run modes; currency evidence; event loss tables, geographic summaries, EP charts and maps; the financial structure workspace; the OED standards registry; HDF5 datastore reading; benchmark and QA gate machinery; the OpenQuake reference comparison; Cohort B sensitivity; completed direct uploads with scanning; enforced execution profiles; keys and converter services; retention expiry; administration of users, queues, storage and retention with a support bundle; observability; MFA and single sign-on; backup and restore; CI coverage of the patched worker with SBOMs; pinned digests and a release bundle.
 
 Needing a decision or outside input: the event representation study; a representation for multi-measure classes; realisation weighting; the storage format; secondary-peril and business-interruption scope; GEM's written position on internal use and legal review; a Nepal source model, denser Vs30 and the licensed ~1 km exposure; approved benchmark curves and QA tolerances; the brief's section 5.1 data questions; a full-country hazard run; and production choices for identity, broker and recovery targets.

@@ -11,6 +11,7 @@
  * workers actually follow.
  */
 
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
@@ -18,22 +19,37 @@ import {
   useAnalysisForRun,
   useCancelRun,
   useDownloadArtifact,
+  useRequestRunException,
+  useResumeAnalysis,
   useRetryRun,
   useRun,
   useRunArtifacts,
   useRunEvents,
+  useRunExceptions,
   useRuns,
+  useSession,
 } from "@/api/hooks";
-import type { AnalysisRun, PipelineStage, Run, RunArtifact } from "@/api/types";
+import type {
+  AnalysisRun,
+  PipelineStage,
+  ReviewCheck,
+  ReviewRecord,
+  Run,
+  RunArtifact,
+  SmokeRecord,
+} from "@/api/types";
+import { GateDecision } from "@/components/GateDecision";
 import { RunStateBadge, StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
   Disclosure,
   EmptyState,
+  Field,
   Notice,
   PageHeader,
   Spinner,
+  TextArea,
 } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
 import { formatBytes, formatDateTime, formatDuration, formatMoney } from "@/lib/format";
@@ -172,6 +188,7 @@ function RunDetail({ run }: { run: Run }) {
               <pre className="run-detail__pre">{run.gate_detail}</pre>
             </Disclosure>
           ) : null}
+          {analysis ? <GateControls run={run} analysis={analysis} /> : null}
         </Notice>
       ) : null}
 
@@ -205,6 +222,7 @@ function RunDetail({ run }: { run: Run }) {
       </div>
 
       {analysis ? <KeysReconciliation analysis={analysis} /> : null}
+      <RunChecks run={run} />
 
       <Card
         title="Evidence"
@@ -389,6 +407,152 @@ const KEYS_ROWS = [
   { key: "failed_tiv", label: "The model could not map" },
   { key: "source_tiv", label: "Published source total" },
 ] as const;
+
+/** The shortest reason the API accepts for an exception, kept in step with it. */
+const MINIMUM_REASON = 12;
+
+/**
+ * What a person can do about a run held at a gate.
+ *
+ * Three states, in the order a gate moves through them. Nobody has asked, so the
+ * person whose run it is says why it should go on. Somebody has asked, so a
+ * reviewer who did not ask decides. The gate is cleared, so the run goes back in
+ * the queue. A refusal returns to the first with the reviewer's reason shown,
+ * because a refused exception is an answer rather than a dead end.
+ */
+function GateControls({ run, analysis }: { run: Run; analysis: AnalysisRun }) {
+  const { data: session } = useSession();
+  const { data: requests } = useRunExceptions(analysis.id);
+  const request = useRequestRunException(analysis.id);
+  const resume = useResumeAnalysis(analysis.id);
+  const [rationale, setRationale] = useState("");
+
+  const mayDecide = session?.user?.capabilities.approve_gates ?? false;
+  const current = requests?.find((item) => item.evidence?.stage === run.stage);
+  const error = (request.error ?? resume.error) as ApiError | null;
+  const reason = rationale.trim();
+
+  return (
+    <div className="gate-controls">
+      {error ? (
+        <Notice tone="error" title="Not recorded">
+          {error.message}
+        </Notice>
+      ) : null}
+
+      {current?.is_cleared ? (
+        <div className="gate-controls__row">
+          <p>
+            Cleared by {current.decided_by_label || "a reviewer"}
+            {current.rationale ? `: ${current.rationale}` : "."}
+          </p>
+          <Button variant="primary" busy={resume.isPending} onClick={() => resume.mutate()}>
+            Resume the run
+          </Button>
+        </div>
+      ) : current?.is_open ? (
+        mayDecide ? (
+          <ul className="gate-list">
+            <GateDecision approval={current} mayDecide={mayDecide} />
+          </ul>
+        ) : (
+          <p className="muted">
+            Asked by {current.requested_by_label || "somebody"}. A reviewer who did not ask
+            decides it.
+          </p>
+        )
+      ) : (
+        <div className="gate-controls__ask">
+          {current?.decision === "rejected" ? (
+            <Notice tone="warning" title="The exception was refused">
+              {current.rationale || "No reason was recorded."}
+            </Notice>
+          ) : null}
+          <Field
+            label="Why the run should go on"
+            htmlFor={`exception-${analysis.id}`}
+            hint="A reviewer reads this beside what the gate is holding. A sentence at least."
+          >
+            <TextArea
+              id={`exception-${analysis.id}`}
+              rows={2}
+              value={rationale}
+              onChange={(event) => setRationale(event.target.value)}
+            />
+          </Field>
+          <Button
+            variant="secondary"
+            busy={request.isPending}
+            disabled={reason.length < MINIMUM_REASON}
+            onClick={() => request.mutate(reason, { onSuccess: () => setRationale("") })}
+          >
+            Ask for an exception
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the smoke check and the result review found.
+ *
+ * Read from the run manifest, which is where the stages record their evidence.
+ * A check that did not pass comes first, because that is the line a reviewer
+ * deciding an exception needs.
+ */
+function RunChecks({ run }: { run: Run }) {
+  const smoke = run.manifest?.smoke as SmokeRecord | undefined;
+  const review = run.manifest?.review as ReviewRecord | undefined;
+  if (!smoke && !review) return null;
+
+  const checks = [...(review?.checks ?? [])].sort((a, b) => checkRank(a) - checkRank(b));
+
+  return (
+    <Card
+      title="Checks"
+      description="The reduced-event smoke run before the losses, and the review of the results they produced."
+    >
+      {smoke ? (
+        smoke.performed ? (
+          <p className="run-checks__smoke">
+            Smoke check: {smoke.event_ids?.length ?? 0} of the package&apos;s largest events ran
+            through every requested perspective
+            {smoke.evaluated === false
+              ? `, but their output could not be read (${smoke.reason ?? "no reason recorded"}).`
+              : "."}
+          </p>
+        ) : (
+          <Notice tone="info" title="Smoke check not performed">
+            {smoke.reason}
+          </Notice>
+        )
+      ) : null}
+      {checks.length > 0 ? (
+        <ul className="run-checks">
+          {checks.map((item) => (
+            <li key={item.check} className="run-checks__item">
+              <StatusBadge
+                tone={item.passed === false ? "error" : item.passed ? "ok" : "idle"}
+                size="sm"
+              >
+                {item.passed === false ? "failed" : item.passed ? "passed" : "not evaluated"}
+              </StatusBadge>
+              <span className="run-checks__name">{item.check}</span>
+              <span className="muted run-checks__detail">{item.detail}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </Card>
+  );
+}
+
+function checkRank(check: ReviewCheck): number {
+  if (check.passed === false) return 0;
+  if (check.passed === null) return 1;
+  return 2;
+}
 
 function Pipeline({ run }: { run: Run }) {
   const currentIndex = run.pipeline.findIndex((stage) => stage.key === run.stage);

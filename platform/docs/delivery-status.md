@@ -10,10 +10,14 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,594 backend tests pass, 1 skipped. 97 integration tests pass against the
+- 1,616 backend tests pass, 1 skipped. 97 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package and the 30 June workbook.
-  83 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  89 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
+- The smoke check's engine behaviour was confirmed against the live Oasis: an
+  analysis re-runs on a 25-event `event_ids` subset, reports `RUN_QUEUED` at once
+  rather than its previous completion, finishes in 19 seconds, and writes only
+  the requested moment event loss table.
 - On the live Docker Compose stack, on 13 September, the invented Jakarta–Bandung
   book in `samples/` (64 locations, USD 1.36bn) ran ground-up, insured and
   reinsurance through the patched Oasis 2.5.7 worker to collected result sets.
@@ -27,7 +31,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | Milestone | Status | What shows it | Still missing |
 | --- | --- | --- | --- |
 | M1 Foundation | Met | Sign in, projects, OED attach, validation, preview, publication, background runs | — |
-| M2 Engine integration | Met, one stage short | PiWind live suite; the sample book through keys, generation, losses and collection | The pre-loss `smoke` check |
+| M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells | Benchmark gate; full-country run; realisation weighting; Nepal source model |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval | Reading the HDF5 datastore instead of CSV exports; QA gate; OpenQuake reference comparison |
 | M5 Loss | Not met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly | Applying an assumption set within a run; currency evidence |
@@ -40,17 +44,17 @@ updated afterwards is a tracker somebody has to reconcile.
 
 | Stage | Status |
 | --- | --- |
-| `validate_exposure` | Done before submission in the exposure workspace; not repeated inside the run |
+| `validate_exposure` | Done, in the exposure workspace and again inside the run: the published files must still validate, match the version record, carry one currency and support the requested perspectives |
 | `enrich` | Not built: no run applies an assumption set, and nothing creates an `EnrichmentRun` |
-| `publish_oed` | Done |
+| `publish_oed` | Done. Before it, the run checks the engine version and that the worker serves this model version's package ([ADR 9](adr/0009-cass-writes-the-oasis-package.md)) |
 | `keys` | Done, through CASS keys |
-| `reconcile_keys` | Done; unmapped value blocks for a run-exception approval |
+| `reconcile_keys` | Done. Unmapped value holds the run; the analyst asks for an exception on the run monitor, a reviewer who did not ask decides, and the run resumes from the gate |
 | `generate_inputs` | Done |
 | `validate_inputs` | Done; compares Oasis's lookup with the CASS keys result |
-| `smoke` | Not built |
+| `smoke` | Done. The served package's 25 largest-footprint events run through every requested perspective using `event_ids`, and their event losses are checked before the full event set. Recorded as not performed where no package is readable. On the live stack: 25 events in 19 seconds |
 | `losses` | Done: ground-up, insured, reinsurance (reinsurance at portfolio level only, [ADR 10](adr/0010-patched-oasis-worker.md)) |
 | `collect` | Done: ORD package stored, result sets published as draft or research |
-| `review` | Not performed as a stage; results are approved one by one |
+| `review` | Done. Published results must not be negative, must rise with return period, stay within the insured value, and insured must not exceed ground-up. A failure holds the run at the gate until a run exception is cleared; results are then approved one by one |
 
 ### Hazard
 
@@ -75,7 +79,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | Exposure workspace | Built, Exposure tab: intake import, OED attach, validation, row correction, publication | Assumption scenarios; reported-versus-inferred display across attributes |
 | Financial structure workspace | Not built | Accounts and layers, contracts, scope preview, inuring, reconciliation |
 | Analysis builder | Built | Assumption set, run mode, output selection |
-| Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry | — |
+| Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
 | Results workspace | Partly built: AAL, return-period table, caveats, approval, export, comparison | Maps, EP curve charts, event tables, scenario ranges |
 | Model build workspace | Built, Hazard and Build tabs | Benchmark and QA evidence views |
 | Administration | Partly built: installation facts, compatibility, profiles, engine health, users, audit search | User and role changes, queues, storage, retention, support bundle |
@@ -106,7 +110,8 @@ updated afterwards is a tracker somebody has to reconcile.
 
 | # | Item | Plan | Status |
 | --- | --- | --- | --- |
-| 1 | Analysis pipeline: exposure validation inside the run, `enrich` applying an assumption set with reconciliation, `smoke` on a reduced event set, `review` stage | §8, M2, M5 | Not started |
+| 1 | Analysis pipeline: exposure validation inside the run, `smoke` on a reduced event set, `review` stage, and releasing a run held at a gate | §8, M2 | Done |
+| 1b | `enrich`: applying an assumption set within a run, with reconciliation | §8, M5 | Not started |
 | 2 | Run modes: geometry-only, technical loss, research, decision use | Brief §5.2 | Not started |
 | 3 | Currency conversion evidence captured and applied before generation | §8 | Not started |
 | 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Not started |

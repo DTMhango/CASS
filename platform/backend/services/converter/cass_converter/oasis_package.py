@@ -224,6 +224,34 @@ def write_footprint(
     return {"events": event_count, "rows": row_count, "largest_bin": largest_bin}
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class FootprintIndexEntry:
+    """One row of ``footprint.idx``: where an event's rows sit, and how many bytes."""
+
+    event_id: int
+    offset: int
+    size: int
+
+
+def read_footprint_index(payload: bytes) -> list[FootprintIndexEntry]:
+    """Read ``footprint.idx`` back, one entry per event in the order written.
+
+    The layout is :func:`write_footprint`'s, kept here so that nothing outside
+    this module has to know it. The control plane reads it to choose the events
+    a smoke check runs, and an index read with the wrong row size would choose
+    events that do not exist.
+    """
+    if len(payload) % _INDEX_ROW.size:
+        raise PackageError(
+            f"A footprint index of {len(payload)} bytes is not a whole number of "
+            f"{_INDEX_ROW.size}-byte rows, so it is not an index this package writes."
+        )
+    return [
+        FootprintIndexEntry(*_INDEX_ROW.unpack_from(payload, offset))
+        for offset in range(0, len(payload), _INDEX_ROW.size)
+    ]
+
+
 def merged_footprint_events(
     footprints: Mapping[str, bytes],
 ) -> Iterator[tuple[int, list[tuple[int, int, float]]]]:

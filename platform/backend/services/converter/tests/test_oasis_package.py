@@ -449,3 +449,27 @@ def test_a_footprint_event_the_engine_cannot_name_is_refused(tmp_path):
         oasis_package.write_footprint(
             [(0, [(7, 3, 1.0)])], io.BytesIO(), io.BytesIO(), intensity_bin_count=50
         )
+
+
+# -- reading the index back ---------------------------------------------------
+
+def test_the_footprint_index_reads_back_what_was_written():
+    """The control plane chooses smoke events from this, so it must read true."""
+    footprint, index = io.BytesIO(), io.BytesIO()
+    oasis_package.write_footprint(
+        [(1, [(10, 2, 1.0)]), (4, [(10, 1, 0.5), (11, 3, 0.5)])],
+        footprint,
+        index,
+        intensity_bin_count=50,
+    )
+
+    entries = oasis_package.read_footprint_index(index.getvalue())
+
+    assert [(item.event_id, item.size) for item in entries] == [(1, 12), (4, 24)]
+    # Rows begin after the eight-byte header, and each event follows the last.
+    assert [item.offset for item in entries] == [8, 20]
+
+
+def test_an_index_that_is_not_whole_rows_is_refused():
+    with pytest.raises(PackageError, match="whole number"):
+        oasis_package.read_footprint_index(b"\0" * 21)

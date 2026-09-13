@@ -6,7 +6,12 @@ errors, reconciliation and lineage visible -- and without anyone opening the
 native Oasis interface. This module is the orchestration half of that. The
 protocol half is the adapter; nothing here speaks HTTP.
 
-Seven of the eleven stages in the analysis pipeline are performed here:
+Ten of the eleven stages in the analysis pipeline are performed here:
+
+``validate_exposure``
+    Validate the published files again, inside the run, and confirm they still
+    match the version record, carry one currency and support the requested
+    perspectives.
 
 ``publish_oed``
     Create the Oasis portfolio and upload the frozen OED artifacts.
@@ -28,6 +33,10 @@ Seven of the eleven stages in the analysis pipeline are performed here:
     Read back what Oasis's own lookup did and check every published location is
     accounted for, comparing it with the CASS keys result.
 
+``smoke``
+    Run a handful of the served package's largest events through every
+    requested perspective before admitting the full event set.
+
 ``losses``
     Run the requested perspectives.
 
@@ -35,11 +44,15 @@ Seven of the eleven stages in the analysis pipeline are performed here:
     Pull the ORD outputs back into the artifact store and complete the run
     manifest.
 
-The remaining four belong to workstreams that are not built yet:
-``validate_exposure`` and ``enrich`` to the exposure services, and ``smoke``
-and ``review`` to the operational gates. They are recorded in the manifest as
-not performed rather than skipped silently, because a manifest that omits them
-reads as though they passed.
+``review``
+    Check the published results are losses at all -- not negative, rising with
+    return period, within the insured value -- and hold them at the gate when
+    they are not.
+
+The eleventh, ``enrich``, belongs to the exposure-enrichment workstream. It is
+recorded in the manifest as not performed rather than skipped silently, because
+a manifest that omits a stage reads as though it passed, and ``smoke`` is
+recorded the same way on the occasions it cannot run.
 
 Two rules shape everything below. A run that stops must say why in terms an
 analyst can act on, and must never leave a published partial result: every
@@ -52,29 +65,34 @@ waiting analysis is never reported as broken.
 
 from __future__ import annotations
 
+import copy
 import csv
 import io
 import json
-from collections.abc import Mapping
-from decimal import Decimal
+import pathlib
+from collections.abc import Mapping, Sequence
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.conf import settings
 from django.db import transaction
 
 from apps.artifacts.models import Artifact, ArtifactLink, ArtifactState
 from apps.audit import services as audit
-from apps.audit.models import AuditAction
+from apps.audit.models import Approval, AuditAction
 from apps.common.engines import oasis_adapter, oasis_model_triple
 from apps.common.storage import bucket, get_store
 from apps.exposure import services as exposure_services
 from apps.modelregistry.assets import ModelAssetError, load_grid, load_vulnerability
 from cass_adapters.base import AdapterError, EngineState
 from cass_adapters.oasis import OasisPhase, PortfolioFileKind
+from cass_converter.oasis_package import PackageError, read_footprint_index
 from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_core.runs import RunState
 from cass_keys.lookup import lookup as keys_lookup
 from cass_oed import ord as ord_results
-from cass_oed.perspectives import Perspective
+from cass_oed.perspectives import Perspective, available_perspectives
+from cass_oed.validation import validate as validate_portfolio
 
 from .models import AnalysisRun
 
@@ -90,24 +108,30 @@ OASIS_FILE_BY_ROLE: dict[str, PortfolioFileKind] = {
 
 #: Stages this service performs, in pipeline order.
 ENGINE_STAGES = (
+    "validate_exposure",
     "publish_oed",
     "keys",
     "reconcile_keys",
     "generate_inputs",
     "validate_inputs",
+    "smoke",
     "losses",
     "collect",
+    "review",
 )
 
 #: Stages the analysis pipeline declares that this service does not perform,
 #: with the reason each is outstanding. Recorded in the manifest so a reader
-#: can tell "not done" from "done and clean".
+#: can tell "not done" from "done and clean". ``smoke`` joins these on a run
+#: where it could not choose an event set, with the reason it could not.
 UNPERFORMED_STAGES: dict[str, str] = {
-    "validate_exposure": "Performed by the exposure workspace before the run is submitted.",
-    "enrich": "Assumption sets are applied by the enrichment service; not yet wired to a run.",
-    "smoke": "The reduced-event pre-loss check is not yet implemented.",
-    "review": "Operational and scientific result review is a separate governance step.",
+    "enrich": "Assumption sets are not yet applied within a run.",
 }
+
+#: How many events the smoke check runs. Enough to touch most of a regional
+#: book, few enough that a national event set of tens of thousands is checked
+#: in the time it takes to generate its inputs.
+SMOKE_EVENT_COUNT = 25
 
 
 class AnalysisExecutionError(Exception):
@@ -178,18 +202,7 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
     if analysis_run.analysis_settings:
         return dict(analysis_run.analysis_settings)
 
-    requested = {str(item) for item in (analysis_run.perspectives or [])}
-    if not requested:
-        requested = {str(Perspective.GROUND_UP)}
-    if str(Perspective.REINSURANCE) in requested:
-        # Reinsurance is computed from the insured position: the engine applies
-        # the contracts to the insured stream and needs it calculated and
-        # summarised to write the reinsurance summary files at all. Asked for
-        # reinsurance alone, it builds the reinsurance structures and then stops
-        # on a missing insured summary index. So the insured stream is asked for
-        # too, and its result is published beside the ceded one -- which is the
-        # comparison a reinsurance analyst wants in front of them anyway.
-        requested.add(str(Perspective.INSURED))
+    requested = set(settings_perspectives(analysis_run))
 
     supplier, model_name, _ = oasis_model_triple()
     settings_document: dict = {
@@ -208,6 +221,25 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
                 {"id": 1, "ord_output": dict(DEFAULT_ORD_OUTPUT)}
             ]
     return settings_document
+
+
+def settings_perspectives(analysis_run: AnalysisRun) -> tuple[str, ...]:
+    """The perspectives the engine is asked to calculate, in pipeline order.
+
+    Not always the ones requested. Reinsurance is computed from the insured
+    position: the engine applies the contracts to the insured stream and needs
+    it calculated and summarised to write the reinsurance summary files at all.
+    Asked for reinsurance alone, it builds the reinsurance structures and then
+    stops on a missing insured summary index. So the insured stream is asked
+    for too, which is the comparison a reinsurance analyst wants in front of
+    them anyway.
+    """
+    requested = {str(item) for item in (analysis_run.perspectives or [])}
+    if not requested:
+        requested = {str(Perspective.GROUND_UP)}
+    if str(Perspective.REINSURANCE) in requested:
+        requested.add(str(Perspective.INSURED))
+    return tuple(str(item) for item in Perspective if str(item) in requested)
 
 
 def settings_digest(document: dict) -> str:
@@ -255,6 +287,175 @@ def oed_payloads(analysis_run: AnalysisRun) -> list[tuple[str, str, bytes]]:
             "The exposure version has no readable location file, so there is nothing to analyse."
         )
     return payloads
+
+
+# -- before anything reaches the engine -------------------------------------
+
+def _validate_exposure(analysis_run, actor) -> dict:
+    """Validate the published exposure again, inside the run.
+
+    It was validated when it was published, and it is validated again here for
+    two reasons. A run may start weeks after publication, under a validator
+    that has learned something since. And three things the engine cannot
+    recover from are cheap to check now and expensive to discover after input
+    generation: files that no longer match the version record, more than one
+    currency reaching the financial module, and a perspective the files cannot
+    support.
+
+    Nothing here writes to the version. A published version is immutable, so a
+    problem found now is a reason to correct it into the next version, not to
+    change this one.
+    """
+    run = analysis_run.run
+    version = analysis_run.exposure_version
+    if not version.is_frozen:
+        raise AnalysisExecutionError(
+            "The exposure version is not published. Publish it before running an analysis, "
+            "so the run points at immutable input."
+        )
+    try:
+        files = exposure_services.load_files(version)
+    except exposure_services.ExposureError as exc:
+        raise AnalysisExecutionError(str(exc)) from exc
+
+    report = validate_portfolio(files)
+    problems: list[str] = []
+
+    errors = report.findings.errors
+    if errors:
+        examples = "; ".join(item.message for item in errors[:3])
+        problems.append(
+            f"{len(errors)} blocking validation finding(s) now stand against the "
+            f"published files, for example: {examples}"
+        )
+
+    recorded_tiv = Decimal(version.total_tiv or 0)
+    if report.total_tiv != recorded_tiv:
+        problems.append(
+            f"The files hold {report.total_tiv} of insured value but the version records "
+            f"{recorded_tiv}, so the artifact and the record have come apart."
+        )
+    if report.location_count != version.location_count:
+        problems.append(
+            f"The files hold {report.location_count} locations but the version records "
+            f"{version.location_count}."
+        )
+
+    currencies = [item for item in report.currencies if item]
+    run_currency = analysis_run.run_currency or version.run_currency
+    if len(currencies) > 1:
+        problems.append(
+            f"The files mix {', '.join(currencies)}. The Oasis financial module does not "
+            "convert between currencies, so values must be normalised into one before a run."
+        )
+    elif currencies and run_currency and currencies[0] != run_currency:
+        problems.append(
+            f"The files are in {currencies[0]} but the run is set to {run_currency}."
+        )
+
+    availability = {str(item.perspective): item for item in available_perspectives(files)}
+    for perspective in analysis_run.perspectives or []:
+        entry = availability.get(str(perspective))
+        if entry is None or not entry.available:
+            reason = entry.reason if entry is not None else "CASS does not produce it."
+            problems.append(
+                f"{perspective} is not supported by the published files. {reason}".strip()
+            )
+
+    if problems:
+        raise AnalysisExecutionError(
+            "The published exposure does not pass the checks a run requires:\n- "
+            + "\n- ".join(problems)
+        )
+
+    summary = {
+        "oed_schema_version": version.oed_schema_version,
+        "locations": report.location_count,
+        "accounts": report.account_count,
+        "total_tiv": str(report.total_tiv),
+        "currency": currencies[0] if currencies else "",
+        "warnings": len(report.findings.warnings),
+        "inputs": _input_checksums(version),
+    }
+    run.advance(
+        "validate_exposure",
+        actor=actor,
+        message=(
+            f"The published exposure validates: {report.location_count} locations, "
+            f"{report.total_tiv} {summary['currency']} of insured value."
+        ),
+        metrics=summary,
+    )
+    return summary
+
+
+def _input_checksums(version) -> dict[str, str]:
+    """The checksum of every published file, by role, for the manifest."""
+    return {
+        link.role: link.artifact.checksum
+        for link in ArtifactLink.objects.filter(
+            subject_type="exposure_version", subject_id=version.id, direction="input"
+        ).select_related("artifact")
+    }
+
+
+def _served_package(analysis_run) -> dict:
+    """Which model package the Oasis worker serves, and whether it is this one.
+
+    ADR 9: a worker serves one package at a time, and building a package for a
+    model version replaces what it serves. A run against another version's
+    package would complete, and publish that version's losses under this one's
+    name, with nothing downstream able to tell. So wherever CASS can read the
+    served package it confirms the name before anything is submitted.
+
+    Where it cannot -- a model version CASS did not build a package for, or a
+    control plane that does not share the worker's volume -- that is recorded as
+    unconfirmed rather than passed.
+    """
+    model_version = analysis_run.model_version
+    if model_version.hazard_set_id is None:
+        return {
+            "checked": False,
+            "reason": (
+                f"{model_version.reference} has no CASS hazard set, so the engine serves "
+                "a package CASS did not build and has no manifest to compare."
+            ),
+        }
+
+    root = pathlib.Path(settings.CASS_OASIS_MODEL_ROOT)
+    try:
+        manifest = json.loads((root / "MANIFEST.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "checked": False,
+            "reason": (
+                f"No model package is readable at {root} from the control plane, so "
+                "which package the worker serves could not be confirmed."
+            ),
+        }
+    except (OSError, ValueError) as exc:
+        return {
+            "checked": False,
+            "reason": f"The package manifest at {root} could not be read: {exc}",
+        }
+
+    provenance = manifest.get("provenance") or {}
+    served = str(provenance.get("model_version") or "")
+    if served != model_version.reference:
+        raise AnalysisExecutionError(
+            f"The Oasis worker is serving the package built for "
+            f"{served or 'an unnamed model version'}, not {model_version.reference}. "
+            f"Build the package for {model_version.reference} on the Build tab and run "
+            "again: this run would otherwise publish the other version's losses under "
+            "this one's name."
+        )
+    return {
+        "checked": True,
+        "model_version": served,
+        "package_version": manifest.get("package_version", ""),
+        "hazard_set": provenance.get("hazard_set", ""),
+        "events": manifest.get("events"),
+    }
 
 
 # -- the stages -------------------------------------------------------------
@@ -551,6 +752,216 @@ def _cass_keys_comparison(analysis_run, oasis_mapped: set[str]) -> dict:
     }
 
 
+def smoke_event_ids(root: pathlib.Path, count: int = SMOKE_EVENT_COUNT) -> list[int]:
+    """The events with the largest footprints in the served package, by identifier.
+
+    Largest by bytes of footprint, which is the number of cells and bins an
+    event reaches: the events most likely to touch a portfolio wherever it
+    sits. Ties go to the lower identifier, so one package always gives one
+    selection.
+    """
+    entries = read_footprint_index((root / "model_data" / "footprint.idx").read_bytes())
+    ranked = sorted(
+        (item for item in entries if item.size > 0),
+        key=lambda item: (-item.size, item.event_id),
+    )
+    return sorted(item.event_id for item in ranked[:count])
+
+
+def smoke_settings(document: Mapping[str, Any], event_ids: Sequence[int]) -> dict:
+    """The full settings, limited to a handful of events and one table each.
+
+    Only the moment event loss table is asked for. An exceedance curve from
+    twenty-five events describes nothing, and the question the smoke check asks
+    -- does every perspective run, and are its losses bounded -- is answered
+    event by event.
+    """
+    reduced = copy.deepcopy(dict(document))
+    reduced["event_ids"] = [int(item) for item in event_ids]
+    for _, summaries in _PERSPECTIVE_KEYS.values():
+        for summary in reduced.get(summaries) or []:
+            if isinstance(summary, dict):
+                summary["ord_output"] = {"elt_moment": True}
+    return reduced
+
+
+def smoke_findings(
+    payload: bytes, *, perspectives: Sequence[str], insured_value: Decimal
+) -> dict:
+    """What the smoke run's event losses say, and anything that cannot be right.
+
+    A package that cannot be read is not evaluated rather than failed, for the
+    reason the collect stage gives: the engine ran, and a table not being where
+    CASS expected it is not evidence about the losses. A perspective that wrote
+    no event losses at all, a loss that is not a number or is negative, and an
+    event loss above the whole portfolio's insured value are all problems: each
+    is a model or financial structure that would produce the same defect across
+    the full event set.
+    """
+    try:
+        package = ord_results.open_package(payload)
+    except ord_results.OrdError as exc:
+        return {"evaluated": False, "reason": str(exc), "problems": [], "perspectives": {}}
+
+    problems: list[str] = []
+    seen: dict[str, dict[str, int]] = {}
+    for perspective in perspectives:
+        label = Perspective(perspective).label.lower()
+        rows = package.rows(perspective, 1, "melt")
+        if not rows:
+            problems.append(
+                f"The smoke run wrote no {label} event losses, so that perspective "
+                "produced nothing."
+            )
+            continue
+        with_loss: set[str] = set()
+        for row in rows:
+            event = row.get("EventId", "?")
+            mean = _loss_value(row.get("MeanLoss"))
+            maximum = _loss_value(row.get("MaxLoss"))
+            if mean is None or not mean.is_finite() or mean < 0:
+                problems.append(
+                    f"Event {event} has a {label} mean of {row.get('MeanLoss')!r}, which "
+                    "is not a loss."
+                )
+                continue
+            if mean > 0:
+                with_loss.add(event)
+            if (
+                insured_value > 0
+                and maximum is not None
+                and maximum.is_finite()
+                and maximum > insured_value
+            ):
+                problems.append(
+                    f"Event {event} reaches a {label} of {maximum}, above the "
+                    f"{insured_value} insured value of the whole portfolio."
+                )
+        seen[perspective] = {"rows": len(rows), "events_with_loss": len(with_loss)}
+
+    return {
+        "evaluated": True,
+        # A defect usually repeats on every event, and twenty identical lines say
+        # no more than three.
+        "problems": problems[:20],
+        "problem_count": len(problems),
+        "perspectives": seen,
+    }
+
+
+def _loss_value(value: Any) -> Decimal | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return Decimal(str(value).strip())
+    except InvalidOperation:
+        return None
+
+
+def _smoke(analysis_run, engine, actor, *, poll_interval, timeout) -> dict:
+    """Run a handful of events through every requested perspective first.
+
+    Section 8 asks for pre-loss smoke checks before a portfolio is admitted to
+    the full event set, and the reason is cost. The defects that stop an insured
+    or reinsurance run surface in the first events it calculates, and finding
+    one after hours of a national event set wastes the hours. So the analysis
+    runs first on the served package's largest events, their losses are
+    checked, and only then are the full settings put back.
+
+    Where no footprint index is readable -- a package CASS did not build, or a
+    control plane that does not share the worker's volume -- no event set can
+    be chosen, and the stage is recorded as not performed rather than passed.
+    """
+    run = analysis_run.run
+    analysis_id = int(analysis_run.oasis_analysis_id)
+    root = pathlib.Path(settings.CASS_OASIS_MODEL_ROOT)
+
+    try:
+        event_ids = smoke_event_ids(root)
+    except OSError:
+        return _smoke_not_performed(
+            run,
+            actor,
+            f"No footprint index is readable at {root} from the control plane, so no "
+            "reduced event set could be chosen.",
+        )
+    except PackageError as exc:
+        raise AnalysisExecutionError(
+            f"The served model package's footprint index cannot be read: {exc}"
+        ) from exc
+    if not event_ids:
+        return _smoke_not_performed(
+            run,
+            actor,
+            "The served package's footprint index lists no event with any footprint, "
+            "so there is nothing to run.",
+        )
+
+    model = engine.find_model(*oasis_model_triple())
+    full = build_analysis_settings(analysis_run, model)
+    engine.upload_settings(analysis_id, smoke_settings(full, event_ids))
+    engine.run(analysis_id)
+    job = engine.poll(
+        analysis_id,
+        OasisPhase.LOSSES,
+        interval=poll_interval,
+        timeout=timeout,
+        on_update=lambda observed: _note(run, "smoke", observed, actor),
+    )
+    _require_success(
+        job, engine, analysis_id, OasisPhase.LOSSES, "complete the reduced-event smoke check"
+    )
+
+    sink = io.BytesIO()
+    engine.download_outputs(analysis_id, sink)
+    evaluation = smoke_findings(
+        sink.getvalue(),
+        perspectives=settings_perspectives(analysis_run),
+        insured_value=Decimal(analysis_run.exposure_version.total_tiv or 0),
+    )
+    if evaluation["problems"]:
+        raise AnalysisExecutionError(
+            "The reduced-event smoke check produced losses that cannot be right, so the "
+            "full event set was not run:\n- " + "\n- ".join(evaluation["problems"])
+        )
+
+    # The full document, exactly as it was hashed when the inputs were
+    # generated, goes back before the loss stage: the analysis that runs has to
+    # be the one the manifest records.
+    if settings_digest(full) != run.settings_hash:
+        raise AnalysisExecutionError(
+            "The analysis settings changed between input generation and the smoke check, "
+            "so the run could not say which settings produced its losses."
+        )
+    engine.upload_settings(analysis_id, full)
+
+    reached = sorted(
+        {counts["events_with_loss"] for counts in evaluation["perspectives"].values()}
+    )
+    run.advance(
+        "smoke",
+        actor=actor,
+        message=(
+            f"{len(event_ids)} of the package's largest events ran through every requested "
+            "perspective"
+            + (
+                f"; {reached[-1]} produced a loss."
+                if evaluation["evaluated"] and reached
+                else "."
+            )
+        ),
+        metrics={"event_count": len(event_ids), "evaluated": evaluation["evaluated"]},
+    )
+    return {"performed": True, "event_ids": event_ids, **evaluation}
+
+
+def _smoke_not_performed(run, actor, reason: str) -> dict:
+    run.advance(
+        "smoke", actor=actor, message=f"Not performed. {reason}", metrics={"performed": False}
+    )
+    return {"performed": False, "reason": reason}
+
+
 def _losses(analysis_run, engine, actor, *, poll_interval, timeout) -> dict:
     """Run the loss calculation."""
     run = analysis_run.run
@@ -776,6 +1187,203 @@ def _material_exclusions(analysis_run, model_version) -> list[str]:
     return sorted(set(exclusions))
 
 
+# -- review -----------------------------------------------------------------
+
+def stage_approval(analysis_run, stage: str):
+    """The latest run-exception request for one gate of this run, if any.
+
+    Tagged with the stage it was asked at, because a run can reach more than one
+    gate and clearing unmapped value at the keys gate says nothing about a loss
+    curve that falls with return period.
+    """
+    return (
+        Approval.objects.filter(
+            gate=Approval.Gate.RUN_EXCEPTION,
+            subject_type="analysis_run",
+            subject_id=analysis_run.id,
+            evidence__stage=stage,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def review_checks(
+    results: Mapping[str, Any],
+    *,
+    requested: Sequence[str],
+    insured_value: Decimal,
+    keys_reconciled: bool | None,
+) -> list[dict]:
+    """The operational checks a result must pass before anyone relies on it.
+
+    Each check is ``passed`` true or false, or ``None`` where there was nothing
+    to evaluate -- a perspective whose package could not be read published no
+    result, which the collect stage has already recorded, and inventing a
+    failure for it would hold a run over a table rather than a number.
+
+    None of these is a scientific judgement. They are the conditions under
+    which a number cannot be a loss at all, and a result that fails one is
+    wrong whatever the model.
+    """
+    checks: list[dict] = []
+
+    def add(check: str, passed: bool | None, detail: str) -> None:
+        checks.append({"check": check, "passed": passed, "detail": detail})
+
+    add(
+        "Keys reconcile to the published source",
+        keys_reconciled is True,
+        "Every location, coverage and sub-peril produced one response."
+        if keys_reconciled
+        else "The keys accounting did not balance.",
+    )
+
+    for perspective in requested:
+        label = Perspective(perspective).label
+        result = results.get(perspective)
+        if result is None:
+            add(
+                f"{label} was published",
+                None,
+                "No result set was published, because the output package could not be "
+                "read; the reason is on the collect stage. There is nothing to review.",
+            )
+            continue
+
+        average = result.average_annual_loss
+        add(
+            f"{label}: the average annual loss is not negative",
+            average is not None and average >= 0,
+            f"{average}" if average is not None else "No average annual loss was reported.",
+        )
+        deviation = result.standard_deviation
+        if deviation is not None:
+            add(
+                f"{label}: the standard deviation is not negative",
+                deviation >= 0,
+                f"{deviation}",
+            )
+
+        curve = _curve(result.return_period_losses)
+        negative = [(period, loss) for period, loss in curve if loss < 0]
+        add(
+            f"{label}: return-period losses are not negative",
+            not negative,
+            "; ".join(f"{period} years: {loss}" for period, loss in negative)
+            or f"{len(curve)} return periods.",
+        )
+        falling = [
+            (low, low_loss, high, high_loss)
+            for (low, low_loss), (high, high_loss) in zip(curve, curve[1:], strict=False)
+            if high_loss < low_loss
+        ]
+        add(
+            f"{label}: losses rise with return period",
+            not falling,
+            "; ".join(
+                f"{high} years ({high_loss}) is below {low} years ({low_loss})"
+                for low, low_loss, high, high_loss in falling
+            )
+            or "The curve does not fall anywhere.",
+        )
+        if insured_value > 0:
+            largest = max([average or Decimal(0)] + [loss for _, loss in curve])
+            add(
+                f"{label}: no loss exceeds the portfolio's insured value",
+                largest <= insured_value,
+                f"The largest is {largest} against {insured_value} insured.",
+            )
+
+    for gross, net in (
+        (str(Perspective.GROUND_UP), str(Perspective.INSURED)),
+        (str(Perspective.INSURED), str(Perspective.REINSURANCE)),
+    ):
+        upper, lower = results.get(gross), results.get(net)
+        if (
+            upper is None
+            or lower is None
+            or upper.average_annual_loss is None
+            or lower.average_annual_loss is None
+        ):
+            continue
+        add(
+            f"{Perspective(net).label} does not exceed {Perspective(gross).label.lower()}",
+            lower.average_annual_loss <= upper.average_annual_loss,
+            f"{lower.average_annual_loss} against {upper.average_annual_loss}.",
+        )
+    return checks
+
+
+def _curve(losses: Mapping[str, Any] | None) -> list[tuple[Decimal, Decimal]]:
+    """A stored return-period curve as ordered decimal pairs."""
+    pairs = []
+    for period, loss in (losses or {}).items():
+        try:
+            pairs.append((Decimal(str(period)), Decimal(str(loss))))
+        except InvalidOperation:
+            continue
+    return sorted(pairs)
+
+
+def _review(analysis_run, actor) -> dict:
+    """Check the published results, and hold them when they cannot be losses.
+
+    Section 8's review gate holds results until operational and scientific
+    checks pass. The operational half is here: the checks in
+    :func:`review_checks`. A result failing one keeps the run at the gate, with
+    what failed, until a reviewer who did not ask records a run exception --
+    and while it is held, the result cannot be approved for decisions, because
+    only a successful run may release one.
+
+    The scientific half is not a check CASS can compute. What the model version
+    is -- a research prototype or an approved release -- is recorded beside the
+    checks so the reviewer reads both together.
+    """
+    from apps.results.models import ResultSet
+
+    run = analysis_run.run
+    model_version = analysis_run.model_version
+    results = {item.perspective: item for item in ResultSet.objects.filter(run=run)}
+    checks = review_checks(
+        results,
+        requested=[str(item) for item in (analysis_run.perspectives or [])],
+        insured_value=Decimal(analysis_run.exposure_version.total_tiv or 0),
+        keys_reconciled=analysis_run.keys_reconciled,
+    )
+    failed = [item for item in checks if item["passed"] is False]
+    record: dict[str, Any] = {
+        "checks": checks,
+        "failed": len(failed),
+        "model_version": {
+            "reference": model_version.reference,
+            "publication_state": model_version.publication_state,
+            "research_prototype": model_version.is_research_prototype,
+        },
+    }
+
+    if failed:
+        approval = stage_approval(analysis_run, "review")
+        if approval is None or not approval.is_cleared:
+            raise RunBlocked(
+                f"{len(failed)} result check(s) did not pass, so the results are held "
+                "until a reviewer decides.",
+                detail="\n".join(f"  {item['check']}: {item['detail']}" for item in failed),
+            )
+        record["approved_exception"] = str(approval.id)
+
+    run.advance(
+        "review",
+        actor=actor,
+        message=(
+            f"{len(checks) - len(failed)} of {len(checks)} result checks passed"
+            + (" and the rest were released by an approved exception." if failed else ".")
+        ),
+        metrics={"checks": len(checks), "failed": len(failed)},
+    )
+    return record
+
+
 # -- the driver -------------------------------------------------------------
 
 def execute(
@@ -818,13 +1426,22 @@ def execute(
     run.transition(RunState.RUNNING, actor=actor)
 
     manifest = dict(run.manifest or {})
-    manifest["stages_not_performed"] = UNPERFORMED_STAGES
+    # Merged rather than replaced: a resumed run keeps what its first attempt
+    # recorded, including a smoke check that could not run.
+    not_performed = dict(manifest.get("stages_not_performed") or {})
+    not_performed.update(UNPERFORMED_STAGES)
+    manifest["stages_not_performed"] = not_performed
 
     #: Each step is named by the stage it performs rather than by the stage the
     #: run last completed. A failure has to be located where it happened: a
     #: loss calculation that dies reported against ``validate_inputs``, because
     #: that was the last stage to finish, sends the analyst to the wrong place.
     steps = (
+        (
+            "validate_exposure",
+            "exposure_validation",
+            lambda: _validate_exposure(analysis_run, actor),
+        ),
         ("publish_oed", "portfolio", lambda: _publish_oed(analysis_run, engine, actor)),
         ("keys", "keys", lambda: _keys(analysis_run, actor)),
         ("reconcile_keys", "reconciliation", lambda: _reconcile_keys(analysis_run, actor)),
@@ -841,6 +1458,13 @@ def execute(
             lambda: _validate_inputs(analysis_run, engine, actor),
         ),
         (
+            "smoke",
+            "smoke",
+            lambda: _smoke(
+                analysis_run, engine, actor, poll_interval=poll_interval, timeout=timeout
+            ),
+        ),
+        (
             "losses",
             "losses",
             lambda: _losses(
@@ -848,39 +1472,62 @@ def execute(
             ),
         ),
         ("collect", "output", lambda: _collect(analysis_run, engine, actor)),
+        ("review", "review", lambda: _review(analysis_run, actor)),
     )
 
     pipeline = run.pipeline
     start = pipeline.index_of(resume_at) if resume_at else -1
 
-    stage = ENGINE_STAGES[0]
-    try:
-        # Before anything is submitted: section 18 refuses an untested engine
-        # rather than producing a result nobody can defend.
-        engine_version = engine.check_compatible()
-        manifest["engine"] = engine_version.as_dict()
+    #: The stages that use the engine. A run resumed at the review gate uses it
+    #: no longer, so it is not asked about its version or its package again: a
+    #: package rebuilt since the losses ran would otherwise hold a finished run.
+    first_engine_stage = pipeline.index_of("publish_oed")
+    last_engine_stage = pipeline.index_of("losses")
 
+    stage = ENGINE_STAGES[0]
+    checked_engine = False
+    try:
         for next_stage, key, step in steps:
-            if pipeline.index_of(next_stage) < start:
+            position = pipeline.index_of(next_stage)
+            if position < start:
                 continue
             # Carried out of the loop so the failure handler can name the stage
             # that raised rather than the last one that finished.
             stage = next_stage
-            manifest[key] = step()
+
+            if not checked_engine and first_engine_stage <= position <= last_engine_stage:
+                # Before anything is submitted: section 18 refuses an untested
+                # engine rather than producing a result nobody can defend, and a
+                # worker serving another version's package would produce one.
+                manifest["engine"] = engine.check_compatible().as_dict()
+                manifest["package"] = _served_package(analysis_run)
+                checked_engine = True
+
+            outcome = step()
+            manifest[key] = outcome
+            if next_stage == "smoke":
+                if outcome.get("performed"):
+                    not_performed.pop("smoke", None)
+                else:
+                    not_performed["smoke"] = outcome.get("reason", "")
 
         manifest["exposure_version"] = str(analysis_run.exposure_version_id)
         manifest["model_version"] = str(analysis_run.model_version_id)
         manifest["settings_hash"] = run.settings_hash
     except RunBlocked as exc:
+        # The evidence so far is kept on the run. A resumed run starts from the
+        # gate, and a manifest dropped here would lose every stage before it.
+        run.manifest = manifest
         _block(run, exc, stage=stage, actor=actor)
         raise
     except (AdapterError, AnalysisExecutionError, ModelAssetError) as exc:
+        run.manifest = manifest
         _fail(run, exc, stage=stage, actor=actor)
         raise
 
     run.manifest = manifest
     run.save(update_fields=["manifest", "updated_at"])
-    run.transition(RunState.SUCCEEDED, actor=actor, stage="collect")
+    run.transition(RunState.SUCCEEDED, actor=actor, stage="review")
 
     audit.record(
         action=AuditAction.SUBMIT,

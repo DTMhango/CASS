@@ -10,19 +10,23 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.db import models, transaction
+from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.artifacts.models import ArtifactLink
 from apps.audit import services as audit
-from apps.audit.models import AuditAction
+from apps.audit.api import ApprovalSerializer
+from apps.audit.models import Approval, AuditAction
 from apps.common.permissions import IsProjectMember
 from apps.common.queries import visible_projects
+from apps.exposure.review import MINIMUM_RATIONALE
 from apps.modelregistry.models import PublicationState
 from apps.projects.models import Project
 from cass_core.runs import RunState, describe
 
+from . import services
 from .models import AnalysisRun, ConversionRun, HazardRun, Run, RunKind, RunStageEvent
 
 
@@ -47,7 +51,7 @@ class RunSerializer(serializers.ModelSerializer):
             "progress", "pipeline", "execution_profile", "correlation_id",
             "queued_at", "started_at", "finished_at", "duration_seconds",
             "peak_memory_mb", "failure_stage", "failure_summary", "failure_detail",
-            "gate_summary", "gate_detail",
+            "gate_summary", "gate_detail", "manifest",
             "settings_hash", "retry_of", "may_retry", "may_publish_results",
             "is_active", "created_at",
         ]
@@ -263,6 +267,24 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
         )
 
 
+def _gate_refusal(run, user) -> Response | None:
+    """Why a gate action on this run is refused, or ``None`` where it may go ahead."""
+    if run.project and not run.project.may_write(user):
+        return Response(
+            {"detail": "You may not act on runs in this project."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if run.run_state is not RunState.BLOCKED:
+        return Response(
+            {
+                "detail": f"A run in state {run.state} is not held at a gate.",
+                "hint": "Only a blocked run needs an exception or a resume.",
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
 class RunViewSet(viewsets.ReadOnlyModelViewSet):
     """Runs are created through their kind-specific endpoints, then monitored here."""
 
@@ -470,6 +492,131 @@ class AnalysisRunViewSet(viewsets.ModelViewSet):
             },
             request=self.request,
         )
+
+    @extend_schema(
+        request=inline_serializer(
+            "RunExceptionRequest", {"rationale": serializers.CharField()}
+        ),
+        responses={200: ApprovalSerializer, 201: ApprovalSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="request-exception")
+    def request_exception(self, request, pk=None, version=None):
+        """Ask a reviewer to let a run held at a gate go on.
+
+        The person whose run is held asks, with a reason; a reviewer who did not
+        ask decides. That is the independence rule every gate keeps, applied to
+        the gates a run itself reaches. The approvals endpoint could not serve
+        it: requesting there is a modeller's act, and the person whose analysis
+        is waiting is usually an analyst.
+
+        The request is tagged with the stage it was asked at. A run can reach
+        more than one gate, and clearing unmapped value at the keys gate says
+        nothing about a loss curve that falls with return period. Asking twice
+        returns the request that already stands rather than making a second.
+        """
+        analysis = self.get_object()
+        run = analysis.run
+        refusal = _gate_refusal(run, request.user)
+        if refusal is not None:
+            return refusal
+
+        rationale = str(request.data.get("rationale") or "").strip()
+        if len(rationale) < MINIMUM_RATIONALE:
+            return Response(
+                {
+                    "detail": (
+                        "Say why the run should go on, in at least "
+                        f"{MINIMUM_RATIONALE} characters. A reviewer decides on the "
+                        "reason, and an auditor reads it afterwards."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        existing = services.stage_approval(analysis, run.stage)
+        if existing is not None and (existing.is_open or existing.is_cleared):
+            return Response(ApprovalSerializer(existing).data, status=status.HTTP_200_OK)
+
+        approval = Approval.objects.create(
+            gate=Approval.Gate.RUN_EXCEPTION,
+            subject_type="analysis_run",
+            subject_id=analysis.id,
+            requested_by=request.user,
+            rationale=rationale,
+            evidence={
+                "stage": run.stage,
+                "run": str(run.id),
+                "gate_summary": run.gate_summary,
+                "gate_detail": run.gate_detail,
+                # Kept apart from ``rationale``, which a decision overwrites with
+                # the reviewer's reason, so both halves of the exchange survive.
+                "requested_because": rationale,
+            },
+        )
+        audit.record(
+            action=AuditAction.CREATE,
+            subject_type="approval",
+            subject_id=approval.id,
+            actor=request.user,
+            project=run.project,
+            subject_label=str(approval),
+            after={"gate": approval.gate, "stage": run.stage, "run": str(run.id)},
+            request=request,
+        )
+        return Response(ApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(request=None, responses={202: AnalysisRunSerializer})
+    @action(detail=True, methods=["post"])
+    def resume(self, request, pk=None, version=None):
+        """Put a run whose gate has been cleared back in the queue.
+
+        Resumed from the gate rather than restarted. Everything before it stands
+        and its evidence is on the run; redoing it would republish the portfolio
+        and leave an orphan on the engine.
+        """
+        analysis = self.get_object()
+        run = analysis.run
+        refusal = _gate_refusal(run, request.user)
+        if refusal is not None:
+            return refusal
+
+        approval = services.stage_approval(analysis, run.stage)
+        if (
+            run.stage == "reconcile_keys"
+            and analysis.exception_approval is not None
+            and analysis.exception_approval.is_cleared
+        ):
+            approval = analysis.exception_approval
+        if approval is None or not approval.is_cleared:
+            return Response(
+                {
+                    "detail": f"The gate at {run.stage_label() or run.stage} has not been cleared.",
+                    "hint": "Ask for an exception, and have a reviewer who did not ask approve it.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # The keys gate reads its approval from the analysis itself, which is
+        # the one definition the API and the service share.
+        if run.stage == "reconcile_keys" and analysis.exception_approval_id != approval.id:
+            analysis.exception_approval = approval
+            analysis.save(update_fields=["exception_approval", "updated_at"])
+
+        from .tasks import execute_analysis
+
+        audit.record(
+            action=AuditAction.SUBMIT,
+            subject_type="analysis_run",
+            subject_id=run.id,
+            actor=request.user,
+            project=run.project,
+            subject_label=str(run),
+            after={"resumed_from": run.stage, "approval": str(approval.id)},
+            request=request,
+        )
+        execute_analysis.delay(str(analysis.id))
+        analysis = self.get_queryset().get(pk=analysis.pk)
+        return Response(self.get_serializer(analysis).data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None, version=None):
