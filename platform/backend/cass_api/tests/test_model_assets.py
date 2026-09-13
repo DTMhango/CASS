@@ -16,10 +16,15 @@ import pytest
 from apps.artifacts.models import Artifact, ArtifactLink
 from apps.modelregistry.assets import (
     GRID_CELLS_ROLE,
+    VULNERABILITY_FUNCTIONS_ROLE,
     VULNERABILITY_MAPPING_ROLE,
+    VULNERABILITY_VARIANT_ROLE_PREFIX,
     ModelAssetError,
+    asset_bytes,
     attach_grid_cells,
+    attach_vulnerability_functions,
     attach_vulnerability_mapping,
+    attach_vulnerability_variant,
     load_grid,
     load_vulnerability,
 )
@@ -237,6 +242,32 @@ def test_a_vulnerability_set_with_no_registered_mapping_says_what_to_do(vulnerab
 
 
 # -- lineage -----------------------------------------------------------------
+
+def test_each_assumption_set_table_is_stored_beside_the_baseline_table(vulnerability, modeller):
+    """ADR 14: one function table per assumption set, under a key the store accepts.
+
+    Registering the GEM set on the live stack once failed here, because the
+    role became part of the object key and carried a character keys refuse.
+    """
+    tables = {"baseline": b"baseline weights\n", "more_vulnerable": b"tilted weights\n"}
+    attach_vulnerability_functions(vulnerability, b"the release table\n", actor=modeller)
+    for key, payload in tables.items():
+        attach_vulnerability_variant(vulnerability, key, payload, actor=modeller)
+
+    for key, payload in tables.items():
+        role = VULNERABILITY_VARIANT_ROLE_PREFIX + key
+        assert asset_bytes(vulnerability, "vulnerability_set", role, key) == payload
+    assert (
+        asset_bytes(vulnerability, "vulnerability_set", VULNERABILITY_FUNCTIONS_ROLE, "release")
+        == b"the release table\n"
+    )
+
+
+@pytest.mark.parametrize("key", ["", "More_vulnerable", "more vulnerable", "2nd", "more:vulnerable"])
+def test_an_assumption_set_name_the_engine_cannot_select_is_refused(vulnerability, modeller, key):
+    with pytest.raises(ModelAssetError, match="cannot name an assumption set"):
+        attach_vulnerability_variant(vulnerability, key, b"x\n", actor=modeller)
+
 
 def test_each_asset_is_linked_to_its_registry_record(grid, vulnerability, modeller):
     attach_grid_cells(grid, CELLS, actor=modeller)

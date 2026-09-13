@@ -31,6 +31,7 @@ from decimal import Decimal, InvalidOperation
 
 from apps.artifacts.models import Artifact, ArtifactLink, ArtifactState
 from apps.common.storage import bucket, get_store
+from cass_converter.oasis_package import variant_key_is_usable
 from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_core.policy import IMTRepresentation
 from cass_keys import assets as keys_assets
@@ -61,7 +62,7 @@ VULNERABILITY_FUNCTIONS_ROLE = "vulnerability_functions"
 #: One table of functions per assumption set, under the same identifiers as the
 #: baseline table above. The role names the set, so a package can find the table
 #: each set's engine file is built from (ADR 14).
-VULNERABILITY_VARIANT_ROLE_PREFIX = "vulnerability_functions:"
+VULNERABILITY_VARIANT_ROLE_PREFIX = "vulnerability_functions_"
 
 #: The damage-bin dictionary the functions were discretised against. A loss
 #: computed against one set of bins is not comparable with a loss computed
@@ -379,8 +380,15 @@ def attach_vulnerability_variant(
 ):
     """Register one assumption set's table of functions for a vulnerability set.
 
-    Checksummed and not parsed, for the same reason as the baseline table.
+    Checksummed and not parsed, for the same reason as the baseline table. The
+    name becomes the engine's file suffix and part of the stored key, so a name
+    the engine could not select is refused here rather than at package build.
     """
+    if not variant_key_is_usable(key):
+        raise ModelAssetError(
+            f"{key!r} cannot name an assumption set's functions: use lower-case letters, "
+            "digits and underscores, starting with a letter."
+        )
     return _attach(
         vulnerability_set,
         "vulnerability_set",
