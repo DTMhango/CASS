@@ -179,6 +179,14 @@ covers ([ADR 12](docs/adr/0012-national-classical-model-run-event-based.md)).
 The run goes through the OpenQuake REST API and registers a hazard set with one
 footprint per intensity measure.
 
+**Hazard is read from the engine's own record.** A conversion reads ground motion either from OpenQuake's CSV exports or from the HDF5 datastore the
+calculation already wrote. The datastore is read a slice at a time under a
+stated row budget: its rows arrive in neither event nor site order, and the
+footprint accumulator needs one complete event at a time, so events are
+counted once and then read in batches that fit. Memory follows the budget
+rather than the size of the calculation, which is what makes a national run
+possible without writing a second copy of the ground motion as text.
+
 **CASS builds the Oasis model package.** A model version with a hazard set
 attached becomes the directory the Oasis worker loads. CASS writes the binaries,
 held byte-for-byte against PiWind's, and vendors its lookup inside, so the
@@ -260,10 +268,10 @@ goes milestone by milestone and stage by stage, and separates what is buildable
 from what waits on a decision or an outside input. In short:
 
 - **Scientific gates.** The hazard benchmark and conversion QA stand open with no
-  approved references, and the converter reads OpenQuake's CSV exports rather
-  than the HDF5 datastore.
-- **Analyst product.** Maps, EP charts, event loss tables, geographic summaries,
-  the financial structure workspace and the OED standards registry.
+  approved references.
+- **Analyst product.** Maps, geographic summaries and scenario ranges. A result
+  carries its exceedance curve and the events behind it; what it does not carry
+  is loss below the portfolio level, which is an engine settings change.
 - **Production readiness.** Backup and restore, observability, single sign-on
   and MFA, upload scanning, retention expiry and signed releases.
 

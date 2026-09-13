@@ -349,3 +349,48 @@ def test_the_real_oed_4_and_5_specifications_register_and_compare(ods_data_path,
     coverage = registry.coverage(services.specification_of(four))
     assert coverage["location"]["fields_defined"] > 100
     assert coverage["location"]["fields_not_in_the_standard"] == []
+
+
+# -- the command that registers one ------------------------------------------
+
+def test_the_registration_command_runs_and_adopts(tmp_path, modeller):
+    """A command that cannot be invoked registers nothing.
+
+    Its option is ``--release`` rather than ``--version`` because Django's own
+    base command defines the latter, and the clash is an error at parse time --
+    which is exactly the kind of thing that stays hidden when the service
+    underneath is tested and the command is not.
+    """
+    from django.core.management import call_command
+
+    (tmp_path / f"OpenExposureData_{OED_SCHEMA_VERSION}Spec.json").write_bytes(
+        specification()
+    )
+
+    call_command(
+        "register_data_standard",
+        "--root",
+        str(tmp_path),
+        "--release",
+        OED_SCHEMA_VERSION,
+        "--source",
+        "ODS Tools 5.0.8",
+        "--adopt",
+        OED_SCHEMA_VERSION,
+        "--actor",
+        modeller.username,
+    )
+
+    record = DataStandardVersion.objects.get(version=OED_SCHEMA_VERSION)
+    assert record.state == StandardState.ACTIVE
+    assert record.adopted_by == modeller
+
+
+def test_the_command_refuses_a_release_the_directory_does_not_hold(tmp_path):
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+
+    with pytest.raises(CommandError, match="is not a file"):
+        call_command(
+            "register_data_standard", "--root", str(tmp_path), "--release", "9.9.9"
+        )

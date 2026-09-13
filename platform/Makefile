@@ -36,7 +36,7 @@ setup-backend: ## Create the backend virtualenv and install every package
 		-e $(BACKEND)/packages/cass_oed \
 		-e $(BACKEND)/packages/cass_extract \
 		-e $(BACKEND)/services/keys \
-		-e $(BACKEND)/services/converter
+		-e "$(BACKEND)/services/converter[hdf5]"
 
 .PHONY: setup-frontend
 setup-frontend: ## Install frontend dependencies from the lockfile

@@ -32,8 +32,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # packages inline, so both are needed here even though each also has its own
 # image.
 #
-# The converter is installed without its hdf5 extra. Nothing in it imports h5py
-# yet, and the extra pulls numpy into an image that has no use for it.
+# The converter is installed with its hdf5 extra, because the worker reads
+# OpenQuake datastores directly (section 7) and that needs h5py and numpy. The
+# API and the worker share this image, so both carry it.
 COPY backend/packages ./packages
 COPY backend/services ./services
 RUN pip install --no-cache-dir \
@@ -41,7 +42,7 @@ RUN pip install --no-cache-dir \
     ./packages/cass_oed \
     ./packages/cass_extract \
     ./services/keys \
-    ./services/converter
+    "./services/converter[hdf5]"
 
 COPY backend/cass_api ./cass_api
 COPY backend/adapters ./adapters

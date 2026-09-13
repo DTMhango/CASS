@@ -32,6 +32,7 @@ import pathlib
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from . import datastore
 from .bins import IntensityBinSet
 from .footprint import (
     ConversionMetrics,
@@ -266,6 +267,136 @@ def build_hazard(
         coverage=coverage,
         job=job,
     )
+
+
+def build_hazard_from_datastore(
+    path: str | pathlib.Path,
+    *,
+    country_code: str,
+    intensity_bins: Mapping[str, IntensityBinSet],
+    label: str = "",
+    area_perils: Mapping[str, int] | None = None,
+    job: HazardJob | None = None,
+    imts: Sequence[str] | None = None,
+    drop_below: float = 0.0,
+    row_budget: int = datastore.DEFAULT_ROW_BUDGET,
+) -> HazardSet:
+    """Build the same tables from the engine's datastore rather than its exports.
+
+    Section 7 asks for this: the datastore is the calculation's own record, so
+    reading it skips the export step entirely -- no second copy of a national
+    ground-motion field written as text before CASS reads any of it -- and it is
+    read a slice at a time under a stated row budget.
+
+    What comes out is the same ``HazardSet`` the export path produces, checked
+    the same way. The two readers disagreeing about one calculation would be
+    worth knowing about, and building both from one source is what makes that
+    comparison possible.
+    """
+    location = pathlib.Path(path)
+    try:
+        facts = datastore.metadata(location)
+        table = datastore.events(location)
+        keys = datastore.site_keys(location)
+    except datastore.DatastoreError as exc:
+        raise HazardBuildError(str(exc)) from exc
+
+    metadata = CalculationMetadata(
+        engine_version="",
+        checksum="",
+        investigation_time=facts.investigation_time,
+        ses_per_logic_tree_path=facts.ses_per_logic_tree_path,
+        realization_count=1,
+    )
+    require_single_realization(metadata)
+
+    frequency = check_frequency(
+        source_event_count=facts.event_count,
+        source_investigation_time=metadata.effective_time,
+        occurrences=table,
+        period_count=metadata.period_count,
+    )
+    frequency.require_preserved()
+
+    if area_perils is None:
+        if job is not None:
+            area_perils = job.area_perils
+        else:
+            # The calculation names its own sites, and a job CASS built carries
+            # the area peril as the custom site id. Taken at face value where
+            # they are numeric, refused where they are not.
+            area_perils = _identity_site_keys(keys)
+
+    wanted = tuple(imts) if imts is not None else facts.imts
+    unbinned = sorted(set(wanted) - set(intensity_bins))
+    if unbinned:
+        raise HazardBuildError(
+            f"No intensity-bin dictionary was supplied for {', '.join(unbinned)}. "
+            "A measure with no bins cannot be binned, and leaving it out would "
+            "produce a footprint that silently answers fewer vulnerability "
+            "functions than the set contains."
+        )
+
+    accumulator = FootprintAccumulator(intensity_bins, drop_below=drop_below)
+    rows: list[FootprintRow] = []
+    try:
+        for sample in datastore.read_ground_motion(
+            location, area_perils=area_perils, imts=wanted, row_budget=row_budget
+        ):
+            rows.extend(accumulator.add(sample))
+    except datastore.DatastoreError as exc:
+        raise HazardBuildError(str(exc)) from exc
+    rows.extend(accumulator.close())
+
+    problems = list(validate_footprint(rows))
+    coverage = check_event_coverage(rows, [row.event_id for row in table])
+    problems.extend(coverage["problems"])
+    if accumulator.metrics.clips_the_hazard:
+        problems.append(
+            f"{accumulator.metrics.samples_above_range} ground-motion values "
+            f"({accumulator.metrics.above_range_share:.2%}) are above the top "
+            "intensity bin and were discarded. These are the strongest values in "
+            "the calculation, so every loss at those cells is understated. Widen "
+            "the intensity dictionary and convert again."
+        )
+
+    events = tuple(
+        Event(
+            event_id=row.event_id,
+            rupture_id=0,
+            realization_id=0,
+            year=row.period_no,
+            ses_id=0,
+        )
+        for row in table
+    )
+    return HazardSet(
+        country_code=country_code.upper(),
+        label=label or f"{country_code.upper()} event-based hazard",
+        metadata=metadata,
+        events=events,
+        occurrences=table,
+        footprint=tuple(rows),
+        intensity_bins=dict(intensity_bins),
+        metrics=accumulator.metrics,
+        problems=tuple(problems),
+        coverage=coverage,
+        job=job,
+    )
+
+
+def _identity_site_keys(keys: Mapping[int, str]) -> dict[str, int]:
+    """Site keys that are already area perils, taken at face value."""
+    found: dict[str, int] = {}
+    for key in keys.values():
+        if not key.isdigit():
+            raise HazardBuildError(
+                f"The calculation identifies its sites by keys that are not area "
+                f"perils ({key!r}). Supply the mapping from site key to grid cell, "
+                "or run the calculation with the cell as the custom site id."
+            )
+        found[key] = int(key)
+    return found
 
 
 def _identity_area_perils(gmf: pathlib.Path) -> dict[str, int]:

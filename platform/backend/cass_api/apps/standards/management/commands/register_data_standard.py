@@ -23,20 +23,24 @@ class Command(BaseCommand):
             required=True,
             help="The ODS Tools data directory holding OpenExposureData_*Spec.json.",
         )
+        # Not --version: Django's own base command already defines that, and a
+        # command that cannot be invoked is not a registered standard.
         parser.add_argument(
-            "--version",
+            "--release",
             dest="versions",
             action="append",
             required=True,
-            help="OED version to register. Repeatable.",
+            help="OED release to register, such as 4.0.0. Repeatable.",
         )
         parser.add_argument(
             "--source",
             default="",
             help="The release these came from, such as 'ODS Tools 5.0.8'.",
         )
-        parser.add_argument("--adopt", help="Version to make active after registering.")
-        parser.add_argument("--actor", help="Email of the user to record.")
+        parser.add_argument("--adopt", help="Release to make active after registering.")
+        parser.add_argument(
+            "--actor", help="Email or username of the user to record as registering this."
+        )
 
     def handle(self, *args, **options):
         root = pathlib.Path(options["root"])
@@ -45,9 +49,13 @@ class Command(BaseCommand):
 
         actor = None
         if options.get("actor"):
-            actor = User.objects.filter(email=options["actor"]).first()
+            stated = options["actor"]
+            actor = (
+                User.objects.filter(email=stated).first()
+                or User.objects.filter(username=stated).first()
+            )
             if actor is None:
-                raise CommandError(f"No user with email {options['actor']}.")
+                raise CommandError(f"No user with email or username {stated}.")
 
         source = options["source"] or f"ODS Tools data at {root}"
         registered = {}

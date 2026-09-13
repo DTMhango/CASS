@@ -10,9 +10,10 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,732 backend tests pass, 1 skipped. 98 integration tests pass against the
-  real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook and
-  the pinned ODS Tools specifications. 104 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+- 1,749 backend tests pass, 1 skipped. 99 integration tests pass against the
+  real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
+  pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
+  104 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -35,6 +36,12 @@ updated afterwards is a tracker somebody has to reconcile.
   events over 962 cells, all four intensity measures.
 - The official PiWind portfolio runs end to end through CASS in the live
   integration suite.
+- The datastore reader was run against the 168 MB datastore of the PuSGeN 2024
+  calculation on the live stack: 6,584,748 rows over 27,313 events and 962
+  cells, streamed with every event whole and in order, at a peak of 35 MB of
+  Python memory under a one-million-row budget.
+- OED 4.0.0 and 5.0.0 are registered on the live stack from ODS Tools 5.0.8,
+  with 4.0.0 active: 565 fields against 574.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
   optional location field (the nine photovoltaic attributes). Nothing is
@@ -49,7 +56,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | M1 Foundation | Met | Sign in, projects, OED attach, validation, preview, publication, background runs | — |
 | M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells | Benchmark gate; full-country run; realisation weighting; Nepal source model |
-| M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval | Reading the HDF5 datastore instead of CSV exports; QA gate; OpenQuake reference comparison |
+| M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices | QA gate; OpenQuake reference comparison |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
 | M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table and the financial structure workspace | Maps, geographic summaries, scenario ranges |
 | M7 Production | Not met | CI builds and scans the CASS images | Backup and restore drill, and the rest of sections 10 and 11 |
@@ -99,7 +106,7 @@ decision number.
 
 | Stage | Status |
 | --- | --- |
-| `manifest`, `events`, `occurrence`, `footprint`, `vulnerability`, `package` | Done, from a registered hazard set |
+| `manifest`, `events`, `occurrence`, `footprint`, `vulnerability`, `package` | Done, from a registered hazard set. Ground motion is read either from the engine's CSV exports or, for a national run, from its HDF5 datastore a slice at a time under a stated row budget |
 | `qa` | Gate stands open: no approved acceptance tolerances, and no report machinery |
 
 ## Screens (plan section 3)
@@ -150,7 +157,7 @@ decision number.
 | 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Partly done: event loss table and EP curve chart built. Geographic summaries, the map and scenario ranges need loss at a summary level below the portfolio, which is an engine settings change |
 | 5 | Financial structure workspace | §3, M5 | Partly done: accounts and layers, contracts, inuring order, scope preview and reconciliation are read from the published portfolio and checked. Building a structure on the platform, rather than importing one, is not built |
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Done |
-| 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Not started |
+| 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Done |
 | 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Not started |
 | 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Not started |
 | 10 | Cohort B geocoding sensitivity | WP3 | Not started |
