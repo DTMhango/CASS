@@ -1030,7 +1030,7 @@ This section is a summary at 13 September 2026. The working tracker, which moves
 | M2 Engine integration | Met, including the pre-loss smoke check | — |
 | M3 Hazard | Partly met: PuSGeN 2024 run on the Jakarta–Bandung region with published Vs30 | Benchmark gate, full-country run, realisation weighting, Nepal source model |
 | M4 Conversion | Partly met: four-measure footprints, frequency preserved, package built under approval | HDF5 datastore reading, QA gate, OpenQuake reference comparison |
-| M5 Loss | Partly met: ground-up, insured and reinsurance run with keys reconciliation, and an assumption set applied within a run and compared live against the baseline | Currency evidence, financial structure workspace |
+| M5 Loss | Partly met: ground-up, insured and reinsurance run with keys reconciliation, an assumption set applied within a run and compared live against the baseline, and currency conversion under an approved rate | Financial structure workspace |
 | M6 Product | Partly met: result approval, export and comparison | Maps, EP charts, event loss tables, geographic summaries, financial structure workspace |
 | M7 Production | Not met | Backup and restore drill, and the security and operations controls of sections 10 and 11 |
 
@@ -1049,6 +1049,6 @@ This section is a summary at 13 September 2026. The working tracker, which moves
 
 ### What remains
 
-Buildable in code: currency evidence; event loss tables, geographic summaries, EP charts and maps; the financial structure workspace; the OED standards registry; HDF5 datastore reading; benchmark and QA gate machinery; the OpenQuake reference comparison; Cohort B sensitivity; completed direct uploads with scanning; enforced execution profiles; keys and converter services; retention expiry; administration of users, queues, storage and retention with a support bundle; observability; MFA and single sign-on; backup and restore; CI coverage of the patched worker with SBOMs; pinned digests and a release bundle.
+Buildable in code: event loss tables, geographic summaries, EP charts and maps; the financial structure workspace; the OED standards registry; HDF5 datastore reading; benchmark and QA gate machinery; the OpenQuake reference comparison; Cohort B sensitivity; completed direct uploads with scanning; enforced execution profiles; keys and converter services; retention expiry; administration of users, queues, storage and retention with a support bundle; observability; MFA and single sign-on; backup and restore; CI coverage of the patched worker with SBOMs; pinned digests and a release bundle.
 
 Needing a decision or outside input: the event representation study; a representation for multi-measure classes; realisation weighting; the storage format; secondary-peril and business-interruption scope; GEM's written position on internal use and legal review; a Nepal source model, denser Vs30 and the licensed ~1 km exposure; approved benchmark curves and QA tolerances; the brief's section 5.1 data questions; a full-country hazard run; and production choices for identity, broker and recovery targets.

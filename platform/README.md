@@ -194,6 +194,15 @@ compared, with the arithmetic done on the server in `Decimal`. The invented
 Jakarta–Bandung book in `samples/` runs ground-up, insured and reinsurance to
 results against the live stack.
 
+**A book in another currency is converted with evidence, not assumed.** The
+Oasis Financial Module cannot calculate multi-currency terms, so a portfolio
+whose currency is not the run's is normalised by CASS before generation — at a
+rate somebody recorded with its source, valuation date and direction, and
+somebody else approved. An unapproved rate is refused as firmly as a missing
+one. The published exposure keeps the values the business reported; the
+converted files the engine received are stored beside the run, and the rate
+travels with the result.
+
 **A run states what it is for before it runs.** The four modes of the brief's
 section 5.2 are a choice in the analysis builder: geometry only, which maps the
 book through CASS keys and stops without touching the engine; KRE-share

@@ -87,7 +87,7 @@ from apps.audit.models import Approval, AuditAction
 from apps.common.engines import oasis_adapter, oasis_model_triple
 from apps.common.storage import bucket, get_store
 from apps.exposure import services as exposure_services
-from apps.exposure.models import EnrichmentRun
+from apps.exposure.models import CurrencyRate, EnrichmentRun
 from apps.modelregistry.assets import ModelAssetError, load_grid, load_vulnerability
 from apps.modelregistry.models import PublicationState
 from cass_adapters.base import AdapterError, EngineState
@@ -105,6 +105,7 @@ from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_core.runs import RunState
 from cass_keys.lookup import lookup as keys_lookup
 from cass_oed import ord as ord_results
+from cass_oed.currency import ConversionRate, CurrencyError, convert_portfolio
 from cass_oed.perspectives import Perspective, available_perspectives
 from cass_oed.validation import validate as validate_portfolio
 
@@ -404,9 +405,15 @@ def _validate_exposure(analysis_run, actor) -> dict:
             "convert between currencies, so values must be normalised into one before a run."
         )
     elif currencies and run_currency and currencies[0] != run_currency:
-        problems.append(
-            f"The files are in {currencies[0]} but the run is set to {run_currency}."
-        )
+        # A book stated in another currency is not a defect: section 8 has CASS
+        # convert it before generation, because the Oasis financial module
+        # cannot. What would be a defect is converting it at no stated rate, so
+        # the evidence is required here -- before the engine is touched --
+        # rather than discovered when the portfolio is published to it.
+        try:
+            conversion_rate_for(analysis_run)
+        except AnalysisExecutionError as exc:
+            problems.append(str(exc))
 
     availability = {str(item.perspective): item for item in available_perspectives(files)}
     for perspective in analysis_run.perspectives or []:
@@ -687,12 +694,107 @@ def _enrich(analysis_run, actor) -> dict:
     }
 
 
+def source_currency(analysis_run: AnalysisRun) -> str:
+    """The currency the published book is stated in."""
+    version = analysis_run.exposure_version
+    stated = [code for code in (version.tiv_by_currency or {}) if code and code != "unknown"]
+    if len(stated) == 1:
+        return stated[0].upper()
+    return (version.run_currency or "").upper()
+
+
+def conversion_rate_for(analysis_run: AnalysisRun) -> ConversionRate | None:
+    """The governed rate this run needs, or ``None`` where it needs none.
+
+    Section 8 requires the evidence before generation and section 15 explains
+    why: the Oasis Financial Module cannot calculate multi-currency terms, so a
+    book that is not already in the run currency is converted here or not run.
+    An unapproved rate is not evidence, so it is refused in the same way a
+    missing one is -- with the difference said plainly, because the fix differs.
+    """
+    source = source_currency(analysis_run)
+    target = (analysis_run.run_currency or source).upper()
+    if not source or not target or source == target:
+        return None
+
+    version = analysis_run.exposure_version
+    candidates = CurrencyRate.objects.filter(
+        from_currency=source, to_currency=target
+    ).order_by("-valuation_date")
+    # A rate is evidence at a date. One quoted after the valuation date of the
+    # book describes a different day's money, so it is not used unless nothing
+    # earlier exists to use instead.
+    if version.valuation_date:
+        dated = candidates.filter(valuation_date__lte=version.valuation_date)
+        candidates = dated if dated.exists() else candidates
+
+    approved = candidates.filter(approved_at__isnull=False).first()
+    if approved is None:
+        unapproved = candidates.first()
+        if unapproved is not None:
+            raise AnalysisExecutionError(
+                f"The {source} to {target} rate of {unapproved.valuation_date.isoformat()} "
+                f"({unapproved.source}) has not been approved, so it is not evidence. "
+                "Have it approved before running, or the numbers rest on a rate "
+                "nobody stood behind."
+            )
+        raise AnalysisExecutionError(
+            f"{version.name} v{version.version} is stated in {source} and this run is "
+            f"in {target}, and no approved {source} to {target} rate is recorded. "
+            "The Oasis Financial Module does not calculate multi-currency terms, so "
+            "the conversion happens in CASS and needs a rate with its source and "
+            "valuation date."
+        )
+
+    return ConversionRate(
+        from_currency=approved.from_currency,
+        to_currency=approved.to_currency,
+        rate=approved.rate,
+        valuation_date=approved.valuation_date,
+        source=approved.source,
+        reference=approved.reference or f"currency_rate:{approved.id}",
+    )
+
+
 # -- the stages -------------------------------------------------------------
 
 def _publish_oed(analysis_run, engine, actor) -> dict:
-    """Create the Oasis portfolio and upload the OED."""
+    """Create the Oasis portfolio and upload the OED.
+
+    Where the book is not already in the run currency it is converted first,
+    and what reaches the engine is the converted copy. The published exposure
+    is untouched: section 8 forbids a transformation silently replacing a
+    reported field, so the reported value and the converted one both stand,
+    with the rate between them recorded on the run.
+    """
     run = analysis_run.run
     payloads = oed_payloads(analysis_run)
+    rate = conversion_rate_for(analysis_run)
+    conversion: dict = {}
+
+    if rate is not None:
+        try:
+            converted, conversion = convert_portfolio(
+                {
+                    role: (exposure_services.KIND_BY_ROLE[role], payload)
+                    for role, _, payload in payloads
+                },
+                rate,
+            )
+        except CurrencyError as exc:
+            raise AnalysisExecutionError(str(exc)) from exc
+
+        payloads = [
+            (role, filename, converted[role]) for role, filename, _ in payloads
+        ]
+        # Stored as well as sent: what the engine was given has to be
+        # retrievable, not merely described.
+        conversion["artifacts"] = {
+            role: _store_keys_file(run, f"{role}_converted", payload, actor)
+            for role, _, payload in payloads
+        }
+        analysis_run.currency_conversion = conversion
+        analysis_run.save(update_fields=["currency_conversion", "updated_at"])
 
     portfolio_id = engine.create_portfolio(f"cass-{run.id}")
     uploaded = {}
@@ -710,10 +812,15 @@ def _publish_oed(analysis_run, engine, actor) -> dict:
         actor=actor,
         message=(
             f"Published {len(uploaded)} OED files to Oasis portfolio {portfolio_id}."
+            + (f" Converted at {rate.description}." if rate is not None else "")
         ),
         metrics={"oasis_portfolio_id": portfolio_id, "bytes_by_role": uploaded},
     )
-    return {"oasis_portfolio_id": portfolio_id, "files": uploaded}
+    return {
+        "oasis_portfolio_id": portfolio_id,
+        "files": uploaded,
+        "currency_conversion": conversion,
+    }
 
 
 def _generate_inputs(analysis_run, engine, actor, *, poll_interval, timeout) -> dict:
@@ -1435,6 +1542,9 @@ def _exposure_quality(analysis_run) -> dict:
         "not_at_risk_tiv": summary.get("not_at_risk_tiv"),
         "unmapped_tiv": summary.get("failed_tiv"),
         "keys_reconciled": analysis_run.keys_reconciled,
+        # Section 8: the rate a number rests on travels with the number, not
+        # only with the run that produced it.
+        "currency_conversion": analysis_run.currency_conversion or {},
     }
 
 

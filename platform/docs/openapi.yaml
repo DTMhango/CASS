@@ -1416,6 +1416,271 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/currency-rates/:
+    get:
+      operationId: api_v1_currency_rates_list
+      description: |-
+        Governed rates for normalising a portfolio to the run currency.
+
+        Section 8 requires the rate, its valuation date, its source and its
+        direction to be captured before generation; section 15 explains why, since
+        the Oasis Financial Module cannot calculate multi-currency terms. A rate is
+        evidence only once somebody other than its author has approved it, which is
+        the rule section 10 applies to every other gate on the platform.
+      parameters:
+      - in: query
+        name: from_currency
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: to_currency
+        schema:
+          type: string
+      - in: query
+        name: valuation_date
+        schema:
+          type: string
+          format: date
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCurrencyRateList'
+          description: ''
+    post:
+      operationId: api_v1_currency_rates_create
+      description: |-
+        Governed rates for normalising a portfolio to the run currency.
+
+        Section 8 requires the rate, its valuation date, its source and its
+        direction to be captured before generation; section 15 explains why, since
+        the Oasis Financial Module cannot calculate multi-currency terms. A rate is
+        evidence only once somebody other than its author has approved it, which is
+        the rule section 10 applies to every other gate on the platform.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrencyRate'
+          description: ''
+  /api/v1/currency-rates/{id}/:
+    get:
+      operationId: api_v1_currency_rates_retrieve
+      description: |-
+        Governed rates for normalising a portfolio to the run currency.
+
+        Section 8 requires the rate, its valuation date, its source and its
+        direction to be captured before generation; section 15 explains why, since
+        the Oasis Financial Module cannot calculate multi-currency terms. A rate is
+        evidence only once somebody other than its author has approved it, which is
+        the rule section 10 applies to every other gate on the platform.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this currency rate.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrencyRate'
+          description: ''
+    put:
+      operationId: api_v1_currency_rates_update
+      description: |-
+        Governed rates for normalising a portfolio to the run currency.
+
+        Section 8 requires the rate, its valuation date, its source and its
+        direction to be captured before generation; section 15 explains why, since
+        the Oasis Financial Module cannot calculate multi-currency terms. A rate is
+        evidence only once somebody other than its author has approved it, which is
+        the rule section 10 applies to every other gate on the platform.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this currency rate.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrencyRate'
+          description: ''
+    patch:
+      operationId: api_v1_currency_rates_partial_update
+      description: |-
+        Governed rates for normalising a portfolio to the run currency.
+
+        Section 8 requires the rate, its valuation date, its source and its
+        direction to be captured before generation; section 15 explains why, since
+        the Oasis Financial Module cannot calculate multi-currency terms. A rate is
+        evidence only once somebody other than its author has approved it, which is
+        the rule section 10 applies to every other gate on the platform.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this currency rate.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCurrencyRateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCurrencyRateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCurrencyRateRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrencyRate'
+          description: ''
+    delete:
+      operationId: api_v1_currency_rates_destroy
+      description: |-
+        Governed rates for normalising a portfolio to the run currency.
+
+        Section 8 requires the rate, its valuation date, its source and its
+        direction to be captured before generation; section 15 explains why, since
+        the Oasis Financial Module cannot calculate multi-currency terms. A rate is
+        evidence only once somebody other than its author has approved it, which is
+        the rule section 10 applies to every other gate on the platform.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this currency rate.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/currency-rates/{id}/approve/:
+    post:
+      operationId: api_v1_currency_rates_approve_create
+      description: Stand behind a rate, so a run may rest its numbers on it.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this currency rate.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CurrencyRateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrencyRate'
+          description: ''
   /api/v1/engines/:
     get:
       operationId: api_v1_engines_retrieve
@@ -5494,6 +5759,111 @@ components:
           nullable: true
       required:
       - run
+    CurrencyRate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        from_currency:
+          type: string
+          maxLength: 3
+        to_currency:
+          type: string
+          maxLength: 3
+        rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,14}(?:\.\d{0,10})?$
+          description: Units of the target currency that one unit of the source currency
+            buys.
+        valuation_date:
+          type: string
+          format: date
+          description: The date the quote is as at. A rate is evidence at a date,
+            not a constant.
+        source:
+          type: string
+          description: The published quote this came from, such as a central bank's
+            daily rate.
+          maxLength: 200
+        reference:
+          type: string
+          description: 'Where a reviewer can check it: a URL, a document or an approval.'
+          maxLength: 300
+        notes:
+          type: string
+        is_approved:
+          type: boolean
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        is_frozen:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approved_at
+      - created_at
+      - description
+      - from_currency
+      - id
+      - is_approved
+      - is_frozen
+      - rate
+      - source
+      - to_currency
+      - valuation_date
+    CurrencyRateRequest:
+      type: object
+      properties:
+        from_currency:
+          type: string
+          minLength: 1
+          maxLength: 3
+        to_currency:
+          type: string
+          minLength: 1
+          maxLength: 3
+        rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,14}(?:\.\d{0,10})?$
+          description: Units of the target currency that one unit of the source currency
+            buys.
+        valuation_date:
+          type: string
+          format: date
+          description: The date the quote is as at. A rate is evidence at a date,
+            not a constant.
+        source:
+          type: string
+          minLength: 1
+          description: The published quote this came from, such as a central bank's
+            daily rate.
+          maxLength: 200
+        reference:
+          type: string
+          description: 'Where a reviewer can check it: a URL, a document or an approval.'
+          maxLength: 300
+        notes:
+          type: string
+      required:
+      - from_currency
+      - rate
+      - source
+      - to_currency
+      - valuation_date
     DecisionEnum:
       enum:
       - requested
@@ -6609,6 +6979,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ConversionRun'
+    PaginatedCurrencyRateList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrencyRate'
     PaginatedEnrichmentRunList:
       type: object
       required:
@@ -7128,6 +7521,40 @@ components:
         frequency_preserved:
           type: boolean
           nullable: true
+    PatchedCurrencyRateRequest:
+      type: object
+      properties:
+        from_currency:
+          type: string
+          minLength: 1
+          maxLength: 3
+        to_currency:
+          type: string
+          minLength: 1
+          maxLength: 3
+        rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,14}(?:\.\d{0,10})?$
+          description: Units of the target currency that one unit of the source currency
+            buys.
+        valuation_date:
+          type: string
+          format: date
+          description: The date the quote is as at. A rate is evidence at a date,
+            not a constant.
+        source:
+          type: string
+          minLength: 1
+          description: The published quote this came from, such as a central bank's
+            daily rate.
+          maxLength: 200
+        reference:
+          type: string
+          description: 'Where a reviewer can check it: a URL, a document or an approval.'
+          maxLength: 300
+        notes:
+          type: string
     PatchedExposureVersionRequest:
       type: object
       properties:

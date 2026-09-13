@@ -288,6 +288,25 @@ export interface RunStageEvent {
   created_at: string;
 }
 
+/** What the keys lookup and any currency conversion said about the book. */
+export interface ExposureQuality {
+  location_count?: number;
+  source_tiv?: string;
+  successful_tiv?: string;
+  not_at_risk_tiv?: string;
+  unmapped_tiv?: string;
+  keys_reconciled?: boolean | null;
+  currency_conversion?: {
+    from_currency?: string;
+    to_currency?: string;
+    rate?: string;
+    direction?: string;
+    valuation_date?: string;
+    source?: string;
+    reference?: string;
+  };
+}
+
 export interface ResultCaveats {
   model_version: string;
   assumption_set: string;

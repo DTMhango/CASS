@@ -318,6 +318,29 @@ describe("ResultsWorkspace", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the rate a converted number rests on", async () => {
+    results = [
+      makeResult({
+        id: "aaaaaaaa-0000-0000-0000-000000000009",
+        label: "Q2 in dollars",
+        caveats: {
+          ...BASELINE.caveats,
+          exposure_quality: {
+            currency_conversion: {
+              direction: "1 IDR = 0.0000613 USD",
+              source: "Bank Indonesia middle rate",
+              valuation_date: "2026-06-30",
+            },
+          },
+        },
+      }),
+    ];
+    renderScreen();
+
+    expect(await screen.findByText(/1 IDR = 0.0000613 USD/)).toBeInTheDocument();
+    expect(screen.getByText(/Bank Indonesia middle rate/)).toBeInTheDocument();
+  });
+
   it("warns when the two runs were made for different purposes", async () => {
     comparisons = [
       {

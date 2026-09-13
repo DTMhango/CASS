@@ -31,6 +31,7 @@ import {
 import type {
   ComparedMetric,
   ComparedReturnPeriod,
+  ExposureQuality,
   ResultComparison,
   ResultSet,
   RunMode,
@@ -524,6 +525,10 @@ function CaveatBlock({ result }: { result: ResultSet }) {
   const caveats = result.caveats;
   const exclusions = caveats.material_exclusions ?? [];
   const uncertainty = Object.entries(caveats.uncertainty_attribution ?? {});
+  // Section 8: where the book was converted, the rate belongs beside the
+  // number rather than only in the run that produced it.
+  const conversion = (caveats.exposure_quality as ExposureQuality | undefined)
+    ?.currency_conversion;
 
   return (
     <div className="caveats">
@@ -539,6 +544,12 @@ function CaveatBlock({ result }: { result: ResultSet }) {
         <Caveat term="Valuation date">{formatDate(caveats.valuation_date)}</Caveat>
         <Caveat term="Perspective">{caveats.perspective}</Caveat>
         <Caveat term="Currency">{caveats.currency || "not recorded"}</Caveat>
+        {conversion?.direction ? (
+          <Caveat term="Converted at">
+            <span className="mono">{conversion.direction}</span>, {conversion.source} as at{" "}
+            {formatDate(conversion.valuation_date)}
+          </Caveat>
+        ) : null}
         <Caveat term="Approval">{caveats.approval_status}</Caveat>
       </dl>
 

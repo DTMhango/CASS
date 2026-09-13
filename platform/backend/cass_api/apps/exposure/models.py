@@ -240,6 +240,74 @@ class AttributeOverride(BaseModel):
         return f"{self.location_reference}.{self.attribute} -> {self.new_value}"
 
 
+class CurrencyRate(BaseModel, FreezableModel):
+    """One governed rate for normalising a portfolio to the run currency.
+
+    Section 8 requires rates, valuation date, source and direction to be
+    captured before Oasis generation, and section 15 names multiple currencies
+    reaching the Oasis Financial Module as a material risk: the module cannot
+    calculate multi-currency terms, so the conversion happens in CASS and has
+    to be evidenced here rather than assumed by whoever assembled the book.
+
+    The direction is a field rather than a convention. ``rate`` is how many
+    units of ``to_currency`` one unit of ``from_currency`` buys, and stating it
+    is what stops a published quote being applied upside down.
+
+    A rate is approved by somebody before a run may use it, and frozen once it
+    has been: a run's numbers cannot be explained by a rate that was edited
+    afterwards.
+    """
+
+    from_currency = models.CharField(max_length=3, db_index=True)
+    to_currency = models.CharField(max_length=3, db_index=True)
+    rate = models.DecimalField(
+        max_digits=24,
+        decimal_places=10,
+        help_text="Units of the target currency that one unit of the source currency buys.",
+    )
+    valuation_date = models.DateField(
+        help_text="The date the quote is as at. A rate is evidence at a date, not a constant."
+    )
+    source = models.CharField(
+        max_length=200,
+        help_text="The published quote this came from, such as a central bank's daily rate.",
+    )
+    reference = models.CharField(
+        max_length=300,
+        blank=True,
+        help_text="Where a reviewer can check it: a URL, a document or an approval.",
+    )
+    notes = models.TextField(blank=True)
+
+    approved_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="currency_rates_approved",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["from_currency", "to_currency", "-valuation_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["from_currency", "to_currency", "valuation_date", "source"],
+                name="unique_currency_rate",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["from_currency", "to_currency", "-valuation_date"])
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"1 {self.from_currency} = {self.rate} {self.to_currency} "
+            f"at {self.valuation_date.isoformat()}"
+        )
+
+    @property
+    def is_approved(self) -> bool:
+        return self.approved_by_id is not None and self.approved_at is not None
+
+
 # -- the Klapton Re geocoded policy extract ----------------------------------
 #
 # Staging records for the two-sheet source workbook. Section 5 keeps rows out

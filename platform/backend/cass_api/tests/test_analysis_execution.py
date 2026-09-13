@@ -15,10 +15,12 @@ untested version or an undeliverable cancellation on demand.
 
 from __future__ import annotations
 
+import datetime as dt
 from decimal import Decimal
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 
 from apps.artifacts.models import ArtifactLink
 from apps.audit.models import Approval
@@ -44,6 +46,7 @@ from apps.runs.services import (
     build_analysis_settings,
     cancel,
     execute,
+    oed_payloads,
 )
 from cass_adapters.base import EngineRejected, IncompatibleEngine
 from cass_adapters.oasis import OasisAdapter
@@ -2123,3 +2126,177 @@ def test_a_retry_claims_no_more_than_the_run_it_replaces(
     assert retried.status_code == 201, retried.data
     replacement = AnalysisRun.objects.get(run_id=retried.data["id"])
     assert replacement.mode == RunMode.RESEARCH
+
+
+# -- currency conversion evidence (section 8, section 15 risk) ---------------
+
+@pytest.fixture()
+def usd_run(analysis_run):
+    """The book is in rupiah; this run is asked for in dollars."""
+    analysis_run.run_currency = "USD"
+    analysis_run.save()
+    return analysis_run
+
+
+@pytest.fixture()
+def approved_rate(db, reviewer):
+    from apps.exposure.models import CurrencyRate
+
+    rate = CurrencyRate.objects.create(
+        from_currency="IDR",
+        to_currency="USD",
+        rate=Decimal("0.0000613"),
+        valuation_date=dt.date(2026, 6, 30),
+        source="Bank Indonesia middle rate",
+        reference="https://www.bi.go.id/en/statistik/informasi-kurs/",
+        created_by=reviewer,
+    )
+    rate.approved_by = reviewer
+    rate.approved_at = timezone.now()
+    rate.save()
+    return rate
+
+
+def test_a_run_in_another_currency_without_a_rate_never_reaches_the_engine(
+    usd_run, analyst
+):
+    """The Oasis FM cannot calculate multi-currency terms, so CASS must convert first."""
+    session = oasis_server()
+
+    with pytest.raises(AnalysisExecutionError, match="no approved IDR to USD rate"):
+        run_it(usd_run, session, actor=analyst)
+
+    assert session.calls == []
+    assert Run.objects.get(id=usd_run.run_id).failure_stage == "validate_exposure"
+
+
+def test_an_unapproved_rate_is_refused_as_not_being_evidence(usd_run, analyst, reviewer):
+    from apps.exposure.models import CurrencyRate
+
+    CurrencyRate.objects.create(
+        from_currency="IDR",
+        to_currency="USD",
+        rate=Decimal("0.0000613"),
+        valuation_date=dt.date(2026, 6, 30),
+        source="A rate somebody pasted in",
+        created_by=reviewer,
+    )
+
+    with pytest.raises(AnalysisExecutionError, match="has not been approved"):
+        run_it(usd_run, session=oasis_server(), actor=analyst)
+
+
+def test_the_engine_receives_the_converted_book(usd_run, approved_rate, analyst):
+    session = oasis_server()
+    run_it(usd_run, session, actor=analyst)
+
+    upload = next(
+        call for call in session.calls if call["path"] == "v2/portfolios/11/location_file/"
+    )
+    _, stream, _ = upload["files"]["file"]
+    sent = stream.getvalue().decode("utf-8")
+
+    # 4,500,000 IDR at 0.0000613 is 275.85 USD.
+    assert "275.85" in sent
+    assert "IDR" not in sent
+    assert "USD" in sent
+
+
+def test_the_published_exposure_is_left_exactly_as_it_was_reported(
+    usd_run, approved_rate, analyst
+):
+    """Section 8: no transformation silently replaces a reported field."""
+    run_it(usd_run, oasis_server(), actor=analyst)
+
+    version = usd_run.exposure_version
+    version.refresh_from_db()
+    assert version.run_currency == "IDR"
+    assert version.total_tiv == Decimal("9900000.00")
+    payloads = {role: payload for role, _, payload in oed_payloads(usd_run)}
+    assert b"IDR" in payloads["oed_location"]
+
+
+def test_the_rate_that_was_applied_is_recorded_on_the_run(
+    usd_run, approved_rate, analyst
+):
+    manifest = run_oasis(usd_run, oasis_server(), analyst)
+
+    evidence = manifest["portfolio"]["currency_conversion"]
+    assert evidence["direction"] == "1 IDR = 0.0000613 USD"
+    assert evidence["valuation_date"] == "2026-06-30"
+    assert evidence["source"] == "Bank Indonesia middle rate"
+    assert evidence["files"][0]["converted_total"] == "606.88"
+
+
+def test_the_converted_file_the_engine_was_given_is_kept(usd_run, approved_rate, analyst):
+    """Describing what was sent is not the same as being able to read it."""
+    run_it(usd_run, oasis_server(), actor=analyst)
+
+    link = ArtifactLink.objects.get(
+        subject_type="analysis_run",
+        subject_id=usd_run.run_id,
+        role="oed_location_converted",
+    )
+    assert link.artifact.is_readable
+
+
+def test_the_result_says_what_rate_it_rests_on(usd_run, approved_rate, oasis_is, api):
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{usd_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=usd_run.run_id)
+    conversion = result.export_caveats()["exposure_quality"]["currency_conversion"]
+    assert conversion["direction"] == "1 IDR = 0.0000613 USD"
+
+
+def rate_body(**extra):
+    body = {
+        "from_currency": "IDR",
+        "to_currency": "USD",
+        "rate": "0.0000613",
+        "valuation_date": "2026-06-30",
+        "source": "Bank Indonesia middle rate",
+        "reference": "https://www.bi.go.id/en/statistik/informasi-kurs/",
+    }
+    body.update(extra)
+    return body
+
+
+def test_a_recorded_rate_is_not_evidence_until_somebody_stands_behind_it(api):
+    created = api.post(f"{API}/currency-rates/", rate_body(), format="json")
+
+    assert created.status_code == 201, created.data
+    assert created.data["is_approved"] is False
+
+
+def test_the_person_who_recorded_a_rate_may_not_approve_it(client_for, reviewer):
+    """Section 10: independent challenge, which self-approval is not."""
+    theirs = client_for(reviewer)
+    created = theirs.post(f"{API}/currency-rates/", rate_body(), format="json")
+
+    refused = theirs.post(f"{API}/currency-rates/{created.data['id']}/approve/")
+
+    assert refused.status_code == 409
+    assert "may not also approve it" in refused.data["detail"]
+
+
+def test_an_approved_rate_is_frozen_against_later_editing(api, client_for, reviewer):
+    """A run's numbers cannot rest on a rate that changed after they were calculated."""
+    created = api.post(f"{API}/currency-rates/", rate_body(), format="json")
+
+    approved = client_for(reviewer).post(
+        f"{API}/currency-rates/{created.data['id']}/approve/"
+    )
+
+    assert approved.status_code == 200
+    assert approved.data["is_approved"] is True
+    assert approved.data["is_frozen"] is True
+
+
+def test_a_rate_from_a_currency_to_itself_is_refused(api):
+    refused = api.post(f"{API}/currency-rates/", rate_body(to_currency="IDR"), format="json")
+
+    assert refused.status_code == 400
+    assert "converts nothing" in str(refused.data["to_currency"])

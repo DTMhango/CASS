@@ -11,6 +11,7 @@ import json
 
 from django.conf import settings
 from django.http import HttpResponse
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
@@ -42,6 +43,7 @@ from . import editing, promotion, review, scenarios, services
 from . import extract as extract_service
 from .models import (
     AttributeOverride,
+    CurrencyRate,
     EnrichmentRun,
     ExposureVersion,
     ImportBatch,
@@ -458,6 +460,106 @@ class EnrichmentRunViewSet(viewsets.ReadOnlyModelViewSet):
         return EnrichmentRun.objects.filter(
             exposure_version__project__in=visible_projects(self.request.user)
         ).select_related("exposure_version", "assumption_set")
+
+
+class CurrencyRateSerializer(serializers.ModelSerializer):
+    is_approved = serializers.BooleanField(read_only=True)
+    description = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CurrencyRate
+        fields = [
+            "id", "from_currency", "to_currency", "rate", "valuation_date",
+            "source", "reference", "notes", "is_approved", "description",
+            "approved_at", "is_frozen", "created_at",
+        ]
+        read_only_fields = [
+            "id", "is_approved", "description", "approved_at", "is_frozen", "created_at",
+        ]
+
+    def get_description(self, obj) -> str:
+        return str(obj)
+
+    def validate(self, attrs):
+        source = (attrs.get("from_currency") or "").upper()
+        target = (attrs.get("to_currency") or "").upper()
+        if source and target and source == target:
+            raise serializers.ValidationError(
+                {"to_currency": "A rate from a currency to itself converts nothing."}
+            )
+        if attrs.get("rate") is not None and attrs["rate"] <= 0:
+            raise serializers.ValidationError(
+                {"rate": "A rate must be positive: a zero or negative rate is not a quote."}
+            )
+        attrs["from_currency"] = source
+        attrs["to_currency"] = target
+        return attrs
+
+
+class CurrencyRateViewSet(viewsets.ModelViewSet):
+    """Governed rates for normalising a portfolio to the run currency.
+
+    Section 8 requires the rate, its valuation date, its source and its
+    direction to be captured before generation; section 15 explains why, since
+    the Oasis Financial Module cannot calculate multi-currency terms. A rate is
+    evidence only once somebody other than its author has approved it, which is
+    the rule section 10 applies to every other gate on the platform.
+    """
+
+    queryset = CurrencyRate.objects.none()
+    serializer_class = CurrencyRateSerializer
+    # Recording the quote is ordinary exposure work; approving it is the gate,
+    # and the action checks the reviewer role and the independence rule itself.
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ["from_currency", "to_currency", "valuation_date"]
+    ordering_fields = ["valuation_date", "created_at"]
+
+    def get_queryset(self):
+        return CurrencyRate.objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, updated_by=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None, version=None):
+        """Stand behind a rate, so a run may rest its numbers on it."""
+        rate = self.get_object()
+        if not request.user.may_approve_gates:
+            return Response(
+                {"detail": "Approving a currency rate requires the reviewer role."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if rate.created_by_id == request.user.id:
+            return Response(
+                {
+                    "detail": (
+                        "You recorded this rate, so you may not also approve it. "
+                        "Independent challenge is the point of the approval."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if rate.is_approved:
+            return Response(self.get_serializer(rate).data)
+
+        rate.approved_by = request.user
+        rate.approved_at = timezone.now()
+        rate.updated_by = request.user
+        rate.save()
+        # Frozen once approved: a run's numbers cannot be explained by a rate
+        # that was edited after they were calculated.
+        rate.freeze()
+
+        audit.record(
+            action=AuditAction.APPROVE,
+            subject_type="currency_rate",
+            subject_id=rate.id,
+            actor=request.user,
+            subject_label=str(rate),
+            after={"approved": True},
+            request=request,
+        )
+        return Response(self.get_serializer(rate).data)
 
 
 # -- the Klapton Re geocoded policy extract -----------------------------------

@@ -95,9 +95,19 @@ class ConversionRate:
             )
 
     @property
+    def quoted(self) -> str:
+        """The rate as it was quoted, without a stored column's trailing zeros.
+
+        Plain notation rather than ``Decimal``'s exponent form: a rate that
+        reads 6.13E-5 in an evidence block is one a reviewer has to decode
+        before they can check it against the published quote.
+        """
+        return format(self.rate.normalize(), "f")
+
+    @property
     def description(self) -> str:
         return (
-            f"1 {self.from_currency} = {self.rate} {self.to_currency} "
+            f"1 {self.from_currency} = {self.quoted} {self.to_currency} "
             f"at {self.valuation_date.isoformat()} ({self.source})"
         )
 
@@ -109,8 +119,8 @@ class ConversionRate:
         return {
             "from_currency": self.from_currency,
             "to_currency": self.to_currency,
-            "rate": str(self.rate),
-            "direction": f"1 {self.from_currency} = {self.rate} {self.to_currency}",
+            "rate": self.quoted,
+            "direction": f"1 {self.from_currency} = {self.quoted} {self.to_currency}",
             "valuation_date": self.valuation_date.isoformat(),
             "source": self.source,
             "reference": self.reference,
@@ -172,7 +182,7 @@ def convert_file(kind: FileKind, payload: bytes, rate: ConversionRate) -> Conver
     columns = list(reader.fieldnames or [])
     if not columns:
         raise CurrencyError(
-            f"The {kind.label().lower()} has no header row, so there is nothing to convert."
+            f"The {kind.label.lower()} has no header row, so there is nothing to convert."
         )
 
     amounts = [name for name in money_columns(kind) if name in columns]
@@ -194,7 +204,7 @@ def convert_file(kind: FileKind, payload: bytes, rate: ConversionRate) -> Conver
         stated = (row.get(stated_in) or "").strip().upper() if stated_in else ""
         if stated_in and stated and stated != source:
             raise CurrencyError(
-                f"Row {position} of the {kind.label().lower()} states {stated}, and the "
+                f"Row {position} of the {kind.label.lower()} states {stated}, and the "
                 f"rate converts {source}. A book holding more than one currency is a "
                 "validation failure rather than something to convert at this rate."
             )

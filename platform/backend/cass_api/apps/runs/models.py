@@ -415,6 +415,12 @@ class AnalysisRun(BaseModel):
     )
     analysis_settings = models.JSONField(default=dict, blank=True)
     run_currency = models.CharField(max_length=3, blank=True)
+    #: The rate, valuation date, source and direction used to normalise the book
+    #: into the run currency, and what that moved. Empty where the book was
+    #: already in the run currency. Section 8 requires this before generation,
+    #: and it is held on the run because the published exposure is immutable and
+    #: states what the business reported.
+    currency_conversion = models.JSONField(default=dict, blank=True)
 
     oasis_analysis_id = models.CharField(max_length=32, blank=True)
     oasis_portfolio_id = models.CharField(max_length=32, blank=True)

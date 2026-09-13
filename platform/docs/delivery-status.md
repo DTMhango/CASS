@@ -10,9 +10,9 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,671 backend tests pass, 1 skipped. 97 integration tests pass against the
+- 1,696 backend tests pass, 1 skipped. 97 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package and the 30 June workbook.
-  95 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  96 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -44,7 +44,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells | Benchmark gate; full-country run; realisation weighting; Nepal source model |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval | Reading the HDF5 datastore instead of CSV exports; QA gate; OpenQuake reference comparison |
-| M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline | Currency evidence; financial structure workspace |
+| M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate | Financial structure workspace |
 | M6 Product | Partly met | Result approval, export and two-result comparison | Maps, EP charts, event loss tables, geographic summaries, financial structure workspace, scenario ranges |
 | M7 Production | Not met | CI builds and scans the CASS images | Backup and restore drill, and the rest of sections 10 and 11 |
 
@@ -54,9 +54,9 @@ updated afterwards is a tracker somebody has to reconcile.
 
 | Stage | Status |
 | --- | --- |
-| `validate_exposure` | Done, in the exposure workspace and again inside the run: the published files must still validate, match the version record, carry one currency and support the requested perspectives |
+| `validate_exposure` | Done, in the exposure workspace and again inside the run: the published files must still validate, match the version record, carry one currency and support the requested perspectives. Where that currency is not the run's, an approved rate must exist, and the run stops here rather than at the engine if it does not |
 | `enrich` | Done. The run's assumption set chooses the vulnerability set the engine uses ([ADR 14](adr/0014-assumption-sets-as-vulnerability-sets.md)), and an `EnrichmentRun` records reported, derived, imputed and unresolved attributes, missingness by value, exceptions, and a lineage table as an artifact. No value moves |
-| `publish_oed` | Done. Before it, the run checks the engine version and that the worker serves this model version's package ([ADR 9](adr/0009-cass-writes-the-oasis-package.md)) |
+| `publish_oed` | Done. Before it, the run checks the engine version and that the worker serves this model version's package ([ADR 9](adr/0009-cass-writes-the-oasis-package.md)). A book stated in another currency is converted at an approved rate first, and the converted files the engine received are kept |
 | `keys` | Done, through CASS keys |
 | `reconcile_keys` | Done. Unmapped value holds the run; the analyst asks for an exception on the run monitor, a reviewer who did not ask decides, and the run resumes from the gate. A geometry-only run reports that value instead of holding for it, because it calculates no loss for the value to be missing from |
 | `generate_inputs` | Done |
@@ -140,7 +140,7 @@ decision number.
 | 1 | Analysis pipeline: exposure validation inside the run, `smoke` on a reduced event set, `review` stage, and releasing a run held at a gate | §8, M2 | Done |
 | 1b | `enrich`: applying an assumption set within a run, with reconciliation | §8, M5 | Done; two sets compared live on one book |
 | 2 | Run modes: geometry-only, technical loss, research, decision use | Brief §5.2 | Done |
-| 3 | Currency conversion evidence captured and applied before generation | §8 | Not started |
+| 3 | Currency conversion evidence captured and applied before generation | §8 | Done |
 | 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Not started |
 | 5 | Financial structure workspace | §3, M5 | Not started |
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Not started |

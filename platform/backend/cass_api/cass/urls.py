@@ -27,6 +27,7 @@ from apps.artifacts.api import ArtifactViewSet
 from apps.audit.api import ApprovalViewSet, AuditEventViewSet
 from apps.exposure.api import (
     AssumptionCatalogueView,
+    CurrencyRateViewSet,
     EnrichmentRunViewSet,
     ExposureVersionViewSet,
     PortfolioImportViewSet,
@@ -57,6 +58,7 @@ router.register("approvals", ApprovalViewSet, basename="approval")
 
 router.register("exposure-versions", ExposureVersionViewSet, basename="exposure-version")
 router.register("enrichment-runs", EnrichmentRunViewSet, basename="enrichment-run")
+router.register("currency-rates", CurrencyRateViewSet, basename="currency-rate")
 router.register(
     "portfolio-imports", PortfolioImportViewSet, basename="portfolio-import"
 )
