@@ -141,6 +141,14 @@ CASS_FIXTURE_ROOT = env("CASS_FIXTURE_ROOT", str(BASE_DIR.parent / "tests" / "fi
 #: Largest upload the API will register. Larger scientific artifacts are
 #: written by workers directly into the store, never through Django.
 CASS_MAX_UPLOAD_BYTES = int(env("CASS_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
+#: How long a direct upload session stays open. An upload nobody completes in
+#: this time is expired by the retention sweep rather than left pending.
+CASS_UPLOAD_SESSION_SECONDS = int(env("CASS_UPLOAD_SESSION_SECONDS", "900"))
+#: An antivirus engine speaking clamd's protocol. Empty means none is
+#: configured, and a completed upload's validation note says so rather than
+#: implying a scan that was not made.
+CASS_CLAMD_HOST = env("CASS_CLAMD_HOST", "")
+CASS_CLAMD_PORT = int(env("CASS_CLAMD_PORT", "3310"))
 
 # -- background execution ---------------------------------------------------
 

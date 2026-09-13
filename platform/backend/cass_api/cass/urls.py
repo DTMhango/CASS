@@ -23,7 +23,7 @@ from apps.accounts.api import (
     SessionView,
     UserViewSet,
 )
-from apps.artifacts.api import ArtifactViewSet
+from apps.artifacts.api import ArtifactUploadView, ArtifactViewSet
 from apps.audit.api import ApprovalViewSet, AuditEventViewSet
 from apps.exposure.api import (
     AssumptionCatalogueView,
@@ -92,6 +92,13 @@ router.register(
 
 api_patterns = [
     path("session/", SessionView.as_view(), name="session"),
+    # The body of a direct upload, for a store that cannot sign its own URL.
+    # Ahead of the router so artifacts/<pk>/ does not claim the path first.
+    path(
+        "artifacts/upload/<str:bucket_name>/<path:key>",
+        ArtifactUploadView.as_view(),
+        name="artifact-upload",
+    ),
     path("platform/", PlatformInfoView.as_view(), name="platform-info"),
     path("engines/", EngineStatusView.as_view(), name="engine-status"),
     path(

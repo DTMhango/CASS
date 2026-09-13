@@ -667,6 +667,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/Artifact'
           description: ''
+  /api/v1/artifacts/{id}/complete/:
+    post:
+      operationId: api_v1_artifacts_complete_create
+      description: |-
+        Read back what arrived, and register or quarantine it.
+
+        ``checksum`` and ``size_bytes`` are what the uploader says they sent,
+        and both are optional. Where given they are compared with what arrived,
+        which is how a truncated or altered upload is caught.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this artifact.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
   /api/v1/artifacts/{id}/download/:
     get:
       operationId: api_v1_artifacts_download_retrieve
@@ -695,11 +724,12 @@ paths:
     post:
       operationId: api_v1_artifacts_upload_session_create
       description: |-
-        Issue a short-lived direct-to-store upload grant.
+        Issue a short-lived direct-to-store upload into a project.
 
         Section 5 has the browser upload large files straight to object
-        storage; Django registers the artifact only once the bytes are present
-        and checksummed.
+        storage. The caller names the project and the file; this service
+        chooses the key, under that project's prefix, so a session can never be
+        pointed at somebody else's object.
       tags:
       - api
       security:
@@ -712,6 +742,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/Artifact'
           description: ''
+  /api/v1/artifacts/upload/{bucket_name}/{key}:
+    put:
+      operationId: api_v1_artifacts_upload_update
+      description: |-
+        Receive an upload's body where the store cannot sign one.
+
+        A filesystem store has no signing authority, so its session URL points
+        here. It accepts a body only for a pending upload the caller opened, before
+        the session expires -- the same terms a presigned URL enforces on S3 -- and
+        registers nothing: completion is still a separate act.
+      parameters:
+      - in: path
+        name: bucket_name
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: key
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: Received. Complete the upload to register it.
+        '404':
+          description: No upload this caller opened is at this address.
+        '409':
+          description: The upload is no longer accepting content.
+        '410':
+          description: The upload session has expired.
+        '413':
+          description: Larger than this installation accepts.
   /api/v1/assumption-sets/:
     get:
       operationId: api_v1_assumption_sets_list
@@ -6183,8 +6256,17 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        validation_note:
+          type: string
+          readOnly: true
         readable:
           type: boolean
+          description: |-
+            Whether this caller can actually read it now.
+
+            Entitlement alone is not enough. A quarantined, pending or expired
+            object is unreadable whoever asks, and a listing that called it
+            readable would promise a download the endpoint then refuses.
           readOnly: true
         created_at:
           type: string
@@ -6205,6 +6287,7 @@ components:
       - size_bytes
       - state
       - uri
+      - validation_note
     ArtifactStateEnum:
       enum:
       - pending

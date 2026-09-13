@@ -2412,3 +2412,25 @@ def test_a_run_that_uses_its_whole_time_limit_stops_at_a_stage_boundary(
     run = Run.objects.get(id=analysis_run.run_id)
     assert run.state == RunState.FAILED
     assert "time limit" in run.failure_summary
+
+
+def test_an_artifact_expired_under_its_retention_class_is_not_offered_for_download(
+    api, analysis_run, oasis_is, analyst
+):
+    """The row stays, so the run still names what it used; the link does not."""
+    from apps.artifacts import retention
+    from apps.artifacts.models import Artifact
+
+    oasis_is(oasis_server())
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    keys = Artifact.objects.get(
+        links__subject_id=analysis_run.run_id, links__role="cass_keys"
+    )
+    retention.expire(keys, actor=analyst)
+
+    listed = api.get(f"{API}/runs/{analysis_run.run_id}/artifacts/").data
+    row = next(item for item in listed if item["role"] == "cass_keys")
+
+    assert row["state"] == "expired"
+    assert row["readable"] is False
+    assert row["checksum"] == keys.checksum

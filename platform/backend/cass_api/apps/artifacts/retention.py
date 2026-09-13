@@ -180,6 +180,24 @@ def sweep(
             }
         )
 
+    # Uploads opened and never completed. Nothing links to a pending artifact
+    # and nothing has vouched for its bytes, so there is nothing to protect:
+    # what arrived under a dead session is removed and the record says why.
+    abandoned: list[dict[str, Any]] = []
+    stale = Artifact.objects.filter(
+        state=ArtifactState.PENDING,
+        expires_at__isnull=False,
+        expires_at__lte=now or timezone.now(),
+    )
+    if limit:
+        stale = stale[:limit]
+    for artifact in stale:
+        if not dry_run:
+            expire(artifact, actor=actor)
+        abandoned.append(
+            {"artifact": str(artifact.id), "uri": artifact.uri, "role": artifact.role}
+        )
+
     return {
         "swept_at": (now or timezone.now()).isoformat(),
         "dry_run": dry_run,
@@ -188,4 +206,6 @@ def sweep(
         "bytes_released": released,
         "kept": [item.as_dict() for item in refused],
         "kept_count": len(refused),
+        "abandoned_uploads": abandoned,
+        "abandoned_upload_count": len(abandoned),
     }

@@ -68,6 +68,14 @@ def attach_file(
     role = ROLE_BY_KIND[kind]
     key = f"{version.artifact_prefix}/{role}.csv"
 
+    # The same content check a direct upload gets. Two routes into the store
+    # with two standards would make the weaker one the route that matters.
+    from apps.artifacts.intake import HEAD_BYTES, content_verdict
+
+    verdict = content_verdict(payload[:HEAD_BYTES], content_type="text/csv")
+    if not verdict.clean:
+        raise ExposureError(verdict.finding)
+
     store = get_store()
     ref = store.put_bytes(
         bucket("portfolio"),

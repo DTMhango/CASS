@@ -399,7 +399,13 @@ class RunViewSet(viewsets.ReadOnlyModelViewSet):
                     "checksum": link.artifact.checksum,
                     "size_bytes": link.artifact.size_bytes,
                     "retention": link.artifact.retention,
-                    "readable": link.artifact.may_read(request.user),
+                    # Why a row cannot be opened matters as much as that it
+                    # cannot: expired under its retention class is not the same
+                    # answer as not permitted, and the monitor says which.
+                    "state": link.artifact.state,
+                    "readable": (
+                        link.artifact.is_readable and link.artifact.may_read(request.user)
+                    ),
                 }
                 for link in links
             ]

@@ -682,6 +682,9 @@ export interface RunArtifact {
   checksum: string;
   size_bytes: number;
   retention: string;
+  /** Registered, pending, quarantined or expired: why an unreadable row is so. */
+  state?: "pending" | "registered" | "quarantined" | "expired";
+  /** Whether this viewer can open it now: entitled, and still present. */
   readable: boolean;
 }
 

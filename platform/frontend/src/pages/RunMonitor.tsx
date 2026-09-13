@@ -325,6 +325,22 @@ function ArtifactRow({ artifact }: { artifact: RunArtifact }) {
           >
             Download
           </Button>
+        ) : artifact.state === "expired" ? (
+          <StatusBadge
+            tone="idle"
+            size="sm"
+            detail="Removed under its retention class. The record stays, so the run still names what it used."
+          >
+            expired
+          </StatusBadge>
+        ) : artifact.state === "quarantined" ? (
+          <StatusBadge
+            tone="error"
+            size="sm"
+            detail="It failed its checks on arrival and cannot be read by the application."
+          >
+            quarantined
+          </StatusBadge>
         ) : (
           <StatusBadge
             tone="idle"

@@ -10,10 +10,10 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,798 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,820 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
-  105 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  106 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -42,6 +42,11 @@ updated afterwards is a tracker somebody has to reconcile.
   Python memory under a one-million-row budget.
 - OED 4.0.0 and 5.0.0 are registered on the live stack from ODS Tools 5.0.8,
   with 4.0.0 active: 565 fields against 574.
+- Direct uploads were run against the live MinIO store: each session was
+  presigned into the owning project's prefix, a clean CSV registered with the
+  checksum it was sent with, and a tampered upload and an executable declared
+  as CSV were both quarantined. No antivirus engine is configured on this
+  installation, and the registered artifact's note says so.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
   optional location field (the nine photovoltaic attributes). Nothing is
@@ -161,7 +166,7 @@ decision number.
 | 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Done as machinery. Both gates still stand open, because no benchmark curves and no tolerances have been approved — which is a decision, not code |
 | 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Not started |
 | 10 | Cohort B geocoding sensitivity | WP3 | Not started |
-| 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Not started |
+| 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Done: sessions are issued into the owning project's prefix to someone who may write there, completion reads back and checksums what arrived, and a content check plus an optional clamd engine scan it before release. An installation with no antivirus engine says so on each artifact |
 | 12 | Execution profiles enforced: time limits and admission control | §11 | Done |
 | 13 | Keys and converter HTTP services | §4 | Not started |
 | 14 | Artifact retention expiry | §5 | Done: a scheduled sweep expires due payloads and keeps their records, and refuses anything a running run is reading, anything behind an approved result, and published exposure |

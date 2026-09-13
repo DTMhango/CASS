@@ -118,6 +118,7 @@ function exception(overrides: Partial<Approval> = {}): Approval {
 }
 
 let approvals: Approval[] = [];
+let artifacts: unknown[] = [];
 let mayDecide = false;
 let posts: { url: string; body: unknown }[] = [];
 
@@ -159,7 +160,7 @@ function routeFor(url: string, method: string, body: unknown): { status: number;
   if (url.includes("/approvals/")) return { status: 200, body: page(approvals) };
   if (url.includes("/analysis-runs/")) return { status: 200, body: page([ANALYSIS]) };
   if (url.includes(`/runs/${RUN_ID}/events/`)) return { status: 200, body: [] };
-  if (url.includes(`/runs/${RUN_ID}/artifacts/`)) return { status: 200, body: [] };
+  if (url.includes(`/runs/${RUN_ID}/artifacts/`)) return { status: 200, body: artifacts };
   if (url.includes(`/runs/${RUN_ID}/`)) return { status: 200, body: HELD_RUN };
   if (url.includes("/runs/")) return { status: 200, body: page([HELD_RUN]) };
   return { status: 200, body: {} };
@@ -187,6 +188,7 @@ function renderMonitor() {
 
 beforeEach(() => {
   approvals = [];
+  artifacts = [];
   mayDecide = false;
   posts = [];
   window.localStorage.setItem(
@@ -299,5 +301,26 @@ describe("a run held at a gate", () => {
 
     expect(await screen.findByLabelText(/Why the run should go on/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume the run" })).not.toBeInTheDocument();
+  });
+  it("says an artifact expired under its retention class rather than offering it", async () => {
+    artifacts = [
+      {
+        id: "88888888-8888-8888-8888-888888888888",
+        role: "cass_keys",
+        direction: "output",
+        uri: "cass://cass-portfolio/analysis/run/cass_keys.csv",
+        checksum: "sha256:abc",
+        size_bytes: 1024,
+        retention: "diagnostic",
+        state: "expired",
+        readable: false,
+      },
+    ];
+    renderMonitor();
+
+    // The row stays, so the run still names what it used; the download does not.
+    expect(await screen.findByText("expired")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Download/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("not yours to read")).not.toBeInTheDocument();
   });
 });
