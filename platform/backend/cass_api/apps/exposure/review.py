@@ -390,8 +390,9 @@ USE_MODES: tuple[tuple[str, str], ...] = (
     ),
     (
         "decision_use",
-        "A result that may inform pricing or reserving. Requires actuarial, "
-        "underwriting and catastrophe-model review first.",
+        "A result a reviewer approves after actuarial, underwriting and "
+        "catastrophe-model review. CASS is a research tool, so it is still not a "
+        "basis for pricing or reserving.",
     ),
 )
 

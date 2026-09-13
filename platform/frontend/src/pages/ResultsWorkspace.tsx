@@ -447,13 +447,15 @@ function ResultCard({ result }: { result: ResultSet }) {
       {!result.usable_for_decisions ? (
         <Notice tone="warning" title="Not approved for decision use">
           <p>
-            This result may be inspected and compared, but it must not inform pricing,
-            capital or underwriting decisions until it is approved.
+            This result may be inspected and compared, but no reviewer has approved it.
+            CASS is a research tool, so even an approved result is not a basis for
+            pricing or reserving.
           </p>
           {result.state === "research" ? (
             <p>
               It came from a research prototype, so approval is not the missing step.
-              A decision number needs a model version published as a full country model.
+              A result that can be approved needs a model version published as a full
+              country model.
             </p>
           ) : mayApprove ? null : (
             <p className="muted">Approval is a reviewer action.</p>

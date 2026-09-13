@@ -92,8 +92,7 @@ class SourceStatement:
         if not self.cleared:
             return (
                 f"Use of {self.model} has not been cleared. This hazard set may be "
-                "used for research and platform development and not for a pricing "
-                "or reserving decision."
+                "used for platform development until it is."
             ) + (f" {self.note}" if self.note else "")
         return f"Cleared under {self.reference}." + (
             f" {self.note}" if self.note else ""

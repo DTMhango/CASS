@@ -72,12 +72,14 @@ having first discovered it the hard way.
 
 ## What the numbers from this book do and do not mean
 
-The model version is published as a **research prototype**: the PuSGeN 2024
-hazard licence and the GEM vulnerability licence are not cleared in writing, the
-grid version is a draft, and no end-to-end validation date has been recorded. So
-every result carries "not usable for decisions", which is the honest state, and
-the AAL and PML below are a demonstration that the pipeline computes them, not a
-view of Indonesian earthquake risk.
+The model version is published as a **research prototype**: the grid version is
+a draft and no end-to-end validation date has been recorded. The GEM
+vulnerability functions are used under GEM Foundation's written permission, and
+the PuSGeN 2024 hazard under the installation's internal-use basis. So every
+result carries "not usable for decisions", which is the honest state, and the
+AAL and PML below are a demonstration that the pipeline computes them, not a
+view of Indonesian earthquake risk. CASS is a research tool in any case: no
+result from it is a basis for pricing or reserving.
 
 ## What this book produced, end to end
 

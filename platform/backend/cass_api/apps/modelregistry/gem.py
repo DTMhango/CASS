@@ -19,11 +19,12 @@ different questions and a set missing any of them is not reproducible:
 
 Three things this deliberately does not decide.
 
-**The licence.** Section 10 puts a data-rights gate before use and the GEM
-public models are CC BY-NC-SA with commercial use needing confirmation. Whoever
-runs the registration states whether that confirmation exists and names it; the
-default is that it does not. An assertion recorded against a named person is
-worth something. A default of ``True`` would be worth nothing.
+**The licence.** GEM Foundation has given explicit written permission to use its
+public Global Exposure and Vulnerability models for the use KRE described
+(ADR 15), so a set built here is cleared under that permission by default and
+says so. The licence the data carries is recorded beside it, because GEM must be
+credited and anything redistributed carries the same terms. A narrower
+entitlement can still be stated by passing one.
 
 **The multi-IMT representation.** A build under an undecided one is the normal
 case and produces the multi-channel classes anyway -- that is how they get
@@ -70,7 +71,6 @@ from .assets import (
     attach_vulnerability_variant,
 )
 from .models import (
-    INTERNAL_USE_LICENCE,
     AssumptionSet,
     ModelVersion,
     PublicationState,
@@ -85,10 +85,20 @@ GEM_RELEASE = "v2026.0.0"
 #: Provenance recorded on the registry record.
 GEM_SOURCE = f"GEM Global Vulnerability Model and Global Exposure Model {GEM_RELEASE}"
 
-#: The licence the published models carry. Stored whether or not commercial use
-#: has been confirmed, because a reader needs to know which licence the
-#: confirmation would have to be against.
+#: The licence the published models carry. Stored beside the permission, because
+#: GEM Foundation must be credited and anything redistributed carries the same
+#: terms whatever KRE is permitted to do with it.
 GEM_LICENCE = "CC BY-NC-SA 4.0"
+
+#: GEM Foundation's written permission, which is what clears a GEM set here
+#: (ADR 15). It covers these two models only: a hazard source model such as
+#: PuSGeN 2024 is held under the installation's internal-use basis instead.
+GEM_PERMISSION = (
+    "GEM Foundation has granted explicit permission to use the public Global "
+    "Exposure and Vulnerability models for the use KRE described in its email of "
+    "11 September 2026. Credit GEM Foundation as the source; anything "
+    "redistributed carries the same licence."
+)
 
 #: GEM's taxonomy generation. Distinct from the OED codes a schedule states:
 #: the whole enrichment step exists to get from one to the other.
@@ -107,16 +117,14 @@ class GemRegistrationError(Exception):
 class LicenceStatement:
     """What the installation is entitled to do with this data.
 
-    CASS runs inside Klapton Re, and the data it carries is used there and
-    nowhere else: not redistributed and not sold. That is what the public model
-    licences permit without a separate agreement, and it is a property of the
-    installation rather than of any one upload -- so it is the default here and
-    the screens no longer ask. A narrower or wider entitlement can still be
-    stated by passing one, and it is recorded with the set either way.
+    GEM Foundation's written permission is the default (ADR 15). It is a fact
+    about these models rather than about any one upload, so the screens do not
+    ask. A narrower entitlement can still be stated by passing one, and it is
+    recorded with the set either way.
     """
 
     cleared: bool = True
-    reference: str = INTERNAL_USE_LICENCE
+    reference: str = GEM_PERMISSION
     note: str = ""
 
     def __post_init__(self) -> None:
@@ -131,8 +139,7 @@ class LicenceStatement:
         if not self.cleared:
             return (
                 f"Use of the {GEM_LICENCE} data has not been cleared on this "
-                "installation. This set may be used for platform development and "
-                "not for a pricing or reserving decision."
+                "installation, so this set is for platform development only."
             ) + (f" {self.note}" if self.note else "")
         return f"{self.reference}" + (f" {self.note}" if self.note else "")
 

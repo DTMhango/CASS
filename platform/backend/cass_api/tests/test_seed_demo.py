@@ -2,7 +2,7 @@
 
 The seed is how a reviewer first sees the product, so it is tested like a
 feature. The assertions that matter are the governance ones: a model version
-whose licence and IMT coverage are outstanding must be seeded as a research
+whose hazard and IMT coverage are outstanding must be seeded as a research
 prototype, not quietly as an approved model.
 """
 
@@ -51,9 +51,20 @@ def test_seeded_model_names_what_blocks_full_publication(seeded):
     model = ModelVersion.objects.get(version="0.1.0-sa")
     blockers = " ".join(model.publication_blockers())
 
-    # The two the plan is most insistent about.
-    assert "licence" in blockers
     assert "hazard set" in blockers
+    # The GEM licence is no longer one of them: GEM Foundation has given its
+    # written permission (ADR 15).
+    assert "licence" not in blockers
+
+
+def test_the_seeded_gem_set_records_gems_permission_beside_its_licence(seeded):
+    from apps.modelregistry.gem import GEM_LICENCE, GEM_PERMISSION
+
+    vulnerability = ModelVersion.objects.get(version="0.1.0-sa").vulnerability_set
+
+    assert vulnerability.licence_cleared is True
+    assert vulnerability.licence_note == GEM_PERMISSION
+    assert vulnerability.licence == GEM_LICENCE
 
 
 def test_seeded_model_declares_only_the_sa_family(seeded):

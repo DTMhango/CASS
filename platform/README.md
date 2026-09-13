@@ -1,7 +1,13 @@
 # CASS — Catastrophe Analytics and Scenario Suite
 
-The internal earthquake portfolio analysis platform for Klapton Reinsurance
-PLC, built to the [build plan](../deliverables/Klapton%20Re%20Earthquake%20Catastrophe%20Modelling%20Platform%20Build%20Plan.md).
+An internal research tool for earthquake portfolio analysis at Klapton
+Reinsurance PLC, built to the [build plan](../deliverables/Klapton%20Re%20Earthquake%20Catastrophe%20Modelling%20Platform%20Build%20Plan.md).
+
+CASS is for research. Its results are not a basis for pricing or reserving.
+The build plan described a governed decision platform, which is where the
+platform roles, approval gates, the decision-use run mode and result approval
+come from. They stay as built, and the remaining work is scoped for research
+([ADR 15](docs/adr/0015-research-tool-and-gem-permission.md)).
 
 React provides the analyst experience. Django provides authentication,
 workflow orchestration, metadata, lineage and a stable CASS API. OpenQuake and
@@ -237,7 +243,9 @@ technical loss; portfolio-loss research; and decision use. Only the last can
 produce a result a reviewer may approve, and it is refused at configuration
 against a research prototype or an unapproved assumption set. A run nobody
 labelled is a technical one, because a number nobody characterised must not be
-able to become a decision. A comparison that mixes two modes says so.
+able to become a decision. A comparison that mixes two modes says so. An
+approved result is a reviewed research result: CASS does not support pricing
+or reserving.
 
 **A portfolio arrives through the intake template.** Risks and policies are
 joined on the Policy ID stated on both sheets, value is read in three recorded
@@ -291,9 +299,10 @@ from what waits on a decision or an outside input. In short:
 - **Analyst product.** Maps, geographic summaries and scenario ranges. A result
   carries its exceedance curve and the events behind it; what it does not carry
   is loss below the portfolio level, which is an engine settings change.
-- **Production readiness.** Backup and restore, single sign-on and MFA, and
-  signed releases. Uploads are scanned by content on every
-  installation; an antivirus engine is used where one is configured.
+- **Keeping and repeating research work.** Backing up the database and the
+  artifact store, and pinning engine image digests so a run can be repeated on
+  the same engines. Single sign-on, MFA, separately deployed keys and converter
+  services and signed releases are not pursued, because CASS is a research tool.
 
 ## Outstanding decisions that gate the model
 
@@ -308,20 +317,24 @@ tab:
 | Oasis static storage format | Interim ktools binaries; Parquet not measured | Earthquake footprints may be too large for uncompressed CSV |
 | Secondary peril scope | Declare per country release | Defines what "earthquake loss" means |
 
-Model data is held under one internal-use basis: used inside Klapton Re, not
-redistributed and not sold ([ADR 7](docs/adr/0007-internal-use-licence-basis.md)).
-The GEM models and PuSGeN 2024 are CC BY-NC-SA, and GEM has not confirmed in
-writing that the NonCommercial term permits internal use supporting pricing and
-reserving. That question, and legal review before any use outside KRE, remain
-open.
+GEM Foundation has given explicit written permission to use its public Global
+Exposure and Vulnerability models for the use KRE described to it, and a GEM
+vulnerability set records that permission
+([ADR 15](docs/adr/0015-research-tool-and-gem-permission.md)). GEM must be
+credited as the source, and anything redistributed carries the same CC BY-NC-SA
+terms. Other model data, including the PuSGeN 2024 hazard package, is held
+under the internal-use basis: used inside Klapton Re, not redistributed and not
+sold ([ADR 7](docs/adr/0007-internal-use-licence-basis.md)). OpenQuake is used
+unmodified under the AGPL. Legal review is still needed before model data, or a
+package derived from it, leaves KRE.
 
 ## The name
 
 CASS is the Catastrophe Analytics and Scenario Suite. The name nods to
 Cassandra, the prophetess granted foresight and cursed never to be believed.
 CASS is built for the opposite outcome: foresight that is evidenced,
-reproducible and traceable to its inputs, so that a decision-maker can act on
-it. Every design rule in this platform — immutable published versions,
+reproducible and traceable to its inputs, so that research built on it can be
+believed. Every design rule in this platform — immutable published versions,
 checksummed artifacts, an assumption that cannot overwrite reported data, a
 model that publishes as a research prototype while its blockers stand — exists
 to make the output believable.

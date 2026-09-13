@@ -10,9 +10,11 @@ doing the build. Without it there is no vulnerability set and no model version,
 which is the honest state of a fresh installation: the platform can hold
 exposure and refuse to model it, and cannot invent a damage relationship.
 
-Commercial use of the CC BY-NC-SA data is not presumed. ``--licence-cleared``
-requires ``--licence-reference``, so a clearance recorded in the registry names
-the thing that grants it.
+A set is cleared under GEM Foundation's written permission for its public
+exposure and vulnerability models (ADR 15), and records that permission. A
+different entitlement is stated with ``--licence-reference``, and
+``--licence-cleared`` records it as a clearance, so whatever the registry holds
+names the thing that grants it.
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--licence-cleared",
             action="store_true",
-            help="Assert that commercial use has been confirmed in writing.",
+            help="Record the entitlement named by --licence-reference as a clearance.",
         )
         parser.add_argument(
             "--licence-reference",
@@ -84,11 +86,11 @@ class Command(BaseCommand):
             )
 
         try:
-            # Cleared by default, under the installation's internal-use basis;
-            # the flags remain for stating a narrower entitlement explicitly.
+            # Cleared by default, under GEM's written permission; the flags remain
+            # for stating a different entitlement explicitly.
             licence = gem.LicenceStatement(
                 cleared=options["licence_cleared"] or not options["licence_reference"],
-                reference=options["licence_reference"] or gem.INTERNAL_USE_LICENCE,
+                reference=options["licence_reference"] or gem.GEM_PERMISSION,
             )
         except gem.GemRegistrationError as exc:
             raise CommandError(str(exc)) from None

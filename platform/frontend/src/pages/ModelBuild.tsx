@@ -288,7 +288,7 @@ function ModelVersionRow({ version }: { version: ModelVersion }) {
             version.usable_for_decisions
               ? "Approved for decision use."
               : published
-                ? "Published as a research prototype: runnable, not decision-grade."
+                ? "Published as a research prototype: runnable, with its blockers still standing."
                 : undefined
           }
         >

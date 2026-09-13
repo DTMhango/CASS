@@ -20,6 +20,7 @@ from django.db import transaction
 from apps.accounts.models import PlatformRole, User
 from apps.exposure import services as exposure_services
 from apps.exposure.models import ExposureVersion
+from apps.modelregistry.gem import GEM_LICENCE, GEM_PERMISSION
 from apps.modelregistry.models import (
     AreaPerilGrid,
     AssumptionSet,
@@ -178,15 +179,11 @@ class Command(BaseCommand):
                 "source": "GEM Global Vulnerability Model v2026.0.0",
                 "source_commit": "5974372ac3f4a99f25d0649eb030fbe596f23b36",
                 "taxonomy_generation": "2026",
-                "licence": "CC BY-NC-SA 4.0",
-                # Section 10: commercial use is unconfirmed, so this stays false
-                # and blocks full publication until GEM confirms in writing.
-                "licence_cleared": False,
-                "licence_note": (
-                    "Public GEM models are CC BY-NC-SA. KRE use supports commercial "
-                    "reinsurance decisions and remains a research activity until GEM "
-                    "confirms permitted commercial use in writing."
-                ),
+                "licence": GEM_LICENCE,
+                # Cleared under GEM Foundation's written permission (ADR 15). The
+                # licence stays recorded, because attribution and share-alike apply.
+                "licence_cleared": True,
+                "licence_note": GEM_PERMISSION,
                 "function_count": 32,
                 # Indonesia has 17 PGA-based and 15 SA-based functions per
                 # coverage component; the PGA demand is what blocks publication

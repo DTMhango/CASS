@@ -8,9 +8,22 @@ and the
 Update this file in the same change that moves any line in it. A tracker
 updated afterwards is a tracker somebody has to reconcile.
 
+## Purpose
+
+CASS is a research tool. Its results are not a basis for pricing or reserving.
+
+Build plan 1.8 described a governed decision platform, and much of what is built
+follows from that: platform roles, approval gates, the decision-use run mode,
+result approval and production controls. That stays as built.
+
+The work that remains is scoped for research: validating the model against
+reference calculations, sensitivity studies, reading results and reproducing a
+run. Production items that serve only a governed deployment are not pursued
+([ADR 15](adr/0015-research-tool-and-gem-permission.md)).
+
 ## Evidence at this revision
 
-- 1,854 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,859 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   112 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -56,6 +69,11 @@ updated afterwards is a tracker somebody has to reconcile.
   are registered and ran, and a sweep published under a request's
   correlation ID was logged by the worker as structured JSON carrying that
   ID. The metrics were collected from the live Postgres.
+- GEM Foundation's permission was recorded on the live stack by migration
+  `modelregistry.0009_gem_permission`: the GEM v2026.0.0 vulnerability set now
+  cites it beside its CC BY-NC-SA 4.0 licence, the PuSGeN 2024 hazard model and
+  hazard set keep the internal-use basis, and the Indonesia model version no
+  longer lists a licence blocker.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
   optional location field (the nine photovoltaic attributes). Nothing is
@@ -73,7 +91,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances; OpenQuake reference comparison |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
 | M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table and the financial structure workspace | Maps, geographic summaries, scenario ranges |
-| M7 Production | Not met | CI builds and scans the CASS images | Backup and restore drill, and the rest of sections 10 and 11 |
+| M7 Production | Not pursued | CI builds and scans the CASS images | Nothing as a milestone: CASS is a research tool, so no production release gate applies ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Backing up research work stays in the backlog as item 18 |
 
 ## Pipelines
 
@@ -108,6 +126,9 @@ without the comparison saying so.
 
 The default is the technical mode: a run nobody labelled cannot produce a
 decision number.
+
+CASS is a research tool, so a decision-use result a reviewer approves is a
+reviewed research result, not a basis for pricing or reserving.
 
 ### Hazard
 
@@ -151,7 +172,8 @@ decision number.
 
 | Area | Plan 1.7 | Now | Record |
 | --- | --- | --- | --- |
-| Model data rights | Research only until GEM confirms commercial use in writing | One internal-use basis; legal confirmation still open | [ADR 7](adr/0007-internal-use-licence-basis.md) |
+| Purpose | A governed platform whose results support pricing, reserving and capital decisions | A research tool. Built governance kept as it is and not extended; production-only items not pursued | [ADR 15](adr/0015-research-tool-and-gem-permission.md) |
+| Model data rights | Research only until GEM confirms commercial use in writing | GEM's exposure and vulnerability models used under GEM Foundation's explicit permission and credited to GEM; other model data, PuSGeN 2024 included, under the internal-use basis | [ADR 7](adr/0007-internal-use-licence-basis.md), [ADR 15](adr/0015-research-tool-and-gem-permission.md) |
 | Intensity measures | SA only, PGA deferred | All four measures as correlated area-peril channels; multi-measure classes refused | [ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md) |
 | Model package | Binaries compiled with Oasis tools | Written by CASS, byte-checked against PiWind, CASS lookup inside | [ADR 9](adr/0009-cass-writes-the-oasis-package.md) |
 | Engine images | Unmodified upstream | Oasis worker patched at build time; OpenQuake unmodified | [ADR 10](adr/0010-patched-oasis-worker.md) |
@@ -177,14 +199,14 @@ decision number.
 | 10 | Cohort B geocoding sensitivity | WP3 | Not started |
 | 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Done: sessions are issued into the owning project's prefix to someone who may write there, completion reads back and checksums what arrived, and a content check plus an optional clamd engine scan it before release. An installation with no antivirus engine says so on each artifact |
 | 12 | Execution profiles enforced: time limits and admission control | §11 | Done |
-| 13 | Keys and converter HTTP services | §4 | Not started |
+| 13 | Keys and converter HTTP services | §4 | Not pursued: the keys lookup and the converter run inside the worker, with the same results. Separate services only serve a governed deployment ([ADR 15](adr/0015-research-tool-and-gem-permission.md)) |
 | 14 | Artifact retention expiry | §5 | Done: a scheduled sweep expires due payloads and keeps their records, and refuses anything a running run is reading, anything behind an approved result, and published exposure |
 | 15 | Administration: users and roles, queues, storage, retention, support bundle | §3, §4 | Done: an administrator changes a person's role or access, and the API refuses any change that would leave nobody able to undo it; the screen shows what each profile is running, what the store holds and what the retention sweep removes next; the support bundle carries settings by allowlist and failures by stage, never secrets or portfolio contents, and viewing it is audited apart from downloading it |
 | 16 | Observability: metrics, correlation IDs through background tasks | §4 | Done: the request's correlation ID travels in task headers into the worker and is stamped on the run when it is queued; /metrics/ serves run, profile, failure, artifact, result and approval gauges read from the records, behind a scrape token |
-| 17 | Multi-factor authentication and single sign-on configuration | §10 | Not started |
-| 18 | Backup and restore tooling, and a restore drill | §11, M7 | Not started |
-| 19 | CI: Oasis worker image build and scan, SBOMs, integration workflow | §10, §17 | Not started |
-| 20 | Pinned image digests and a checksummed release bundle | §4, §18 | Not started |
+| 17 | Multi-factor authentication and single sign-on configuration | §10 | Not pursued: a research tool with local accounts ([ADR 15](adr/0015-research-tool-and-gem-permission.md)) |
+| 18 | Backup and restore of research work: the database and the artifact store | §11 | Not started. Re-scoped from a production restore drill to a procedure that keeps research work from being lost |
+| 19 | CI: Oasis worker image build and the integration workflow | §17 | Not started. Re-scoped: SBOMs for releases dropped |
+| 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Not started. Re-scoped: the signed release bundle for approved local installations dropped |
 
 ## Needs a decision or outside input
 
@@ -198,9 +220,11 @@ machinery around one, the decision still has to be taken.
 - Parquet or binary footprints, which needs a national-scale measurement.
 - Secondary-peril scope for each country release, and business interruption
   treatment.
-- GEM's written position on internal use supporting pricing and reserving
-  ([ADR 7](adr/0007-internal-use-licence-basis.md)), and legal review before
-  any use outside KRE.
+- Legal review before model data, or a package derived from it, leaves KRE.
+  GEM Foundation's permission covers the use KRE described to it
+  ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Anything
+  redistributed carries GEM's share-alike terms, and PuSGeN 2024 is not covered
+  by that permission.
 - A Nepal seismic source model, a denser Vs30 source, and the licensed GEM
   ~1 km exposure.
 - Approved hazard benchmark curves and converter QA tolerances, with named
@@ -216,5 +240,3 @@ machinery around one, the decision still has to be taken.
   moving the reader and the pinned ODS Tools together, and re-running the
   acceptance checks against PiWind and the KRE extract.
 - A full Indonesian grid run: 52,831 cells, hours of compute.
-- Production choices: identity provider, message broker, and availability and
-  recovery targets.

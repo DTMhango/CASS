@@ -13,6 +13,8 @@
 | Peril coverage | Assume earthquake coverage for every policy in this extract |
 | Loss-use status | Research/testing until location allocation, coverage-component allocation, vulnerability taxonomy and model validation are approved |
 
+> *Changed after 1.8.* CASS is a research tool, and no result from it is a basis for pricing or reserving. Where this brief speaks of decision use, or of a result used for a decision, read a result a reviewer has approved as a reviewed research result ([ADR 15](../platform/docs/adr/0015-research-tool-and-gem-permission.md)).
+
 ## 1  Decision
 
 Scope this extract into the programme now as reported KRE-share earthquake exposure. It provides a strong real-portfolio test of identifiers, one-to-many locations, coordinates, quality evidence, country coverage and facultative workflow. The reported `gross_limit` is the TIV at KRE's share, all values are USD and every policy is assumed to cover earthquake. The extract still lacks the coverage-component split and building attributes needed to select vulnerability functions and interpret the resulting loss without material assumptions.
@@ -397,7 +399,7 @@ The source now reaches CASS through the CASS intake template rather than as the 
 | Exact policy-level TIV reconciliation under every allocation scenario | Done |
 | Documented list of unresolved component, financial-term and taxonomy questions | Listed in section 5.1 and the tracker; unanswered |
 | Masked automated fixtures covering the structural edge cases | Done |
-| Signed readiness decision | Not taken |
+| Signed readiness decision | Not pursued: CASS is a research tool, so no result is presented as a KRE portfolio loss estimate for a decision ([ADR 15](../platform/docs/adr/0015-research-tool-and-gem-permission.md)) |
 
 | Work package | Status |
 | --- | --- |

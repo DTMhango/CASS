@@ -76,7 +76,7 @@ const RUN_MODES: { value: RunMode; label: string; note: string }[] = [
   {
     value: "decision",
     label: "Decision use",
-    note: "The output may be approved for pricing, capital or underwriting once a reviewer has released it.",
+    note: "A reviewer may approve the output once it has been checked. CASS is a research tool, so an approved result is a reviewed research result, not a basis for pricing or reserving.",
   },
 ];
 
@@ -421,8 +421,8 @@ export function AnalysisBuilder() {
 
             {ready && model?.is_research_prototype ? (
               <Notice tone="warning" title="This run will produce research output">
-                {model.reference} is a research prototype. The result will be marked so
-                it cannot be used for a pricing, capital or underwriting decision.
+                {model.reference} is a research prototype, so the result will be marked
+                research output and cannot be approved.
               </Notice>
             ) : null}
           </Card>

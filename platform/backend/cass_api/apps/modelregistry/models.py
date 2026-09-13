@@ -120,14 +120,16 @@ class AreaPerilGrid(BaseModel, FreezableModel):
         return f"{self.country_code.lower()}-grid-{self.version}"
 
 
-#: The basis every asset on this installation is held under.
+#: The basis every asset on this installation is held under, unless a more
+#: specific one is recorded with it.
 #:
-#: CASS is an internal Klapton Re platform. The model data it carries is used
-#: inside the company, is not redistributed outside it, and earns nothing on its
-#: own account -- which is what the public model licences permit without a
-#: separate commercial agreement. It is a fact about the installation rather
-#: than a question to ask of each upload, so it is recorded here, applied by
-#: default, and shown once in Administration instead of on every screen.
+#: CASS is an internal Klapton Re research tool. The model data it carries is
+#: used inside the company, is not redistributed outside it, and earns nothing
+#: on its own account. It is a fact about the installation rather than a
+#: question to ask of each upload, so it is recorded here, applied by default,
+#: and shown once in Administration instead of on every screen. GEM's exposure
+#: and vulnerability models carry GEM Foundation's written permission instead
+#: (``apps.modelregistry.gem.GEM_PERMISSION``, ADR 15).
 INTERNAL_USE_LICENCE = (
     "Internal use within Klapton Re only: no redistribution outside the company "
     "and no commercial exploitation."
@@ -695,7 +697,8 @@ class ModelVersion(BaseModel, FreezableModel):
 
         if not self.vulnerability_set.licence_cleared:
             blockers.append(
-                "The vulnerability licence does not yet permit this use in writing."
+                "The vulnerability set's licence has not been cleared for use on "
+                "this installation."
             )
         unsupported = self.vulnerability_set.unsupported_imts
         if unsupported:
