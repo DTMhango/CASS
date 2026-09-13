@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,859 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,863 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   112 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -69,10 +69,11 @@ run. Production items that serve only a governed deployment are not pursued
   are registered and ran, and a sweep published under a request's
   correlation ID was logged by the worker as structured JSON carrying that
   ID. The metrics were collected from the live Postgres.
-- GEM Foundation's permission was recorded on the live stack by migration
-  `modelregistry.0009_gem_permission`: the GEM v2026.0.0 vulnerability set now
-  cites it beside its CC BY-NC-SA 4.0 licence, the PuSGeN 2024 hazard model and
-  hazard set keep the internal-use basis, and the Indonesia model version no
+- GEM Foundation's permission was recorded on the live stack by migrations
+  `modelregistry.0009_gem_permission` and `0010_gem_permission_public_models`:
+  the GEM v2026.0.0 vulnerability set, the PuSGeN 2024 hazard model published in
+  GEM's mosaic and the hazard set computed from it all cite the permission
+  beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
@@ -87,7 +88,7 @@ run. Production items that serve only a governed deployment are not pursued
 | --- | --- | --- | --- |
 | M1 Foundation | Met | Sign in, projects, OED attach, validation, preview, publication, background runs | — |
 | M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
-| M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; full-country run; realisation weighting; Nepal source model |
+| M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; a full-country run; a realisation-weighting rule (item 22). Nepal acquires no hazard: it was a test country and Indonesia is covered |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances; OpenQuake reference comparison |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
 | M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table and the financial structure workspace | Maps, geographic summaries, scenario ranges |
@@ -173,7 +174,7 @@ reviewed research result, not a basis for pricing or reserving.
 | Area | Plan 1.7 | Now | Record |
 | --- | --- | --- | --- |
 | Purpose | A governed platform whose results support pricing, reserving and capital decisions | A research tool. Built governance kept as it is and not extended; production-only items not pursued | [ADR 15](adr/0015-research-tool-and-gem-permission.md) |
-| Model data rights | Research only until GEM confirms commercial use in writing | GEM's exposure and vulnerability models used under GEM Foundation's explicit permission and credited to GEM; other model data, PuSGeN 2024 included, under the internal-use basis | [ADR 7](adr/0007-internal-use-licence-basis.md), [ADR 15](adr/0015-research-tool-and-gem-permission.md) |
+| Model data rights | Research only until GEM confirms commercial use in writing | Everything GEM makes publicly available, its exposure and vulnerability models and PuSGeN 2024 among them, used under GEM Foundation's explicit permission and credited; data GEM does not publish under the internal-use basis | [ADR 7](adr/0007-internal-use-licence-basis.md), [ADR 15](adr/0015-research-tool-and-gem-permission.md) |
 | Intensity measures | SA only, PGA deferred | All four measures as correlated area-peril channels; multi-measure classes refused | [ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md) |
 | Model package | Binaries compiled with Oasis tools | Written by CASS, byte-checked against PiWind, CASS lookup inside | [ADR 9](adr/0009-cass-writes-the-oasis-package.md) |
 | Engine images | Unmodified upstream | Oasis worker patched at build time; OpenQuake unmodified | [ADR 10](adr/0010-patched-oasis-worker.md) |
@@ -207,26 +208,17 @@ reviewed research result, not a basis for pricing or reserving.
 | 18 | Backup and restore of research work: the database and the artifact store | §11 | Not started. Re-scoped from a production restore drill to a procedure that keeps research work from being lost |
 | 19 | CI: Oasis worker image build and the integration workflow | §17 | Not started. Re-scoped: SBOMs for releases dropped |
 | 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Not started. Re-scoped: the signed release bundle for approved local installations dropped |
+| 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Not started. Needs item 9. Classes whose taxonomies span measures are refused until it is decided ([ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md)) |
+| 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Not started. The hazard behind every Indonesian loss is one sampled path until it is decided ([ADR 12](adr/0012-national-classical-model-run-event-based.md)) |
+| 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |
 
 ## Needs a decision or outside input
 
 These cannot be closed by writing code. Where a backlog item builds the
 machinery around one, the decision still has to be taken.
 
-- Sign-off of the event representation study.
-- A representation for classes whose taxonomies respond at several intensity
-  measures.
-- A realisation-weighting rule for hazard.
-- Parquet or binary footprints, which needs a national-scale measurement.
 - Secondary-peril scope for each country release, and business interruption
   treatment.
-- Legal review before model data, or a package derived from it, leaves KRE.
-  GEM Foundation's permission covers the use KRE described to it
-  ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Anything
-  redistributed carries GEM's share-alike terms, and PuSGeN 2024 is not covered
-  by that permission.
-- A Nepal seismic source model, a denser Vs30 source, and the licensed GEM
-  ~1 km exposure.
 - Approved hazard benchmark curves and converter QA tolerances, with named
   reviewers. The machinery now waits on them: register the curves and the
   tolerances, have somebody who did not register them approve them, and both
@@ -240,3 +232,23 @@ machinery around one, the decision still has to be taken.
   moving the reader and the pinned ODS Tools together, and re-running the
   acceptance checks against PiWind and the KRE extract.
 - A full Indonesian grid run: 52,831 cells, hours of compute.
+
+### Answered on 13 September 2026
+
+- **The event representation study.** Not needed, and dropped from the workflow.
+  Occurrence per event stands as built, recorded on each package by the
+  converter approval that named it
+  ([ADR 4](adr/0004-converter-refuses-unapproved-policy.md)).
+- **Legal review before model data, or a package derived from it, leaves KRE.**
+  Cleared. GEM Foundation's permission covers the use KRE described to it
+  ([ADR 15](adr/0015-research-tool-and-gem-permission.md)); anything
+  redistributed still carries GEM's share-alike terms and credits the authors
+  and GEM.
+- **A Nepal seismic source model, a denser Vs30 source, and the licensed GEM
+  ~1 km exposure.** Not needed. Indonesia and Nepal were chosen as test
+  countries and Indonesia is covered, so Nepal keeps its grid and its keys and
+  acquires no hazard.
+- **The multi-IMT representation, the realisation-weighting rule and the
+  footprint storage format.** Not waiting on anybody else: CASS is to research
+  each and decide. They are backlog items 21, 22 and 23, and each ends in a
+  decision record rather than a preference.

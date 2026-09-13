@@ -311,11 +311,14 @@ tab:
 
 | Decision | Position | Why it matters |
 | --- | --- | --- |
-| Event representation | Occurrence per event in use under a converter approval; formal study not reported | Controls frequency, uncertainty, correlation and footprint probabilities |
-| Multi-IMT representation | Correlated area-peril channels for classes resolving to one measure; multi-measure classes refused | Determines whether GEM vulnerability can be represented faithfully in Oasis |
-| Realisation weighting | One logic-tree path sampled per hazard run | A single path understates hazard uncertainty |
-| Oasis static storage format | Interim ktools binaries; Parquet not measured | Earthquake footprints may be too large for uncompressed CSV |
+| Event representation | Settled: occurrence per event, recorded on each package by its converter approval. The formal study is dropped | Controls frequency, uncertainty, correlation and footprint probabilities |
+| Multi-IMT representation | Correlated area-peril channels for classes resolving to one measure; multi-measure classes refused. CASS is to measure the candidates against an OpenQuake reference calculation and decide | Determines whether GEM vulnerability can be represented faithfully in Oasis |
+| Realisation weighting | One logic-tree path sampled per hazard run. CASS is to measure what that costs and decide the rule | A single path understates hazard uncertainty |
+| Oasis static storage format | Interim ktools binaries. CASS is to measure a national footprint against Parquet and decide | Earthquake footprints may be too large for uncompressed CSV |
 | Secondary peril scope | Declare per country release | Defines what "earthquake loss" means |
+
+The three CASS is to decide are backlog items 21, 22 and 23 in the tracker, and
+each ends in a decision record. The last waits on a scope decision.
 
 GEM Foundation has given explicit written permission to use the data and models
 it makes publicly available, for the use KRE described to it: the Global
