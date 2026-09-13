@@ -44,7 +44,7 @@ Thumbs.db
 
 # Backend local state
 platform/backend/.venv/
-platform/backend/.test-artifacts/
+platform/backend/**/.test-artifacts/
 
 # Generated deployment records
 platform/deploy/image-digests.txt

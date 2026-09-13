@@ -1,6 +1,6 @@
 """Driving an analysis run across the Oasis boundary.
 
-Milestone 2 of section 19 is the target: CASS publishes the OED, runs Oasis
+Milestone M2 of section 13 is the target: CASS publishes the OED, runs Oasis
 file generation, then submits and monitors the loss job, with artifacts,
 errors, reconciliation and lineage visible -- and without anyone opening the
 native Oasis interface. This module is the orchestration half of that. The

@@ -108,6 +108,10 @@ range has to be re-checked against it rather than tuned to this.
 
 ## What replaces it
 
+**Replaced, 2026-09-12.** The PuSGeN 2024 national model, registered as
+[`v2024.0.0`](../v2024.0.0/MANIFEST.md), is what the platform now runs. This
+prototype stays for the pipeline tests. The original note follows.
+
 GEM's Global Hazard Mosaic, or a national model such as the Indonesian
 `PuSGeN` 2017 hazard maps and their underlying source model. Acquiring one is
 an external dependency and the outstanding item on the hazard leg. Whichever

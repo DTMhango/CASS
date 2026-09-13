@@ -17,7 +17,9 @@ Both repositories were clean immediately after cloning. The detached HEAD state 
 
 ## Pilot-country availability
 
-The public exposure repository contains Indonesia and Nepal national, Adm1 and taxonomy summary CSVs and associated figures. It does **not** contain the spatially disaggregated approximately 1 km exposure archives or the country vulnerability-mapping CSVs. Both ship with the licensed download obtained through the [GEM licence request page](https://www.globalquakemodel.org/license-request/global-exposure-model).
+The public exposure repository contains Indonesia and Nepal national, Adm1 and taxonomy summary CSVs and associated figures. It does **not** contain the spatially disaggregated approximately 1 km exposure archives, which ship with the licensed download obtained through the [GEM licence request page](https://www.globalquakemodel.org/license-request/global-exposure-model). The taxonomy mapping, first thought to ship only with that download, is in the public repository; see below.
+
+CASS holds both models under the installation's internal-use basis ([ADR 7](../../../platform/docs/adr/0007-internal-use-licence-basis.md)). GEM has not confirmed in writing that CC BY-NC-SA's NonCommercial term permits internal use supporting pricing and reserving.
 
 The vulnerability repository contains structural, non-structural, contents and fatalities XMLs for both Indonesia and Nepal.
 

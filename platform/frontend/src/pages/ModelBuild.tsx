@@ -82,24 +82,35 @@ const GATES = [
   },
 ];
 
-/** Open decisions from section 16 that gate converter architecture. */
+/**
+ * Open decisions from section 16 that gate converter architecture, as they
+ * stand in build plan 1.8. A prototype in use is not a decision taken, so each
+ * says what is running meanwhile as well as what is still to be decided.
+ */
 const OPEN_DECISIONS = [
   {
     decision: "Event representation",
-    position: "Complete a formal study before converter build",
+    position:
+      "Occurrence per event is implemented, and each package is built under a converter approval. The formal study has not reported.",
     matters:
       "Controls annual frequency, uncertainty, correlation and footprint probabilities.",
   },
   {
     decision: "Multi-IMT representation",
     position:
-      "Prototype correlated IMT channels, custom ground-up loss and an OpenQuake-loss fallback",
+      "Correlated area-peril channels are implemented for classes that resolve to one intensity measure. Classes that respond at several are refused, and the OpenQuake reference comparison is outstanding.",
     matters:
       "Determines whether the GEM vulnerability functions can be represented faithfully in Oasis. Converting everything to one common intensity measure is not an accepted default.",
   },
   {
+    decision: "Realisation weighting",
+    position: "Each hazard run samples one logic-tree path until a weighting rule is approved.",
+    matters:
+      "One path is one view of the hazard, not the model's weighted mean, so hazard uncertainty is understated.",
+  },
+  {
     decision: "Oasis static storage format",
-    position: "Select Parquet or binary runtime assets through performance tests",
+    position: "Interim: ktools binaries written by CASS. Parquet has not been measured.",
     matters: "Earthquake footprints may be too large for uncompressed CSV.",
   },
   {
@@ -194,7 +205,7 @@ export function ModelBuild({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="build__empty">
             <EmptyState
               title="No model-build runs yet"
-              description="A saved hazard configuration cannot be launched yet: the OpenQuake adapter is not implemented, so nothing turns a job specification into a run. Configurations saved on the hazard models screen are waiting for it."
+              description="Launch a saved configuration from the Hazard tab, or build a package for a model version above. Both runs appear here once started."
             />
           </div>
         )}
@@ -202,7 +213,7 @@ export function ModelBuild({ embedded = false }: { embedded?: boolean } = {}) {
 
       <Card
         title="Decisions still open"
-        description="From section 16 of the build plan. The converter architecture cannot be approved while these stand."
+        description="From section 16 of the build plan. Packages are built under a converter approval while these stand, but the converter architecture cannot be signed off until they close."
       >
         <ul className="decision-list">
           {OPEN_DECISIONS.map((item) => (

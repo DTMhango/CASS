@@ -5,9 +5,12 @@ in for. Published by the Team for Updating Seismic Hazard Maps of Indonesia —
 under the National Center for Earthquake Studies, with the GEM Foundation — as
 part of the 2026 mosaic.
 
-**Licence: CC BY-NC-SA 4.0. Commercial use is not cleared.** The registry
-records that as a stored fact, so anything computed from this is research and
-platform development until somebody names the agreement that changes it.
+**Licence: CC BY-NC-SA 4.0.** CASS holds it under the installation's
+internal-use basis — used inside Klapton Re, not redistributed, not sold — which
+is recorded once rather than per upload
+([ADR 7](../../../../platform/docs/adr/0007-internal-use-licence-basis.md)).
+GEM has not confirmed in writing that NonCommercial permits internal use
+supporting pricing and reserving, so that question stays open.
 
 ## What it contains
 

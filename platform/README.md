@@ -144,12 +144,15 @@ not support is refused rather than silently producing zero. A model version
 whose licence or IMT coverage is outstanding publishes as a research prototype
 with its blockers listed, not as an approved model.
 
-**The converter refuses to run.** Event semantics and multi-IMT representation
-are open decisions in section 16, so the converter has no default for either: a
-conversion under an unapproved policy raises rather than picking something
-plausible. Converting every vulnerability function to one common intensity
-measure is rejected even when chosen explicitly, because section 6 requires its
-own scientific derivation and approval first.
+**The converter runs only under an approved policy.** Event semantics and
+multi-IMT representation are open decisions in section 16, so the converter has
+no default for either. A package is built only under a converter-candidate
+approval that somebody other than the requester decided, naming occurrence per
+event and intensity measures carried as area-peril channels
+([ADR 8](docs/adr/0008-intensity-measures-as-area-peril-channels.md)).
+Converting every vulnerability function to one common intensity measure is
+rejected even when chosen explicitly, because section 6 requires its own
+scientific derivation and approval first.
 
 **The M2 engine slice works against a real Oasis.** An analysis run publishes
 its frozen OED to an Oasis portfolio, maps it through the CASS keys service,
@@ -167,21 +170,43 @@ run-exception approval. A blocked run is not a failed one: it keeps its
 progress, has its own `gate_summary`, and resumes from the gate rather than
 republishing its portfolio.
 
-**A source portfolio extract imports without joining itself.** The Klapton Re
-geocoded policy extract is registered as an immutable, project-restricted
-artifact *before* it is parsed — a workbook that cannot be read is still
-evidence of what was supplied — then both sheets are staged independently and
-the join is reported rather than performed. Two business references in the real
-extract carry more than one policy row, and joining on the business reference
-alone would repeat their locations once per policy and inflate a total that
-still looked plausible.
+**Hazard runs on OpenQuake from a published model.** A national package such as
+PuSGeN 2024 is uploaded, inspected and configured on the Hazard tab. The
+classical calculation it publishes is converted to an event-based run with every
+change listed, the model's own science is shown but not offered for editing, a
+run can be limited to a region, and the published Vs30 is joined to the cells it
+covers ([ADR 12](docs/adr/0012-national-classical-model-run-event-based.md)).
+The run goes through the OpenQuake REST API and registers a hazard set with one
+footprint per intensity measure.
+
+**CASS builds the Oasis model package.** A model version with a hazard set
+attached becomes the directory the Oasis worker loads. CASS writes the binaries,
+held byte-for-byte against PiWind's, and vendors its lookup inside, so the
+engine's lookup is the one CASS reconciled against
+([ADR 9](docs/adr/0009-cass-writes-the-oasis-package.md)). The worker carries a
+build-time patch for three oasislmf 2.5.7 defects that otherwise stop every
+insured and reinsurance run ([ADR 10](docs/adr/0010-patched-oasis-worker.md)).
+
+**An analysis ends in results a person can use.** The ORD package is read into
+result sets — draft, or research for a prototype model — with the exceedance
+basis recorded. Results can be approved, exported with their manifest, and
+compared, with the arithmetic done on the server in `Decimal`. The invented
+Jakarta–Bandung book in `samples/` runs ground-up, insured and reinsurance to
+results against the live stack.
+
+**A portfolio arrives through the intake template.** Risks and policies are
+joined on the Policy ID stated on both sheets, value is read in three recorded
+tiers, and storeys are collected because height decides which intensity measure
+a class responds at ([ADR 11](docs/adr/0011-intake-template-and-policy-id.md)).
+The 30 June extract was migrated into the template once. The rows of any
+attached OED file can be read and corrected on the platform, checked against
+the file's own schema; a published version is corrected into the next one.
 
 Coordinate presence is not coordinate eligibility. Every location in the real
 extract has a valid coordinate pair and 115 of 224 still need review, so rows
 are assigned to governed cohorts — A precise and unflagged, B coarse and
 unflagged, C flagged — with the rule version that assigned them, and cohort C
-is the review queue. The transformation manifest is downloadable and withholds
-insured, cedent and broker names unless a role that needs them asks.
+is the review queue.
 
 The acceptance checks in the integration brief are numbers against the real
 workbook, which is confidential and not in this repository. They live in
@@ -212,37 +237,39 @@ an empty grid and mapping nothing.
 
 ## What is not built
 
-Ordered as the roadmap orders it.
+The working tracker is [docs/delivery-status.md](docs/delivery-status.md). It
+goes milestone by milestone and stage by stage, and separates what is buildable
+from what waits on a decision or an outside input. In short:
 
-- **Phase 3, hazard.** OpenQuake job submission, the Indonesia and Nepal
-  adaptive grids, and site-condition treatment. The grid model, its versioning
-  rules and the loader that reads its cells exist; the published geometry does
-  not.
-- **Phase 4, converter.** Chunked HDF5 reading and vulnerability
-  discretisation. The framework around them — policy gating, deterministic
-  identifiers, intensity binning, streaming footprint accumulation, frequency
-  reconciliation — is built and tested.
-- **Phase 5 onward.** Enrichment execution, maps, EP curves and comparison
-  views.
-
-None of this is blocked by the platform. Each is blocked by a scientific
-decision or an engine integration that the plan sequences deliberately.
+- **Analysis stages.** `enrich`, `smoke` and `review` are not performed, and
+  exposure is validated only before submission.
+- **Scientific gates.** The hazard benchmark and conversion QA stand open with no
+  approved references, and the converter reads OpenQuake's CSV exports rather
+  than the HDF5 datastore.
+- **Analyst product.** Maps, EP charts, event loss tables, geographic summaries,
+  the financial structure workspace and the OED standards registry.
+- **Production readiness.** Backup and restore, observability, single sign-on
+  and MFA, upload scanning, retention expiry and signed releases.
 
 ## Outstanding decisions that gate the model
 
-From section 16, visible in the interface on the model build screen:
+From section 16 as revised in plan 1.8, visible in the interface on the Build
+tab:
 
 | Decision | Position | Why it matters |
 | --- | --- | --- |
-| Event representation | Formal study before converter build | Controls frequency, uncertainty, correlation and footprint probabilities |
-| Multi-IMT representation | Prototype correlated channels, custom GUL and an OpenQuake-loss fallback | Determines whether GEM vulnerability can be represented faithfully in Oasis |
-| Oasis static storage format | Select Parquet or binary through performance tests | Earthquake footprints may be too large for uncompressed CSV |
+| Event representation | Occurrence per event in use under a converter approval; formal study not reported | Controls frequency, uncertainty, correlation and footprint probabilities |
+| Multi-IMT representation | Correlated area-peril channels for classes resolving to one measure; multi-measure classes refused | Determines whether GEM vulnerability can be represented faithfully in Oasis |
+| Realisation weighting | One logic-tree path sampled per hazard run | A single path understates hazard uncertainty |
+| Oasis static storage format | Interim ktools binaries; Parquet not measured | Earthquake footprints may be too large for uncompressed CSV |
 | Secondary peril scope | Declare per country release | Defines what "earthquake loss" means |
 
-The GEM public models are CC BY-NC-SA. KRE's intended use supports commercial
-reinsurance decisions, so it remains a research activity until GEM confirms
-permitted commercial use in writing. The seeded model version records this as a
-publication blocker rather than assuming it resolved.
+Model data is held under one internal-use basis: used inside Klapton Re, not
+redistributed and not sold ([ADR 7](docs/adr/0007-internal-use-licence-basis.md)).
+The GEM models and PuSGeN 2024 are CC BY-NC-SA, and GEM has not confirmed in
+writing that the NonCommercial term permits internal use supporting pricing and
+reserving. That question, and legal review before any use outside KRE, remain
+open.
 
 ## The name
 

@@ -88,9 +88,9 @@ export function Administration() {
 
       {!isAdmin ? (
         <Notice tone="info" title="Read-only view">
-          Queue and retention management is restricted to platform administrators. The
-          version and health information below is available to everyone so it can be
-          quoted in a support request.
+          User and role changes are made by a platform administrator. The version and
+          health information below is available to everyone so it can be quoted in a
+          support request.
         </Notice>
       ) : null}
 

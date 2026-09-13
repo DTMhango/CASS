@@ -11,8 +11,8 @@ This plan is the product and engineering baseline. Model assumptions remain subj
 
 | Prepared for | Klapton Reinsurance PLC |
 | --- | --- |
-| Planning date | 12 September 2026 |
-| Document version | 1.7 CASS Naming and ODS Reference Baseline |
+| Planning date | 12 September 2026; delivery status revised 13 September 2026 |
+| Document version | 1.8 Delivery Status and Design Changes |
 | Initial peril | Earthquake |
 | Pilot countries | Indonesia and Nepal |
 | Deployment | KRE servers or approved local Docker installations |
@@ -21,6 +21,10 @@ This plan is the product and engineering baseline. Model assumptions remain subj
 **Purpose**
 
 This plan defines the product, scientific, data, engineering, validation and operating work required to build CASS, Klapton Reinsurance PLC's integrated catastrophe modelling application. It establishes the target architecture and a staged route from the proven Docker test environment to a governed earthquake modelling service.
+
+**Revision 1.8**
+
+Version 1.8 records where delivery has moved the design since 1.7. The text below is otherwise unchanged. Where a statement has been overtaken, it is followed by a *Changed in 1.8* note linking the decision record that changed it. Section 19 summarises every change and the delivery position; the working tracker is [CASS delivery status](../platform/docs/delivery-status.md).
 
 ## 1  Executive Direction
 
@@ -37,6 +41,8 @@ The platform will use Docker as the common execution boundary from development o
 Exposure enrichment will follow an evidence hierarchy: reported KRE or cedant data, reliably derived data, permitted external corroboration, GEM-informed probabilistic assumptions, then documented expert overrides. Assumptions will never overwrite reported facts. Every inferred field will retain its source, confidence and assumption-set version, and analysts will be able to compare approved alternative assumptions. GEM exposure is therefore a prior for missing attributes rather than a statement of fact about an individual insured building.
 
 The first technical model gate is an SA-only prototype using SA(0.3), SA(0.6) and SA(1.0), beginning with an SA(0.3) vertical slice. This deliberately narrows the converter proof while retaining the period-specific nature of spectral acceleration. The complete 2026 GEM functions also contain PGA-based classes, so the SA-only package is a research prototype and may not be published as a complete Indonesia or Nepal portfolio model until exposure coverage is measured and the PGA classes are either added or replaced through an approved scientific method.
+
+> *Changed in 1.8.* The converter now produces a footprint for every intensity measure the hazard set carries, PGA included, with each measure carried as a correlated area-peril channel ([ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md)). Classes whose taxonomies respond at several measures are still refused until a representation for them is approved. The section 6 study and the OpenQuake reference comparison remain open.
 
 **Build Outcome**
 
@@ -141,6 +147,8 @@ The CASS web application is the primary operating interface for release one, not
 | Results workspace | Support risk interpretation | AAL, EP curves, event tables, maps, assumption ranges, uncertainty attribution, comparisons and downloads |
 | Model build workspace | Manage scientific assets | Hazard runs, converter QA, vulnerability sets, model packages and approval gates |
 | Administration | Operate the service | Users, roles, engine health, queues, storage, retention and audit search |
+
+> *Changed in 1.8.* The model catalogue, hazard and model build screens are tabs of one Models area, and the exposure workspace and import review are tabs of one Exposure area ([ADR 13](../platform/docs/adr/0013-product-areas-hold-tabs.md)). The financial structure workspace belongs in the Exposure area.
 
 ### Visual design system
 
@@ -268,6 +276,8 @@ The same versioned container set should support two approved operating modes. A 
 
 The pilot will cover Indonesia and Nepal using appropriate earthquake source models obtained from GEM and loaded into OpenQuake. The exact source-model releases, licences and checksums must be recorded before use. Each country will use a fixed, versioned, adaptive area-peril grid that is independent of uploaded portfolios. OpenQuake will generate hazard on the approved grid during controlled model builds, and the resulting Oasis footprint will be reused across portfolio analyses.
 
+> *Changed in 1.8.* Indonesia's hazard is the PuSGeN 2024 national model from GEM's 2026 mosaic. It is a classical calculation, which CASS converts to an event-based run on the fixed grid, sampling one logic-tree path until a realisation-weighting rule is approved ([ADR 12](../platform/docs/adr/0012-national-classical-model-run-event-based.md)). Only the 858-cell Jakarta–Bandung region has been run. Nepal has no source model yet.
+
 The grid will use finer resolution in important exposure centres and areas with strong hazard or site-condition gradients, medium resolution across other populated or commercially relevant areas, and coarser resolution in sparsely exposed regions. Indonesia's grid should avoid unnecessary calculation points over ocean and allow island or regional tiling. Nepal's grid should provide deliberate refinement around Kathmandu and other material exposure centres while retaining suitable national coverage.
 
 **Country Model Definition**
@@ -333,6 +343,8 @@ Converting all vulnerability functions to one common IMT is not an accepted defa
 
 The SA-only model will report supported and unsupported vulnerability classes and associated TIV. It cannot pass the model-release gate as a full country model while material exposure maps to PGA functions. After the SA converter is proven, KRE will choose between adding a PGA channel, licensing or developing scientifically justified SA alternatives, or explicitly limiting the published model's supported taxonomy scope.
 
+> *Changed in 1.8.* PGA is produced alongside the SA measures ([ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md)), so the open question is no longer PGA. It is the classes whose taxonomies respond at several measures: 56 of the 240 classes per country in the current build, most of them risks with no stated storey count.
+
 ## 7  OpenQuake to Oasis Converter
 
 The converter is a CASS product component, not an ad hoc export script. It should be packaged as a stateless container and called by a durable background job. Its public contract is a conversion manifest; its output is a complete candidate Oasis model package plus machine-readable validation evidence.
@@ -371,6 +383,8 @@ The production file format—CSV, binary or Parquet—will follow Oasis 2.5.x su
 | `lossfactors.csv/.bin` | Post-loss amplification factors | Deferred unless demand surge or another PLA method is approved | Created by a separate governed PLA workstream, not inferred by the converter |
 
 For CSV-sourced assets, the model-build job will use the Oasis-supported converters to create binaries and indexes, then perform CSV-to-binary-to-CSV or Parquet round-trip checks, row counts, probability sums, identifier coverage and checksums. The published package will contain only the runtime formats and reference dictionaries required by the selected worker, while the complete source and validation evidence remain in model-build storage.
+
+> *Changed in 1.8.* CASS writes the runtime binaries itself, held byte-for-byte against the official PiWind binaries, and ships its own lookup inside the package so the lookup Oasis runs is the one CASS reconciles against ([ADR 9](../platform/docs/adr/0009-cass-writes-the-oasis-package.md)). A worker serves one package at a time.
 
 ### Engineering requirements
 
@@ -477,6 +491,8 @@ The lookup pipeline will:
 - Produce a separate errors file and coverage report showing mapped and unmapped location counts and TIV by reason, country, cedant, coverage and confidence.
 
 - Reconcile successful, not-at-risk and failed TIV to the published OED source before the analyst may proceed or approve a permitted exception.
+
+> *Changed in 1.8.* Portfolios arrive through the CASS intake template joined on Policy ID, exposure versions no longer record a cedant, and portfolio data is not restricted by role ([ADR 11](../platform/docs/adr/0011-intake-template-and-policy-id.md)). Where this plan segments by cedant, segment by portfolio, account, policy, country and occupancy.
 
 ### Portfolio-specific Oasis files
 
@@ -701,7 +717,11 @@ Every decision view and export will identify model version, valuation date, fina
 
 OpenQuake is distributed under the GNU Affero General Public License version 3, while the main OasisLMF repository uses a BSD licence. KRE should obtain legal review before offering CASS to external network users, distributing modified engine containers or embedding third-party hazard and vulnerability data. The design should prefer unmodified upstream engine containers and separate CASS adapters, but service separation must not be treated as a substitute for licence analysis.
 
+> *Changed in 1.8.* The Oasis model worker is built from the official 2.5.7 image with a build-time patch for three oasislmf defects that stop insured and reinsurance runs ([ADR 10](../platform/docs/adr/0010-patched-oasis-worker.md)). One consequence: reinsurance results are available at whole-portfolio level only. OpenQuake remains unmodified.
+
 The public GEM Global Exposure and Global Vulnerability Models are published under CC BY-NC-SA terms. KRE's intended internal use supports commercial reinsurance decisions and must therefore remain a research/evaluation activity until GEM confirms the permitted commercial use in writing. The licence record must address use of original data, transformed vulnerability and Oasis model packages, derived priors, attribution, internal server deployment, approved local Docker distribution, retention and deletion.
+
+> *Changed in 1.8.* CASS now records all model data under one internal-use basis — used inside Klapton Re, not redistributed, not sold — and no longer treats the licence as a publication blocker ([ADR 7](../platform/docs/adr/0007-internal-use-licence-basis.md)). That records the basis KRE operates under. It does not settle whether the NonCommercial term permits internal use supporting pricing and reserving, which this section judged to need GEM's written confirmation. That confirmation, and legal review before any use outside KRE, remain open.
 
 The official v2026.0.0 repositories are pinned in the project model inventory. Their public Indonesia and Nepal exposure content consists of summary tables and figures; the approximately 1 km spatial exposure and required mapping assets must be obtained through the authorised GEM process. No model release may infer that those licensed files are present merely because the public repositories have been downloaded.
 
@@ -877,17 +897,23 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 | Release users | KRE staff and approved key users | Confirmed | Defines an internal security and support model without external tenancy |
 | Pilot countries | Indonesia and Nepal using GEM earthquake source models | Confirmed | Establishes the first two scientific validation workstreams |
 | Hazard spatial basis | Fixed, versioned, adaptive area-peril grid for each country; portfolio-specific sites reserved for validation and specialist studies | Confirmed | Enables reusable footprints while controlling storage and spatial approximation |
-| Event representation | Complete a formal study before converter build | Open | Controls frequency, uncertainty, correlation and footprint probabilities |
-| Multi-IMT representation | Prototype correlated IMT channels, custom GUL and OpenQuake-loss fallback; do not default to common-IMT conversion | Open | Determines whether GEM vulnerability can be represented faithfully in Oasis |
-| Initial IMT scope | SA-only converter prototype: SA(0.3) first, then SA(0.6) and SA(1.0); PGA deferred from the prototype but not assumed unnecessary for production | Confirmed | Narrows early engineering while preventing incomplete taxonomy coverage from being presented as a full country model |
+| Event representation | Occurrence per event is implemented and used under a converter-candidate approval for each package; the formal study has not reported | Open, prototype in use | Controls frequency, uncertainty, correlation and footprint probabilities |
+| Multi-IMT representation | Correlated area-peril channels implemented for classes resolving to one measure; multi-measure classes refused; OpenQuake reference comparison outstanding ([ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md)) | Open, prototype in use | Determines whether GEM vulnerability can be represented faithfully in Oasis |
+| Initial IMT scope | Superseded: the converter produces PGA, SA(0.3), SA(0.6) and SA(1.0) footprints ([ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md)) | Changed in 1.8 | The SA-only scope left PGA-routed exposure with no function |
+| Realisation weighting | One logic-tree path sampled per hazard run until a weighting rule is approved ([ADR 12](../platform/docs/adr/0012-national-classical-model-run-event-based.md)) | Open | A single path understates hazard uncertainty |
+| Indonesia hazard source | PuSGeN 2024 national model, converted from classical to event-based ([ADR 12](../platform/docs/adr/0012-national-classical-model-run-event-based.md)) | Changed in 1.8 | Determines the hazard behind every Indonesian loss |
+| Nepal hazard source | No source model acquired | Open | Nepal can map keys but cannot produce a loss |
+| Model data rights | All model data held under one internal-use basis; GEM's written confirmation for internal use supporting pricing and reserving not obtained ([ADR 7](../platform/docs/adr/0007-internal-use-licence-basis.md)) | Changed in 1.8, legal confirmation open | Controls whether results may support decisions and whether data may leave KRE |
+| Oasis worker image | Official 2.5.7 image with a build-time patch for three oasislmf defects ([ADR 10](../platform/docs/adr/0010-patched-oasis-worker.md)) | Changed in 1.8 | Insured and reinsurance runs cannot finish without it |
+| Portfolio intake | CASS intake template joined on Policy ID; no cedant; no role-based data classification ([ADR 11](../platform/docs/adr/0011-intake-template-and-policy-id.md)) | Changed in 1.8 | Removes the inferred join and the review barrier on addresses |
 | Deployment | KRE servers or controlled Docker installations on approved devices | Confirmed | Requires equivalent results, secure packaging, upgrades and local support procedures |
 | Portfolio scale | The first extract contains 1,353 policies and 224 geocoded locations; larger and non-geocoded portfolios still require measurement | Partially confirmed | Provides a realistic small pilot while leaving median, maximum and enrichment workloads to be measured |
-| OED compatibility baseline | Load the official reference JSON through pinned ODS Tools; register OED 4.0.0 as active and OED 5.0.0 as candidate, then select the production baseline through PiWind, KRE-extract and OasisLMF 2.5.7 tests | In progress | Controls generated fields, dynamic CASS forms, validation semantics and upgrade behavior without creating a competing schema |
-| Oasis static storage format | Retain governed source tables and select Parquet or binary runtime assets through performance tests | Open | Earthquake footprints may be too large for uncompressed CSV or unsuitable storage choices |
-| Input-file ownership | CASS creates business records and immutable OED; CASS keys maps exposure; pinned OasisLMF creates portfolio kernel and financial files | Proposed | Prevents duplicated Oasis logic while keeping a complete user-facing workflow |
-| Exposure enrichment | Reported data first; GEM-derived conditional priors only for missing fields; compare approved assumption scenarios | Proposed | Prevents false precision while allowing incomplete facultative portfolios to be modelled |
-| GEM model baseline | Matched v2026.0.0 exposure and vulnerability; public repositories pinned, licensed spatial/mapping assets outstanding | Partially confirmed | Prevents taxonomy-version mismatch and records the remaining acquisition gate |
-| Vulnerability source | Use only functions with documented provenance and commercial rights; validate multi-IMT and damage-bin translation | Open | Controls model credibility, cost and publication rights |
+| OED compatibility baseline | Load the official reference JSON through pinned ODS Tools; register OED 4.0.0 as active and OED 5.0.0 as candidate, then select the production baseline through PiWind, KRE-extract and OasisLMF 2.5.7 tests. OED 4.0.0 is in use through the hand-maintained CASS subset; the registry, reference JSON and schema API are not yet built | In progress | Controls generated fields, dynamic CASS forms, validation semantics and upgrade behavior without creating a competing schema |
+| Oasis static storage format | Retain governed source tables and select Parquet or binary runtime assets through performance tests. Interim: ktools binaries written by CASS ([ADR 9](../platform/docs/adr/0009-cass-writes-the-oasis-package.md)); Parquet not yet measured | Open | Earthquake footprints may be too large for uncompressed CSV or unsuitable storage choices |
+| Input-file ownership | CASS creates business records and immutable OED; CASS keys maps exposure; pinned OasisLMF creates portfolio kernel and financial files. The model package ships the CASS lookup, so Oasis's own lookup is the same one ([ADR 9](../platform/docs/adr/0009-cass-writes-the-oasis-package.md)) | Implemented | Prevents duplicated Oasis logic while keeping a complete user-facing workflow |
+| Exposure enrichment | Reported data first; GEM-derived conditional priors only for missing fields; compare approved assumption scenarios. The GEM mixture priors are built; applying an assumption set within a run is not | Proposed | Prevents false precision while allowing incomplete facultative portfolios to be modelled |
+| GEM model baseline | Matched v2026.0.0 exposure and vulnerability; public repositories pinned. The taxonomy mapping is in the public repository and in use; the licensed ~1 km spatial exposure is outstanding | Partially confirmed | Prevents taxonomy-version mismatch and records the remaining acquisition gate |
+| Vulnerability source | GEM v2026.0.0 functions, discretised with a mean-preserving method and a reconstruction check on every bin; held under the internal-use basis ([ADR 7](../platform/docs/adr/0007-internal-use-licence-basis.md)) | Partially confirmed | Controls model credibility, cost and publication rights |
 | Secondary peril scope | Declare inclusion or exclusion of liquefaction, landslide, tsunami and fire following earthquake by country release | Open | Defines what "earthquake loss" means and the expected bias from omissions |
 | Business interruption | Treat separately from structural, non-structural and contents damage | Open | BI may be material for facultative commercial and industrial risks |
 | Financial scope | Ground-up first; add insured then reinsurance behind golden tests | Proposed | Avoids mixing hazard validation with complex contract interpretation |
@@ -991,3 +1017,37 @@ The following upstream sources define the initial implementation boundary. CASS 
 ### Version policy
 
 The production selection should favour the OpenQuake LTS line unless a required model or export capability is available only in the newer stable line. Oasis should use a tested 2.5.x patch release and matching Platform and model-worker images. Every engine update must run contract, scientific regression and PiWind or earthquake end-to-end suites before promotion.
+
+## 19  Delivery Status and Changes in 1.8
+
+This section is a summary at 13 September 2026. The working tracker, which moves with the code, is [CASS delivery status](../platform/docs/delivery-status.md).
+
+### Milestone position
+
+| Milestone | Position | Principal gap |
+| --- | --- | --- |
+| M1 Foundation | Met | — |
+| M2 Engine integration | Met except the pre-loss smoke check | Reduced-event check before losses |
+| M3 Hazard | Partly met: PuSGeN 2024 run on the Jakarta–Bandung region with published Vs30 | Benchmark gate, full-country run, realisation weighting, Nepal source model |
+| M4 Conversion | Partly met: four-measure footprints, frequency preserved, package built under approval | HDF5 datastore reading, QA gate, OpenQuake reference comparison |
+| M5 Loss | Not met: ground-up, insured and reinsurance run with keys reconciliation | Assumption sets applied within a run, currency evidence |
+| M6 Product | Partly met: result approval, export and comparison | Maps, EP charts, event loss tables, geographic summaries, financial structure workspace |
+| M7 Production | Not met | Backup and restore drill, and the security and operations controls of sections 10 and 11 |
+
+### Where the design changed
+
+| Area | 1.7 position | 1.8 position | Record |
+| --- | --- | --- | --- |
+| Model data rights | Research only until GEM confirms commercial use in writing | One internal-use basis; GEM's written position and legal review still open | [ADR 7](../platform/docs/adr/0007-internal-use-licence-basis.md) |
+| Intensity measures | SA-only prototype, PGA deferred | All four measures as correlated area-peril channels; multi-measure classes refused | [ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md) |
+| Model package | Binaries compiled with Oasis tools | Written by CASS and byte-checked; the CASS lookup ships inside | [ADR 9](../platform/docs/adr/0009-cass-writes-the-oasis-package.md) |
+| Engine images | Unmodified upstream | Oasis worker patched for three oasislmf 2.5.7 defects; OpenQuake unmodified | [ADR 10](../platform/docs/adr/0010-patched-oasis-worker.md) |
+| Portfolio intake | Geocoded extract; names shown by role; cedant segmentation | Intake template joined on Policy ID; no role gate; no cedant | [ADR 11](../platform/docs/adr/0011-intake-template-and-policy-id.md) |
+| Hazard source | GEM source models | PuSGeN 2024, converted from classical to event-based, one sampled path | [ADR 12](../platform/docs/adr/0012-national-classical-model-run-event-based.md) |
+| Screens | One sidebar entry per screen | Models and Exposure areas holding their screens as tabs | [ADR 13](../platform/docs/adr/0013-product-areas-hold-tabs.md) |
+
+### What remains
+
+Buildable in code: the `enrich`, `smoke` and `review` analysis stages; run modes; currency evidence; event loss tables, geographic summaries, EP charts and maps; the financial structure workspace; the OED standards registry; HDF5 datastore reading; benchmark and QA gate machinery; the OpenQuake reference comparison; Cohort B sensitivity; completed direct uploads with scanning; enforced execution profiles; keys and converter services; retention expiry; administration of users, queues, storage and retention with a support bundle; observability; MFA and single sign-on; backup and restore; CI coverage of the patched worker with SBOMs; pinned digests and a release bundle.
+
+Needing a decision or outside input: the event representation study; a representation for multi-measure classes; realisation weighting; the storage format; secondary-peril and business-interruption scope; GEM's written position on internal use and legal review; a Nepal source model, denser Vs30 and the licensed ~1 km exposure; approved benchmark curves and QA tolerances; the brief's section 5.1 data questions; a full-country hazard run; and production choices for identity, broker and recovery targets.

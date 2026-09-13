@@ -58,6 +58,12 @@ belongs where the science happens.
 The converter cannot produce a model package today. That is the correct state:
 neither study has reported.
 
+*Amended by [ADR 8](0008-intensity-measures-as-area-peril-channels.md), 2026-09-13.*
+A package is now built under a converter-candidate approval decided by someone
+other than the requester, naming occurrence per event and correlated
+area-peril channels. Refusing an unapproved policy is unchanged, and
+`COMMON_IMT` is still rejected.
+
 When a study reports, the change is data — an approved policy value and an
 approval reference — not a code change to the conversion path. The machinery is
 already tested against it.

@@ -109,6 +109,8 @@ Keep Engineering as a separate workstream. Construction/erection risks, operatio
 4. Restrict download to project members with portfolio-data permission.
 5. Display insured, cedent and broker names only where the user's role requires them. Use source references in technical logs.
 
+> *Superseded 12 September 2026.* Every CASS user sees portfolio data, including names and addresses, because the geocoding review needs the address beside the coordinate. Only what leaves the platform — logs and support bundles — carries identifiers instead of portfolio rows ([ADR 11](../platform/docs/adr/0011-intake-template-and-policy-id.md)).
+
 ### 4.2 Parse both sheets independently
 
 Create staging records without changing the source values:
@@ -379,3 +381,28 @@ This dataset is successfully scoped when the programme can show:
 - a documented list of unresolved component-allocation, financial-term and taxonomy questions;
 - masked automated fixtures covering the source's structural edge cases;
 - a signed readiness decision before any result is presented as a KRE portfolio loss estimate.
+
+## 11  Status at 13 September 2026
+
+The source now reaches CASS through the CASS intake template rather than as the two-sheet workbook. The 30 June extract was migrated into the template once, joined on the Policy ID stated on both sheets, and the join rules of section 4.3 now describe that migration only ([ADR 11](../platform/docs/adr/0011-intake-template-and-policy-id.md)). The working tracker is [CASS delivery status](../platform/docs/delivery-status.md).
+
+| Completion evidence (section 10) | Status |
+| --- | --- |
+| Registered immutable source artifact with restricted access | Done |
+| Repeatable import with the expected counts and no fan-out | Done; checked in `test_extract_acceptance.py` against the real workbook |
+| Visible Cohort A, B and C assignments with reasons | Done, on the Import review tab |
+| Fixed-grid mapping report for Indonesia and Nepal | Partly done: keys reports per run against the prototype grids; Cohort B sensitivity not built |
+| Geometry-only run making no financial claim | Not built |
+| KRE-share USD end-to-end run, labelled and blocked from decision use | Done against the fixture model |
+| Exact policy-level TIV reconciliation under every allocation scenario | Done |
+| Documented list of unresolved component, financial-term and taxonomy questions | Listed in section 5.1 and the tracker; unanswered |
+| Masked automated fixtures covering the structural edge cases | Done |
+| Signed readiness decision | Not taken |
+
+| Work package | Status |
+| --- | --- |
+| WP1 Secure importer | Done, then superseded by the intake template |
+| WP2 Eligibility and review interface | Done |
+| WP3 Area-peril and keys test | Partly done: mapping and outside-domain reporting; Cohort B sensitivity and OpenQuake site comparison not built |
+| WP4 Controlled Oasis earthquake test | Steps 1 to 8 done against the fixture model; step 9, the OpenQuake reference comparison, not built |
+| WP5 Portfolio-loss readiness | Not started |

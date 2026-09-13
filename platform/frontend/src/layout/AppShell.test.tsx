@@ -61,6 +61,11 @@ function routeFor(url: string, method: string): { status: number; body: unknown 
   if (url.includes("/platform/") || url.includes("/engines/")) {
     return { status: 200, body: { engines: {} } };
   }
+  // The catalogue answers with its models under a key rather than a page, and
+  // a page here left the query holding undefined.
+  if (url.includes("/model-versions/catalogue/")) {
+    return { status: 200, body: { models: [] } };
+  }
   return { status: 200, body: { count: 0, next: null, previous: null, results: [] } };
 }
 
