@@ -181,6 +181,25 @@ PILOT_ENRICHMENTS: dict[str, Enrichment] = {
 }
 
 
+#: The draft tilts behind the three assumption sets section 8 requires, used
+#: where a registered assumption set states no rule of its own.
+#:
+#: Illustrative sensitivities, not calibrated priors. More robust halves the
+#: weight of buildings designed to no code and doubles those designed to a high
+#: one, with the two middle levels moved a quarter and a half; more vulnerable
+#: does the opposite. That moves a typical concrete mixture's mean loss far
+#: enough to see without removing any building type. They exist so the platform
+#: can show how far a result moves when the design-level assumption does, and
+#: they must be replaced by values a local structural engineer and the model
+#: owner approve at the exposure-enrichment gate before a result under them is
+#: used for a decision.
+ASSUMPTION_TILTS: dict[str, dict[str, float]] = {
+    "baseline": {},
+    "more_robust": {"CDN": 0.5, "CDL": 0.75, "CDM": 1.5, "CDH": 2.0},
+    "more_vulnerable": {"CDN": 2.0, "CDL": 1.5, "CDM": 0.75, "CDH": 0.5},
+}
+
+
 def enrichment(country_code: str) -> Enrichment:
     try:
         return PILOT_ENRICHMENTS[country_code.upper()]

@@ -10,7 +10,7 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,616 backend tests pass, 1 skipped. 97 integration tests pass against the
+- 1,657 backend tests pass, 1 skipped. 97 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package and the 30 June workbook.
   89 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
@@ -45,7 +45,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | Stage | Status |
 | --- | --- |
 | `validate_exposure` | Done, in the exposure workspace and again inside the run: the published files must still validate, match the version record, carry one currency and support the requested perspectives |
-| `enrich` | Not built: no run applies an assumption set, and nothing creates an `EnrichmentRun` |
+| `enrich` | Done. The run's assumption set chooses the vulnerability set the engine uses ([ADR 14](adr/0014-assumption-sets-as-vulnerability-sets.md)), and an `EnrichmentRun` records reported, derived, imputed and unresolved attributes, missingness by value, exceptions, and a lineage table as an artifact. No value moves |
 | `publish_oed` | Done. Before it, the run checks the engine version and that the worker serves this model version's package ([ADR 9](adr/0009-cass-writes-the-oasis-package.md)) |
 | `keys` | Done, through CASS keys |
 | `reconcile_keys` | Done. Unmapped value holds the run; the analyst asks for an exception on the run monitor, a reviewer who did not ask decides, and the run resumes from the gate |
@@ -78,7 +78,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | Model catalogue | Built, Models tab | — |
 | Exposure workspace | Built, Exposure tab: intake import, OED attach, validation, row correction, publication | Assumption scenarios; reported-versus-inferred display across attributes |
 | Financial structure workspace | Not built | Accounts and layers, contracts, scope preview, inuring, reconciliation |
-| Analysis builder | Built | Assumption set, run mode, output selection |
+| Analysis builder | Built, including the assumption set | Run mode, output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
 | Results workspace | Partly built: AAL, return-period table, caveats, approval, export, comparison | Maps, EP curve charts, event tables, scenario ranges |
 | Model build workspace | Built, Hazard and Build tabs | Benchmark and QA evidence views |
@@ -105,13 +105,14 @@ updated afterwards is a tracker somebody has to reconcile.
 | Portfolio intake | Two-sheet extract; role-gated names; cedant segmentation | Intake template joined on Policy ID; no role gate; no cedant | [ADR 11](adr/0011-intake-template-and-policy-id.md) |
 | Hazard source | GEM source models | PuSGeN 2024 converted to event-based, one sampled path | [ADR 12](adr/0012-national-classical-model-run-event-based.md) |
 | Navigation | One screen per sidebar entry | Models and Exposure areas with tabs | [ADR 13](adr/0013-product-areas-hold-tabs.md) |
+| Assumption sets | Enrichment applied to exposure | Re-weighted mixtures carried as vulnerability sets the engine selects per analysis; no value moves; pilot tilts are draft | [ADR 14](adr/0014-assumption-sets-as-vulnerability-sets.md) |
 
 ## Backlog: buildable in code
 
 | # | Item | Plan | Status |
 | --- | --- | --- | --- |
 | 1 | Analysis pipeline: exposure validation inside the run, `smoke` on a reduced event set, `review` stage, and releasing a run held at a gate | §8, M2 | Done |
-| 1b | `enrich`: applying an assumption set within a run, with reconciliation | §8, M5 | Not started |
+| 1b | `enrich`: applying an assumption set within a run, with reconciliation | §8, M5 | Built; live comparison of two sets pending |
 | 2 | Run modes: geometry-only, technical loss, research, decision use | Brief §5.2 | Not started |
 | 3 | Currency conversion evidence captured and applied before generation | §8 | Not started |
 | 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Not started |

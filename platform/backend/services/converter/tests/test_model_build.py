@@ -18,6 +18,7 @@ from cass_converter.bins import DamageBinSet, IntensityBinSet, log_bins, oasis_d
 from cass_converter.enrichment import (
     UNKNOWN_CONSTRUCTION,
     Enrichment,
+    EnrichmentError,
     StockPrior,
 )
 from cass_converter.gem import (
@@ -31,11 +32,13 @@ from cass_converter.model_build import (
     STOREY_BANDS,
     BuildError,
     build_country,
+    build_variants,
     classes,
     dictionary,
     evidence_summary,
     mapping_csv,
     multi_imt_report,
+    structure,
     vulnerability_csv,
 )
 from cass_converter.policy import ConversionPolicy, EventIdentity, IMTRepresentation
@@ -181,6 +184,119 @@ def test_a_class_whose_candidates_do_not_becomes_a_channel_each(build):
     for item in spanning:
         assert len(item.channels) == len(set(item.intensity_measures))
         assert sum(channel.weight for channel in item.channels) == pytest.approx(1.0)
+
+
+# -- one build per assumption set ----------------------------------------------------
+
+MORE_VULNERABLE = {"design_level_factors": {"CDN": 2.0, "CDL": 1.5, "CDM": 0.75, "CDH": 0.5}}
+
+
+def variant_builds(enrichment, models, prior, bins, policy, variants):
+    return build_variants(
+        enrichment=enrichment,
+        variants=variants,
+        models=models,
+        prior=prior,
+        intensity_bins=bins["intensity"],
+        damage_bins=bins["damage"],
+        policy=policy,
+        coverage_types=(1, 3),
+    )
+
+
+def test_every_assumption_set_is_built_under_the_same_identifiers(
+    enrichment, models, prior, bins, policy
+):
+    """A key has to mean the same building whichever set a run chooses."""
+    builds = variant_builds(
+        enrichment, models, prior, bins, policy,
+        {"baseline": {}, "more_vulnerable": MORE_VULNERABLE},
+    )
+
+    assert list(builds) == ["baseline", "more_vulnerable"]
+    assert structure(builds["baseline"]) == structure(builds["more_vulnerable"])
+
+
+def test_the_baseline_with_no_rules_is_the_enrichment_as_given(
+    enrichment, models, prior, bins, policy, build
+):
+    builds = variant_builds(enrichment, models, prior, bins, policy, {"baseline": {}})
+
+    assert vulnerability_csv(builds["baseline"]) == vulnerability_csv(build)
+    assert builds["baseline"].enrichment.reference == enrichment.reference
+
+
+def test_a_tilted_set_changes_the_damage_behind_the_same_key(enrichment, prior, bins, policy):
+    """Unstated construction blends masonry designed to no code with concrete
+    designed to a low one. Once the two respond differently -- every fixture
+    function above shares one curve, so re-weighing them could change nothing --
+    a design tilt moves the blend."""
+
+    def fragile_masonry(category: LossCategory) -> VulnerabilityModel:
+        base = model_for(category)
+        fragile = VulnerabilityFunction(
+            taxonomy=parse_taxonomy("MUR+CLBRS/LWAL/CDN+ERN/H:1/COM"),
+            loss_category=category,
+            imt="PGA",
+            intensities=(0.1, 0.5, 1.0),
+            mean_loss_ratios=(0.05, 0.6, 0.95),
+            coefficients_of_variation=(1.0, 0.4, 0.05),
+        )
+        return VulnerabilityModel(
+            country_code=base.country_code,
+            loss_category=category,
+            functions=tuple(
+                fragile if item.taxonomy.text == fragile.taxonomy.text else item
+                for item in base.functions
+            ),
+            source_name=base.source_name,
+            checksum=base.checksum,
+        )
+
+    models = {category: fragile_masonry(category) for category in LossCategory}
+    builds = variant_builds(
+        enrichment, models, prior, bins, policy,
+        {"baseline": {}, "more_vulnerable": MORE_VULNERABLE},
+    )
+
+    assert vulnerability_csv(builds["more_vulnerable"]) != vulnerability_csv(builds["baseline"])
+    assert builds["more_vulnerable"].enrichment.reference == "id_test+more_vulnerable/1.0.0"
+
+
+def test_a_set_that_would_reshape_the_model_is_refused(
+    enrichment, models, prior, bins, policy, monkeypatch
+):
+    import dataclasses
+
+    import cass_converter.model_build as module
+
+    real = module.build_country
+    seen = []
+
+    def reshaped(**kwargs):
+        built = real(**kwargs)
+        seen.append(built)
+        if len(seen) == 2:
+            return dataclasses.replace(built, classes=built.classes[1:])
+        return built
+
+    monkeypatch.setattr(module, "build_country", reshaped)
+
+    with pytest.raises(BuildError, match="re-weigh the model rather than reshape it"):
+        variant_builds(
+            enrichment, models, prior, bins, policy,
+            {"baseline": {}, "more_vulnerable": MORE_VULNERABLE},
+        )
+
+
+def test_a_rule_that_would_remove_buildings_is_refused_before_building(
+    enrichment, models, prior, bins, policy
+):
+    with pytest.raises(EnrichmentError, match="minimum_storeys"):
+        variant_builds(
+            enrichment, models, prior, bins, policy,
+            {"baseline": {}, "tall_only": {"minimum_storeys": 8}},
+        )
 
 
 def test_each_channel_carries_the_taxonomies_it_blended(build):

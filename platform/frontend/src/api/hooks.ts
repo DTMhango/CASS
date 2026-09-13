@@ -533,6 +533,7 @@ export function useCreateAnalysis() {
       perspectives: PerspectiveKey[];
       label?: string;
       execution_profile?: string;
+      assumption_set?: UUID;
     }) => api.post<AnalysisRun>("/analysis-runs/", input),
     onSuccess: () => client.invalidateQueries({ queryKey: ["runs"] }),
   });

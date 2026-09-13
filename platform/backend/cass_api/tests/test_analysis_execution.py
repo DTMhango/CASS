@@ -334,12 +334,11 @@ def test_the_manifest_says_which_stages_were_not_performed(analysis_run, analyst
 
     not_performed = manifest["stages_not_performed"]
     assert set(UNPERFORMED_STAGES) <= set(not_performed)
-    assert "enrich" in not_performed
     # No model package is readable from the test process, so the smoke check
     # could not choose any events, and it says so rather than passing.
     assert "footprint index" in not_performed["smoke"]
     # Stages that ran must not be listed.
-    for performed in ("validate_exposure", "keys", "reconcile_keys", "review"):
+    for performed in ("validate_exposure", "enrich", "keys", "reconcile_keys", "review"):
         assert performed not in not_performed
 
 
@@ -755,6 +754,7 @@ def test_a_submitted_run_records_its_output_artifact(api, analysis_run, oasis_is
     assert {item["role"] for item in artifacts.data} == {
         "cass_keys",
         "cass_keys_errors",
+        "enrichment_lineage",
         "oasis_output",
     }
     assert all(item["checksum"] for item in artifacts.data)
@@ -1764,6 +1764,207 @@ def test_the_keys_gate_is_released_through_the_run_as_well(
     assert analysis_run.run.state == RunState.SUCCEEDED
     assert str(analysis_run.exception_approval_id) == asked.data["id"]
     assert session.paths("POST").count("v2/portfolios/") == 1
+
+
+# -- the enrich stage, and the assumption set the engine is asked for ---------------
+
+@pytest.fixture()
+def more_vulnerable(model_version, modeller):
+    """A vulnerability set built under two assumption sets, and one of them registered."""
+    from apps.modelregistry.models import AssumptionSet
+
+    vulnerability = model_version.vulnerability_set
+    vulnerability.assumption_variants = {
+        "baseline": {},
+        "more_vulnerable": {"design_level_factors": {"CDN": 2.0}},
+    }
+    vulnerability.save()
+    return AssumptionSet.objects.create(
+        country_code="ID",
+        flavour=AssumptionSet.Flavour.MORE_VULNERABLE,
+        version="0.1.0",
+        label="More vulnerable construction mix",
+        created_by=modeller,
+    )
+
+
+def test_the_enrich_stage_records_what_the_run_rests_on(analysis_run, analyst):
+    """Section 5: what was reported, derived and assumed, and what could not be placed."""
+    manifest = run_oasis(analysis_run, oasis_server(), analyst)
+
+    analysis_run.refresh_from_db()
+    enrichment_run = analysis_run.enrichment_run
+    assert enrichment_run is not None
+    assert enrichment_run.assumption_set is None
+    assert enrichment_run.reconciled is True
+    # Three locations, four attributes each. Occupancy is stated on two and
+    # unplaceable on the third; nothing states a known construction, a height
+    # or a year, so those nine are the mixture's.
+    assert (
+        enrichment_run.reported_count,
+        enrichment_run.derived_count,
+        enrichment_run.imputed_count,
+    ) == (2, 0, 9)
+    assert [item["LocNumber"] for item in enrichment_run.exceptions] == ["LOC-2"]
+    assert enrichment_run.output_checksum
+    assert manifest["enrichment"]["enrichment_run"] == str(enrichment_run.id)
+    assert ArtifactLink.objects.filter(
+        subject_type="enrichment_run", subject_id=enrichment_run.id, role="enrichment_lineage"
+    ).exists()
+
+
+def test_a_model_with_one_table_names_no_vulnerability_set(analysis_run):
+    assert build_analysis_settings(analysis_run)["model_settings"] == {}
+
+
+def test_a_package_with_sets_is_asked_for_the_baseline_when_none_is_chosen(
+    analysis_run, more_vulnerable
+):
+    """ADR 14: such a package has no plain table, so every analysis names a set."""
+    assert build_analysis_settings(analysis_run)["model_settings"] == {
+        "vulnerability_set": "baseline"
+    }
+
+
+def test_a_run_names_its_assumption_set_to_the_engine(analysis_run, analyst, more_vulnerable):
+    analysis_run.assumption_set = more_vulnerable
+    analysis_run.save()
+    session = oasis_server()
+
+    run_it(analysis_run, session, actor=analyst)
+
+    documents = settings_documents(session)
+    assert documents
+    assert all(
+        item["model_settings"]["vulnerability_set"] == "more_vulnerable" for item in documents
+    )
+    analysis_run.refresh_from_db()
+    assert analysis_run.enrichment_run.assumption_set == more_vulnerable
+    assert analysis_run.enrichment_run.attribute_lineage["vulnerability_set"] == "more_vulnerable"
+
+
+def test_an_explicit_settings_document_is_given_the_runs_set_when_it_names_none(
+    analysis_run, more_vulnerable
+):
+    analysis_run.assumption_set = more_vulnerable
+    analysis_run.analysis_settings = {"gul_output": True}
+
+    assert build_analysis_settings(analysis_run) == {
+        "gul_output": True,
+        "model_settings": {"vulnerability_set": "more_vulnerable"},
+    }
+
+
+def test_a_set_the_vulnerability_set_does_not_carry_stops_the_run_at_enrich(
+    analysis_run, analyst, modeller
+):
+    from apps.modelregistry.models import AssumptionSet
+
+    robust = AssumptionSet.objects.create(
+        country_code="ID",
+        flavour=AssumptionSet.Flavour.MORE_ROBUST,
+        version="0.1.0",
+        label="More robust construction mix",
+        created_by=modeller,
+    )
+    analysis_run.assumption_set = robust
+    analysis_run.save()
+    session = oasis_server()
+
+    with pytest.raises(AnalysisExecutionError, match="carries no functions for the more robust"):
+        run_it(analysis_run, session, actor=analyst)
+
+    assert Run.objects.get(id=analysis_run.run_id).failure_stage == "enrich"
+    assert session.calls == []
+
+
+def test_a_result_under_an_unapproved_set_is_research_output(
+    analysis_run, oasis_is, api, model_version, more_vulnerable
+):
+    from apps.results.models import ResultSet, ResultState
+
+    model_version.is_research_prototype = False
+    model_version.save()
+    analysis_run.assumption_set = more_vulnerable
+    analysis_run.save()
+    oasis_is(oasis_server(output=ord_package()))
+
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    assert result.state == ResultState.RESEARCH
+    assert result.assumption_set_reference == more_vulnerable.reference
+
+
+def test_a_served_package_without_the_runs_set_is_refused(
+    analysis_run, analyst, attached_hazard, package_root, more_vulnerable
+):
+    serve_package(
+        package_root,
+        model_version=analysis_run.model_version.reference,
+        footprint_rows={1: 2},
+    )
+    analysis_run.assumption_set = more_vulnerable
+    analysis_run.save()
+    session = oasis_server()
+
+    with pytest.raises(AnalysisExecutionError, match="asks for more_vulnerable"):
+        run_it(analysis_run, session, actor=analyst)
+
+    assert Run.objects.get(id=analysis_run.run_id).failure_stage == "publish_oed"
+    assert "v2/portfolios/" not in session.paths("POST")
+
+
+def test_an_assumption_set_the_model_does_not_carry_cannot_be_configured(
+    api, project, published_exposure, published_model_version, modeller
+):
+    from apps.modelregistry.models import AssumptionSet
+
+    robust = AssumptionSet.objects.create(
+        country_code="ID",
+        flavour=AssumptionSet.Flavour.MORE_ROBUST,
+        version="0.1.0",
+        label="More robust construction mix",
+        created_by=modeller,
+    )
+    response = configure(
+        api, project, published_exposure, published_model_version,
+        assumption_set=str(robust.id),
+    )
+
+    assert response.status_code == 400
+    assert "carries no functions" in str(response.data["assumption_set"])
+
+
+def test_a_carried_assumption_set_can_be_configured(
+    api, project, published_exposure, published_model_version, more_vulnerable
+):
+    response = configure(
+        api, project, published_exposure, published_model_version,
+        assumption_set=str(more_vulnerable.id),
+    )
+
+    assert response.status_code == 201, response.data
+    assert AnalysisRun.objects.get(id=response.data["id"]).assumption_set == more_vulnerable
+
+
+def test_the_catalogue_offers_only_the_sets_a_version_carries(
+    api, published_model_version, more_vulnerable, modeller
+):
+    from apps.modelregistry.models import AssumptionSet
+
+    AssumptionSet.objects.create(
+        country_code="ID",
+        flavour=AssumptionSet.Flavour.MORE_ROBUST,
+        version="0.1.0",
+        label="More robust construction mix",
+        created_by=modeller,
+    )
+    models = api.get(f"{API}/model-versions/catalogue/").data["models"]
+    offered = next(item for item in models if item["id"] == str(published_model_version.id))
+
+    assert [item["flavour"] for item in offered["assumption_sets"]] == ["more_vulnerable"]
+    assert offered["assumption_sets"][0]["approved"] is False
 
 
 def test_an_exception_cleared_at_one_gate_does_not_release_another(

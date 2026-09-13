@@ -381,6 +381,176 @@ def test_a_minimum_height_drops_the_candidates_below_it(model, prior):
 
 # -- reporting ---------------------------------------------------------------------
 
+# -- assumption sets re-weigh a mixture and never reshape it --------------------------
+
+CONCRETE_TWO_STOREYS = Attributes(occupancy_code="1100", construction_code="5150", storeys=2)
+
+
+def design_share(mixture, level: str) -> float:
+    return sum(item.weight for item in mixture if f"/{level}+" in item.taxonomy)
+
+
+def test_a_design_tilt_moves_weight_towards_the_levels_it_favours(enrichment, model, prior):
+    import dataclasses
+
+    baseline = enrichment.resolve(CONCRETE_TWO_STOREYS, model, prior)
+    tilted = dataclasses.replace(
+        enrichment, design_weight_factors={"CDL": 2.0, "CDM": 0.5}
+    ).resolve(CONCRETE_TWO_STOREYS, model, prior)
+
+    assert design_share(tilted, "CDL") > design_share(baseline, "CDL")
+    assert design_share(tilted, "CDM") < design_share(baseline, "CDM")
+    assert sum(item.weight for item in tilted) == pytest.approx(1.0)
+    # Nothing left the mixture: a tilt weighs a building type less, it does
+    # not remove it from the country.
+    assert {item.taxonomy for item in tilted} == {item.taxonomy for item in baseline}
+
+
+def test_the_tilt_multiplies_the_published_shares(enrichment, model, prior):
+    """CR- holds 400 and CR+ 300; doubling one and halving the other is 800 to 150."""
+    import dataclasses
+
+    tilted = dataclasses.replace(
+        enrichment, design_weight_factors={"CDL": 2.0, "CDM": 0.5}
+    ).resolve(CONCRETE_TWO_STOREYS, model, prior)
+
+    assert design_share(tilted, "CDL") == pytest.approx(800 / 950)
+    assert design_share(tilted, "CDM") == pytest.approx(150 / 950)
+
+
+def test_no_tilt_leaves_the_mixture_exactly_as_it_was(enrichment, model, prior):
+    import dataclasses
+
+    untouched = dataclasses.replace(enrichment, design_weight_factors={})
+    assert untouched.resolve(CONCRETE_TWO_STOREYS, model, prior) == enrichment.resolve(
+        CONCRETE_TWO_STOREYS, model, prior
+    )
+
+
+def test_a_tilt_applies_where_there_is_no_prior_as_well(enrichment, model):
+    import dataclasses
+
+    mixture = dataclasses.replace(
+        enrichment, design_weight_factors={"CDM": 3.0}
+    ).resolve(CONCRETE_TWO_STOREYS, model)
+
+    weights = {item.taxonomy: item.weight for item in mixture}
+    assert weights["CR/LFINF/CDM+ERM/H:2/COM"] == pytest.approx(0.75)
+    assert weights["CR/LFINF/CDL+ERM/H:2/COM"] == pytest.approx(0.25)
+
+
+@pytest.mark.parametrize(
+    "factors",
+    [{"CDX": 2.0}, {"CDL": 0.0}, {"CDL": -1.0}, {"CDL": float("inf")}, {"CDL": "2"}],
+)
+def test_a_tilt_must_be_a_positive_factor_of_a_level_gem_uses(factors):
+    with pytest.raises(EnrichmentError):
+        Enrichment(name="id_test", version="1", country_code="ID", design_weight_factors=factors)
+
+
+def test_an_assumption_set_may_only_re_weigh_the_mixture(enrichment):
+    """A minimum height would change which classes exist, not how they weigh."""
+    from cass_converter.enrichment import assumption_variant
+
+    with pytest.raises(EnrichmentError, match="minimum_storeys"):
+        assumption_variant(enrichment, key="tall_only", rules={"minimum_storeys": 8})
+
+
+def test_an_assumption_variant_is_named_for_its_set_and_keeps_the_rest(enrichment):
+    from cass_converter.enrichment import assumption_variant
+
+    variant = assumption_variant(
+        enrichment,
+        key="more_vulnerable",
+        rules={"design_level_factors": {"CDN": 2}, "macro_weights": {"CR-": 0.6}},
+    )
+
+    assert variant.reference == "id_test+more_vulnerable/1.0.0"
+    assert variant.design_weight_factors == {"CDN": 2.0}
+    assert variant.weight_overrides == {"CR-": 0.6}
+    assert variant.design_eras == enrichment.design_eras
+
+
+def test_the_pilot_tilts_mirror_each_other_across_the_design_levels():
+    from cass_converter.enrichment import DESIGN_LEVELS
+    from cass_converter.pilot_enrichment import ASSUMPTION_TILTS
+
+    robust = [ASSUMPTION_TILTS["more_robust"][level] for level in DESIGN_LEVELS]
+    vulnerable = [ASSUMPTION_TILTS["more_vulnerable"][level] for level in DESIGN_LEVELS]
+
+    assert vulnerable == list(reversed(robust))
+    assert ASSUMPTION_TILTS["baseline"] == {}
+    # Robust favours the engineered end, vulnerable the unengineered one.
+    assert robust[-1] > 1 > robust[0]
+
+
+# -- lineage: what a run knew and what it assumed ---------------------------------------
+
+LINEAGE_ROWS = [
+    # Everything stated: occupancy and construction reported, height and design derived.
+    {"AccNumber": "A1", "LocNumber": "1", "OccupancyCode": "1100", "ConstructionCode": "5150",
+     "NumberOfStoreys": "6", "YearBuilt": "2011", "BuildingTIV": "600", "ContentsTIV": "400"},
+    # Nothing but occupancy: the rest is the mixture's.
+    {"AccNumber": "A1", "LocNumber": "2", "OccupancyCode": "1100", "ConstructionCode": "5000",
+     "NumberOfStoreys": "", "YearBuilt": "", "BuildingTIV": "300"},
+    # An occupancy no GEM class answers.
+    {"AccNumber": "A2", "LocNumber": "1", "OccupancyCode": "1000", "ConstructionCode": "5100",
+     "NumberOfStoreys": "2", "YearBuilt": "", "BuildingTIV": "100"},
+]
+
+
+def test_lineage_says_which_attributes_were_stated_derived_or_assumed(enrichment):
+    from cass_converter.enrichment import Provenance, exposure_lineage
+
+    lineage = exposure_lineage(LINEAGE_ROWS, enrichment)
+    first, second, third = lineage.locations
+
+    assert dict(first.evidence) == {
+        "occupancy": Provenance.REPORTED,
+        "construction": Provenance.REPORTED,
+        "height": Provenance.DERIVED,
+        "design": Provenance.DERIVED,
+    }
+    assert first.confidence == 1.0
+    assert second.evidence["construction"] is Provenance.IMPUTED
+    assert second.confidence == 0.25
+    assert third.evidence["occupancy"] is Provenance.UNRESOLVED
+    assert lineage.counts() == {"reported": 4, "derived": 3, "imputed": 4, "unresolved": 1}
+
+
+def test_lineage_weighs_missingness_by_value_and_keeps_the_total_whole(enrichment):
+    from decimal import Decimal
+
+    from cass_converter.enrichment import exposure_lineage
+
+    lineage = exposure_lineage(LINEAGE_ROWS, enrichment)
+
+    assert lineage.total_tiv == Decimal("1400")
+    assert lineage.missingness()["construction"] == {
+        "locations": 1, "tiv": "300", "share_of_tiv": "0.2143",
+    }
+    assert lineage.missingness()["occupancy"]["tiv"] == "100"
+    assert [item["LocNumber"] for item in lineage.exceptions()] == ["1"]
+
+
+def test_a_year_no_era_covers_is_assumed_rather_than_derived():
+    from cass_converter.enrichment import Provenance, exposure_lineage
+
+    no_eras = Enrichment(name="id_bare", version="1", country_code="ID")
+    lineage = exposure_lineage(LINEAGE_ROWS[:1], no_eras)
+
+    assert lineage.locations[0].evidence["design"] is Provenance.IMPUTED
+
+
+def test_the_lineage_table_is_a_row_per_location(enrichment):
+    from cass_converter.enrichment import exposure_lineage
+
+    table = exposure_lineage(LINEAGE_ROWS, enrichment).as_csv().decode("utf-8").splitlines()
+
+    assert table[0] == "AccNumber,LocNumber,TIV,occupancy,construction,height,design,Confidence"
+    assert len(table) == 4
+
+
 def test_the_coverage_report_says_what_reaches_nothing(enrichment, model):
     report = coverage(enrichment, model)
     assert report["unknown_occupancy_is_unmapped"] is True

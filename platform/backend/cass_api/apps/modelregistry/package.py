@@ -30,6 +30,7 @@ from .assets import (
     HAZARD_ROLE_PREFIX,
     VULNERABILITY_FUNCTIONS_ROLE,
     VULNERABILITY_MAPPING_ROLE,
+    VULNERABILITY_VARIANT_ROLE_PREFIX,
     asset_bytes,
 )
 from .models import ModelVersion
@@ -119,6 +120,15 @@ def gather(model_version: ModelVersion) -> oasis_package.PackageInputs:
         damage_bins_csv=asset_bytes(
             vulnerability, "vulnerability_set", DAMAGE_BINS_ROLE, str(vulnerability)
         ),
+        vulnerability_variants={
+            key: asset_bytes(
+                vulnerability,
+                "vulnerability_set",
+                VULNERABILITY_VARIANT_ROLE_PREFIX + key,
+                f"{vulnerability} under the {key.replace('_', ' ')} assumption set",
+            )
+            for key in (vulnerability.assumption_variants or {})
+        },
         footprints=footprints,
         occurrence_csv=asset_bytes(
             hazard_set,
@@ -138,6 +148,7 @@ def gather(model_version: ModelVersion) -> oasis_package.PackageInputs:
             "hazard_licence_cleared": hazard_set.licence_cleared,
             "vulnerability_licence_cleared": vulnerability.licence_cleared,
             "intensity_bin_version": pilot_bins.PILOT_BIN_VERSION,
+            "assumption_sets": dict(vulnerability.assumption_variants or {}),
         },
     )
 

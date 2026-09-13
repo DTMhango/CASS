@@ -122,7 +122,7 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
     class Meta:
         model = AnalysisRun
         fields = [
-            "id", "run", "run_detail", "exposure_version", "enrichment_run",
+            "id", "run", "run_detail", "exposure_version", "enrichment_run", "assumption_set",
             "model_version", "perspectives", "analysis_settings", "run_currency",
             "oasis_analysis_id", "oasis_portfolio_id", "keys_summary",
             "keys_reconciled", "may_proceed_past_keys", "exception_approval",
@@ -208,6 +208,31 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+
+        # ADR 14: a run may name only an assumption set its model version was
+        # built under, because the engine has no functions for any other.
+        assumption_set = attrs.get("assumption_set")
+        if assumption_set is not None:
+            if assumption_set.country_code.upper() != model_version.country_code.upper():
+                raise serializers.ValidationError(
+                    {
+                        "assumption_set": (
+                            f"{assumption_set} is for {assumption_set.country_code}, and "
+                            f"{model_version.reference} models {model_version.country_code}."
+                        )
+                    }
+                )
+            carried = model_version.vulnerability_set.assumption_variants or {}
+            if assumption_set.flavour not in carried:
+                raise serializers.ValidationError(
+                    {
+                        "assumption_set": (
+                            f"{model_version.reference} carries no functions for the "
+                            f"{assumption_set.get_flavour_display().lower()} assumption "
+                            "set, so a run could not use it."
+                        )
+                    }
+                )
 
         requested = attrs.get("perspectives") or []
         if not requested:
@@ -421,6 +446,7 @@ class RunViewSet(viewsets.ReadOnlyModelViewSet):
                 run=replacement,
                 exposure_version=analysis.exposure_version,
                 enrichment_run=analysis.enrichment_run,
+                assumption_set=analysis.assumption_set,
                 model_version=analysis.model_version,
                 perspectives=analysis.perspectives,
                 analysis_settings=analysis.analysis_settings,

@@ -58,6 +58,11 @@ VULNERABILITY_MAPPING_ROLE = "vulnerability_mapping"
 #: thousands of rows, which is exactly why section 4 keeps it out of Django.
 VULNERABILITY_FUNCTIONS_ROLE = "vulnerability_functions"
 
+#: One table of functions per assumption set, under the same identifiers as the
+#: baseline table above. The role names the set, so a package can find the table
+#: each set's engine file is built from (ADR 14).
+VULNERABILITY_VARIANT_ROLE_PREFIX = "vulnerability_functions:"
+
 #: The damage-bin dictionary the functions were discretised against. A loss
 #: computed against one set of bins is not comparable with a loss computed
 #: against another, so the dictionary travels with the set that used it.
@@ -365,6 +370,23 @@ def attach_vulnerability_functions(
         VULNERABILITY_FUNCTIONS_ROLE,
         payload,
         filename,
+        actor,
+    )
+
+
+def attach_vulnerability_variant(
+    vulnerability_set, key: str, payload: bytes, *, filename: str = "", actor=None
+):
+    """Register one assumption set's table of functions for a vulnerability set.
+
+    Checksummed and not parsed, for the same reason as the baseline table.
+    """
+    return _attach(
+        vulnerability_set,
+        "vulnerability_set",
+        VULNERABILITY_VARIANT_ROLE_PREFIX + key,
+        payload,
+        filename or f"vulnerability_{key}.csv",
         actor,
     )
 

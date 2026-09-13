@@ -174,6 +174,19 @@ export interface CatalogueModel {
   unsupported_taxonomy_report: Record<string, unknown>;
   /** Why this version may not be published as a full country model. */
   blockers: string[];
+  /** Assumption sets a run against this version may name (ADR 14). */
+  assumption_sets?: CatalogueAssumptionSet[];
+}
+
+/** An assumption set a model version carries functions for. */
+export interface CatalogueAssumptionSet {
+  id: UUID;
+  flavour: string;
+  label: string;
+  reference: string;
+  publication_state: string;
+  /** A run under a set nobody has approved produces research output. */
+  approved: boolean;
 }
 
 export type RunState =
@@ -580,6 +593,8 @@ export interface AnalysisRun {
   run_detail: Run;
   exposure_version: UUID;
   enrichment_run: UUID | null;
+  /** The assumption set chosen; null means the model's baseline weights. */
+  assumption_set?: UUID | null;
   model_version: UUID;
   perspectives: PerspectiveKey[];
   analysis_settings: Record<string, unknown>;

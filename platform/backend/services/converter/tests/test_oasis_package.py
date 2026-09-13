@@ -473,3 +473,58 @@ def test_the_footprint_index_reads_back_what_was_written():
 def test_an_index_that_is_not_whole_rows_is_refused():
     with pytest.raises(PackageError, match="whole number"):
         oasis_package.read_footprint_index(b"\0" * 21)
+
+
+# -- assumption sets as vulnerability sets -----------------------------------------
+
+def test_assumption_sets_are_named_tables_and_the_plain_one_is_not_written(tmp_path):
+    """ADR 14. The engine links the chosen set over vulnerability.bin, and the
+    link fails if a plain file is already there -- found against the live
+    worker, not assumed."""
+    manifest = oasis_package.build(
+        inputs(
+            vulnerability_variants={"baseline": VULNERABILITY, "more_vulnerable": VULNERABILITY}
+        ),
+        tmp_path,
+    )
+
+    assert (tmp_path / "model_data/vulnerability_baseline.bin").is_file()
+    assert (tmp_path / "model_data/vulnerability_more_vulnerable.bin").is_file()
+    assert not (tmp_path / "model_data/vulnerability.bin").exists()
+    assert manifest["vulnerability_sets"] == ["baseline", "more_vulnerable"]
+
+
+def test_the_model_settings_offer_the_sets_with_the_baseline_as_default(tmp_path):
+    oasis_package.build(
+        inputs(vulnerability_variants={"more_robust": VULNERABILITY, "baseline": VULNERABILITY}),
+        tmp_path,
+    )
+
+    settings = json.loads((tmp_path / "meta-data/model_settings.json").read_text(encoding="utf-8"))
+    selector = settings["model_settings"]["vulnerability_set"]
+    assert selector["default"] == "baseline"
+    assert [item["id"] for item in selector["options"]] == ["baseline", "more_robust"]
+
+
+def test_a_package_without_assumption_sets_keeps_its_plain_table(tmp_path):
+    manifest = oasis_package.build(inputs(), tmp_path)
+
+    assert (tmp_path / "model_data/vulnerability.bin").is_file()
+    assert manifest["vulnerability_sets"] == []
+    settings = json.loads((tmp_path / "meta-data/model_settings.json").read_text(encoding="utf-8"))
+    assert "vulnerability_set" not in settings["model_settings"]
+
+
+def test_a_named_table_is_the_same_binary_the_plain_one_would_be(tmp_path):
+    oasis_package.build(inputs(), tmp_path / "plain")
+    oasis_package.build(inputs(vulnerability_variants={"baseline": VULNERABILITY}), tmp_path / "named")
+
+    assert (tmp_path / "named/model_data/vulnerability_baseline.bin").read_bytes() == (
+        tmp_path / "plain/model_data/vulnerability.bin"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("key", ["More_vulnerable", "more-vulnerable", "1baseline", "", "ümlaut"])
+def test_a_set_name_that_cannot_be_a_file_suffix_is_refused(tmp_path, key):
+    with pytest.raises(PackageError, match="cannot name a vulnerability set"):
+        oasis_package.build(inputs(vulnerability_variants={key: VULNERABILITY}), tmp_path)

@@ -241,8 +241,6 @@ The working tracker is [docs/delivery-status.md](docs/delivery-status.md). It
 goes milestone by milestone and stage by stage, and separates what is buildable
 from what waits on a decision or an outside input. In short:
 
-- **Analysis stages.** `enrich` is not performed: no run applies an assumption
-  set yet.
 - **Scientific gates.** The hazard benchmark and conversion QA stand open with no
   approved references, and the converter reads OpenQuake's CSV exports rather
   than the HDF5 datastore.

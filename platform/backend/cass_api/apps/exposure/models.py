@@ -133,8 +133,14 @@ class EnrichmentRun(BaseModel):
     exposure_version = models.ForeignKey(
         ExposureVersion, on_delete=models.CASCADE, related_name="enrichment_runs"
     )
+    #: Null where the run used the baseline weights its model was built with and
+    #: named no assumption set. The lineage is recorded either way.
     assumption_set = models.ForeignKey(
-        "modelregistry.AssumptionSet", on_delete=models.PROTECT, related_name="enrichment_runs"
+        "modelregistry.AssumptionSet",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="enrichment_runs",
     )
 
     #: Counts by evidence class, which is what makes the hierarchy auditable
@@ -174,7 +180,8 @@ class EnrichmentRun(BaseModel):
         indexes = [models.Index(fields=["exposure_version", "-created_at"])]
 
     def __str__(self) -> str:
-        return f"{self.exposure_version} under {self.assumption_set.reference}"
+        applied = self.assumption_set.reference if self.assumption_set else "baseline weights"
+        return f"{self.exposure_version} under {applied}"
 
     @property
     def total_attributes(self) -> int:

@@ -152,6 +152,13 @@ class PackageInputs:
     provenance: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     return_periods: Sequence[int] = DEFAULT_RETURN_PERIODS
     sample_count: int = 10
+    #: One ``vulnerability.csv`` per assumption set, keyed by the set. Empty for a
+    #: model built without them, which keeps the plain ``vulnerability.bin``.
+    #: Where there are variants the plain file is not written at all: the engine
+    #: links every model file into its run directory before it links the chosen
+    #: set over ``vulnerability.bin``, and a plain file already there makes that
+    #: link fail (ADR 14).
+    vulnerability_variants: Mapping[str, bytes] = dataclasses.field(default_factory=dict)
 
 
 # -- the binaries ---------------------------------------------------------------------
@@ -485,9 +492,21 @@ def build(inputs: PackageInputs, destination: pathlib.Path) -> dict[str, Any]:
     damage_binary, damage_csv, damage_count = damage_bins_bin(inputs.damage_bins_csv)
     (model_data / "damage_bin_dict.bin").write_bytes(damage_binary)
     (model_data / "damage_bin_dict.csv").write_bytes(damage_csv)
-    (model_data / "vulnerability.bin").write_bytes(
-        vulnerability_bin(inputs.vulnerability_csv, damage_count)
-    )
+    if inputs.vulnerability_variants:
+        for key, table in sorted(inputs.vulnerability_variants.items()):
+            if not variant_key_is_usable(key):
+                raise PackageError(
+                    f"{key!r} cannot name a vulnerability set. The engine uses it as a "
+                    "file suffix, so it must be lower-case letters, digits and "
+                    "underscores, beginning with a letter."
+                )
+            (model_data / f"vulnerability_{key}.bin").write_bytes(
+                vulnerability_bin(table, damage_count)
+            )
+    else:
+        (model_data / "vulnerability.bin").write_bytes(
+            vulnerability_bin(inputs.vulnerability_csv, damage_count)
+        )
 
     occurrence, event_ids = occurrence_bin(
         inputs.occurrence_csv, inputs.period_count, offset
@@ -580,6 +599,9 @@ def build(inputs: PackageInputs, destination: pathlib.Path) -> dict[str, Any]:
         "periods": inputs.period_count,
         "footprint": footprint_summary,
         "damage_bins": damage_count,
+        # Which assumption sets the engine can be asked for. Empty where the
+        # package carries one plain table and an analysis names none.
+        "vulnerability_sets": sorted(inputs.vulnerability_variants),
         "intensity_bins": inputs.intensity_bin_count,
         "return_periods": sorted(set(inputs.return_periods), reverse=True),
         "provenance": dict(inputs.provenance),
@@ -599,8 +621,23 @@ def _demanded_measures(mapping_csv: bytes) -> set[str]:
     }
 
 
+#: The set a package with variants offers first.
+BASELINE_VARIANT = "baseline"
+
+
+def variant_key_is_usable(key: str) -> bool:
+    """Whether a name can be the engine's vulnerability file suffix."""
+    return (
+        bool(key)
+        and key[0].isalpha()
+        and key == key.lower()
+        and key.replace("_", "").isalnum()
+        and key.isascii()
+    )
+
+
 def _model_settings(inputs: PackageInputs, event_count: int) -> dict[str, Any]:
-    return {
+    document = {
         "version": "3",
         "model_settings": {
             "event_set": {
@@ -627,6 +664,17 @@ def _model_settings(inputs: PackageInputs, event_count: int) -> dict[str, Any]:
         },
         "model_default_samples": inputs.sample_count,
     }
+    if inputs.vulnerability_variants:
+        keys = sorted(inputs.vulnerability_variants)
+        document["model_settings"]["vulnerability_set"] = {
+            "name": "Assumption set",
+            "desc": "The exposure-enrichment assumption set the vulnerability functions are weighted under",
+            "default": BASELINE_VARIANT if BASELINE_VARIANT in keys else keys[0],
+            "options": [
+                {"id": key, "desc": key.replace("_", " ").capitalize()} for key in keys
+            ],
+        }
+    return document
 
 
 def _checksums(base: pathlib.Path) -> dict[str, dict[str, Any]]:

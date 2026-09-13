@@ -44,6 +44,7 @@ from .enrichment import (
     Evidence,
     Mixture,
     StockPrior,
+    assumption_variant,
 )
 from .gem import LossCategory, VulnerabilityModel
 from .policy import ConversionPolicy
@@ -393,6 +394,77 @@ def build_country(
         damage_bin_reference=damage_bins.reference,
         sources=sources,
     )
+
+
+# -- one build per assumption set ------------------------------------------------------
+
+#: The assumption set a build without variants stands for.
+BASELINE = "baseline"
+
+
+def structure(build: CountryBuild) -> tuple[tuple[Any, ...], ...]:
+    """What a build's identifiers mean, without the weights behind them.
+
+    Two builds with the same structure answer every key the same way: the same
+    identifier is the same class, coverage and intensity measure in both. Only
+    the damage relationship behind it can differ.
+    """
+    return tuple(
+        (
+            item.coverage_type,
+            item.occupancy_code,
+            item.construction_code,
+            item.storey_band,
+            tuple((channel.imt, channel.vulnerability_id) for channel in item.channels),
+        )
+        for item in build.classes
+    )
+
+
+def build_variants(
+    *,
+    enrichment: Enrichment,
+    variants: Mapping[str, Mapping[str, Any]],
+    **options: Any,
+) -> dict[str, CountryBuild]:
+    """One country build per assumption set, all under one set of identifiers.
+
+    An assumption set is a different weighting of the same mixtures, so each
+    set's functions are built from the same classes, and the builds must agree
+    on every identifier. That agreement is checked rather than assumed. It is
+    what lets one Oasis package carry every set, the engine choose between them
+    per analysis, and the keys and their reconciliation stay the same whichever
+    set a run uses -- a key that meant a different building under each set would
+    make two runs' losses incomparable without anything saying so.
+
+    The baseline with no rules of its own is the enrichment as given. Every
+    other set is named for itself even where it states nothing, so a build's
+    provenance always says which set produced it.
+    """
+    if not variants:
+        raise BuildError("A build needs at least one assumption set: the baseline, if nothing else.")
+
+    builds: dict[str, CountryBuild] = {}
+    first: tuple[str, tuple[tuple[Any, ...], ...]] | None = None
+    for key, rules in variants.items():
+        chosen = (
+            enrichment
+            if key == BASELINE and not rules
+            else assumption_variant(enrichment, key=key, rules=rules)
+        )
+        built = build_country(enrichment=chosen, **options)
+        shape = structure(built)
+        if first is None:
+            first = (key, shape)
+        elif shape != first[1]:
+            raise BuildError(
+                f"The {key} assumption set produced different classes or identifiers "
+                f"from the {first[0]} set. An assumption set must re-weigh the model "
+                "rather than reshape it, or one key would mean a different building "
+                "under each set."
+            )
+        builds[key] = built
+    return builds
 
 
 # -- what the build produces ----------------------------------------------------------

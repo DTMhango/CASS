@@ -53,8 +53,11 @@ import csv
 import dataclasses
 import enum
 import hashlib
+import io
+import math
 import pathlib
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .gem import GemError, OccupancyClass, Taxonomy, VulnerabilityModel
@@ -145,6 +148,16 @@ MACRO_MATERIALS: Mapping[str, tuple[str, ...]] = {
 #: taxonomy carrying one of these belongs to the ``CR+`` macro class, and one
 #: that does not belongs to ``CR-``.
 DUCTILE_DESIGN = ("CDM", "CDH")
+
+#: GEM's seismic design levels, least engineered first: no code, then low,
+#: moderate and high code. What an assumption set may tilt a mixture towards.
+DESIGN_LEVELS = ("CDN", "CDL", "CDM", "CDH")
+
+
+def design_level(taxonomy: Taxonomy) -> str:
+    """The seismic design level a taxonomy states, or ``""`` where it states none."""
+    code = taxonomy.design.split("+")[0]
+    return code if code in DESIGN_LEVELS else ""
 
 #: Masonry qualifiers the ``ADO|ST|E`` macro class covers: adobe, dressed and
 #: rubble stone. GEM's vulnerability model writes them as MUR qualifiers, and
@@ -752,6 +765,12 @@ class Enrichment:
     #: Macro-class weights that replace the published ones, for a book whose
     #: composition is known better than the national stock describes it.
     weight_overrides: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    #: Factors multiplying each candidate's weight by its seismic design level
+    #: before the mixture is normalised. Empty means the published stock stands.
+    #: An assumption set that leans towards or away from engineered construction
+    #: says so here, as numbers a reviewer can argue with, rather than as a
+    #: different model.
+    design_weight_factors: Mapping[str, float] = dataclasses.field(default_factory=dict)
     open_questions: tuple[str, ...] = ()
     notes: str = ""
 
@@ -767,6 +786,19 @@ class Enrichment:
                     "which is not a GEM macro class. Known: "
                     + ", ".join(sorted(MACRO_MATERIALS))
                     + "."
+                )
+        for level, factor in self.design_weight_factors.items():
+            if level not in DESIGN_LEVELS:
+                raise EnrichmentError(
+                    f"Enrichment {self.name!r} tilts design level {level!r}, which is "
+                    f"not one GEM uses. Known: {', '.join(DESIGN_LEVELS)}."
+                )
+            if not (isinstance(factor, int | float) and math.isfinite(factor) and factor > 0):
+                raise EnrichmentError(
+                    f"Enrichment {self.name!r} gives design level {level} a factor of "
+                    f"{factor!r}. A tilt must be a positive number: zero would remove a "
+                    "building type from the country rather than weigh it less, and a "
+                    "mixture that loses a candidate changes shape rather than balance."
                 )
 
     @property
@@ -919,16 +951,19 @@ class Enrichment:
 
         macros = [macro_class(item.taxonomy) for item in candidates]
         if prior is None:
-            share = 1.0 / len(candidates)
+            # Equal shares, then any design-level tilt: with no tilt stated
+            # every factor is one and this is exactly an equal split.
+            tilted = [self._tilt(item) for item in candidates]
+            spread = sum(tilted)
             return (
                 tuple(
                     Candidate(
                         taxonomy=item.taxonomy.text,
                         imt=item.imt,
-                        weight=share,
+                        weight=value / spread,
                         macro=macro,
                     )
-                    for item, macro in zip(candidates, macros, strict=True)
+                    for item, macro, value in zip(candidates, macros, tilted, strict=True)
                 ),
                 Evidence.UNCONSTRAINED,
             )
@@ -945,7 +980,7 @@ class Enrichment:
                 # belongs to this function rather than to the group it sits in.
                 exact = prior.taxonomy_weight(occupancy, item.taxonomy.text)
                 if exact is not None:
-                    raw.append(exact or _NOMINAL_SHARE)
+                    raw.append((exact or _NOMINAL_SHARE) * self._tilt(item))
                     continue
                 weight = prior.weight(occupancy, macro)
             # A macro class the summary does not report for this occupancy gets
@@ -953,7 +988,7 @@ class Enrichment:
             # nominal share rather than vanishing: GEM published a function for
             # them, so the stock has some, and a zero here would silently
             # remove a building type from the country.
-            raw.append((weight or _NOMINAL_SHARE) / counts[macro])
+            raw.append((weight or _NOMINAL_SHARE) / counts[macro] * self._tilt(item))
 
         total = sum(raw)
         if total <= 0.0:
@@ -974,6 +1009,10 @@ class Enrichment:
             Evidence.PRIOR,
         )
 
+    def _tilt(self, candidate: Any) -> float:
+        """This candidate's design-level factor, or one where none is stated."""
+        return float(self.design_weight_factors.get(design_level(candidate.taxonomy), 1.0))
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -984,6 +1023,7 @@ class Enrichment:
             "weighting": str(self.weighting),
             "minimum_storeys": self.minimum_storeys,
             "weight_overrides": dict(self.weight_overrides),
+            "design_weight_factors": dict(self.design_weight_factors),
             "design_eras": [
                 {
                     "to_year": era.to_year,
@@ -1002,6 +1042,45 @@ class Enrichment:
 #: occupancy. Small enough not to matter against a real share and large enough
 #: that the building type does not disappear.
 _NOMINAL_SHARE = 1e-04
+
+#: The rules an assumption set may state. Both re-weigh a mixture; neither can
+#: remove a candidate from it.
+ASSUMPTION_RULES = ("design_level_factors", "macro_weights")
+
+
+def assumption_variant(
+    base: Enrichment, *, key: str, rules: Mapping[str, Any] | None = None
+) -> Enrichment:
+    """The base enrichment under one assumption set's rules.
+
+    Only rules that re-weigh the mixture are accepted. A rule that removed
+    candidates -- a minimum height, say -- would change which classes exist and
+    which intensity measures they reach, and an assumption set has to be a
+    different weighting of the same model rather than a different model. That is
+    what lets one Oasis package carry every set under one set of vulnerability
+    identifiers, with the keys and their reconciliation unchanged whichever set
+    a run chooses.
+    """
+    stated = dict(rules or {})
+    unknown = sorted(set(stated) - set(ASSUMPTION_RULES))
+    if unknown:
+        raise EnrichmentError(
+            f"Assumption set {key!r} states {', '.join(unknown)}, which an assumption "
+            f"set may not. It may state {', '.join(ASSUMPTION_RULES)}: rules that "
+            "re-weigh a mixture rather than change which buildings are in it."
+        )
+    return dataclasses.replace(
+        base,
+        name=f"{base.name}+{key}",
+        design_weight_factors={
+            **base.design_weight_factors,
+            **{str(k): float(v) for k, v in (stated.get("design_level_factors") or {}).items()},
+        },
+        weight_overrides={
+            **base.weight_overrides,
+            **{str(k): float(v) for k, v in (stated.get("macro_weights") or {}).items()},
+        },
+    )
 
 
 def _nearest_height(candidates: Sequence[Any], storeys: int) -> list[Any]:
@@ -1098,6 +1177,212 @@ def mixture_report(mixtures: Sequence[Mixture]) -> dict[str, Any]:
             for dimension in ("construction", "height", "design")
         },
     }
+
+
+# -- what an enrichment run records about a portfolio -----------------------------------
+
+#: The OED value columns a location's evidence is weighed by.
+TIV_COLUMNS = ("BuildingTIV", "OtherTIV", "ContentsTIV", "BITIV")
+
+#: The attributes an enrichment decides, in the order a mixture narrows them.
+ENRICHED_ATTRIBUTES = ("occupancy", "construction", "height", "design")
+
+
+class Provenance(enum.StrEnum):
+    """Where one attribute of one location came from, in section 8's hierarchy."""
+
+    REPORTED = "reported"
+    """The schedule stated it, and CASS uses it as stated."""
+
+    DERIVED = "derived"
+    """Reliably derived from a stated field: a height band from a storey count,
+    a seismic design level from a year of construction."""
+
+    IMPUTED = "imputed"
+    """Not stated, or stated in a form that constrains nothing, so the
+    assumption set's mixture carries it."""
+
+    UNRESOLVED = "unresolved"
+    """Stated, and reaching nothing: an occupancy no GEM class answers. Neither
+    evidence nor assumption, and the lookup fails the location."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LocationEvidence:
+    """What an enrichment knew and assumed about one location."""
+
+    account: str
+    location: str
+    tiv: Decimal
+    evidence: Mapping[str, Provenance]
+
+    @property
+    def confidence(self) -> float:
+        """The share of its attributes that were stated or derived rather than assumed."""
+        known = sum(
+            1
+            for value in self.evidence.values()
+            if value in (Provenance.REPORTED, Provenance.DERIVED)
+        )
+        return known / len(ENRICHED_ATTRIBUTES)
+
+    def as_row(self) -> dict[str, str]:
+        return {
+            "AccNumber": self.account,
+            "LocNumber": self.location,
+            "TIV": str(self.tiv),
+            **{name: str(self.evidence[name]) for name in ENRICHED_ATTRIBUTES},
+            "Confidence": f"{self.confidence:.2f}",
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ExposureLineage:
+    """Attribute-level lineage for a whole portfolio under one enrichment.
+
+    The control-plane summary section 5 asks an enrichment run to hold -- counts
+    by evidence class, missingness by count and by value, and exceptions -- and
+    the per-location table behind it, which is kept as an artifact rather than
+    expanded into database rows.
+    """
+
+    enrichment: str
+    locations: tuple[LocationEvidence, ...]
+
+    @property
+    def total_tiv(self) -> Decimal:
+        return sum((item.tiv for item in self.locations), Decimal(0))
+
+    def counts(self) -> dict[str, int]:
+        """Attribute values by provenance, across every location."""
+        found = {str(item): 0 for item in Provenance}
+        for location in self.locations:
+            for value in location.evidence.values():
+                found[str(value)] += 1
+        return found
+
+    def by_attribute(self) -> dict[str, dict[str, int]]:
+        found = {
+            name: {str(item): 0 for item in Provenance} for name in ENRICHED_ATTRIBUTES
+        }
+        for location in self.locations:
+            for name, value in location.evidence.items():
+                found[name][str(value)] += 1
+        return found
+
+    def missingness(self) -> dict[str, dict[str, Any]]:
+        """For each attribute, how many locations and how much value lacked it."""
+        profile: dict[str, dict[str, Any]] = {}
+        for name in ENRICHED_ATTRIBUTES:
+            missing = [
+                item
+                for item in self.locations
+                if item.evidence[name] in (Provenance.IMPUTED, Provenance.UNRESOLVED)
+            ]
+            value = sum((item.tiv for item in missing), Decimal(0))
+            profile[name] = {
+                "locations": len(missing),
+                "tiv": str(value),
+                "share_of_tiv": (
+                    str((value / self.total_tiv).quantize(Decimal("0.0001")))
+                    if self.total_tiv
+                    else "0"
+                ),
+            }
+        return profile
+
+    def exceptions(self) -> list[dict[str, str]]:
+        """Locations no assumption can place, with the value that rests on them."""
+        return [
+            {
+                "AccNumber": item.account,
+                "LocNumber": item.location,
+                "TIV": str(item.tiv),
+                "reason": (
+                    "The occupancy reaches no GEM class, so no assumption set places "
+                    "this location and the lookup fails it."
+                ),
+            }
+            for item in self.locations
+            if item.evidence["occupancy"] is Provenance.UNRESOLVED
+        ]
+
+    def mean_confidence(self) -> float:
+        if not self.locations:
+            return 0.0
+        return sum(item.confidence for item in self.locations) / len(self.locations)
+
+    def as_csv(self) -> bytes:
+        buffer = io.StringIO(newline="")
+        writer = csv.DictWriter(
+            buffer,
+            fieldnames=["AccNumber", "LocNumber", "TIV", *ENRICHED_ATTRIBUTES, "Confidence"],
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        for item in self.locations:
+            writer.writerow(item.as_row())
+        return buffer.getvalue().encode("utf-8")
+
+
+def exposure_lineage(
+    rows: Iterable[Mapping[str, Any]], enrichment: Enrichment
+) -> ExposureLineage:
+    """Which of each location's attributes were stated, derived or assumed.
+
+    Read from the published OED rows, as reported. Nothing here changes a value:
+    an assumption set re-weighs the mixture a class is blended from, not the
+    attributes a schedule states, so the lineage is a statement about the rows
+    rather than a rewrite of them.
+    """
+    found: list[LocationEvidence] = []
+    for row in rows:
+        occupancy = str(row.get("OccupancyCode") or "").strip()
+        construction = str(row.get("ConstructionCode") or "").strip()
+        storeys = _whole(row.get("NumberOfStoreys"))
+        year = _whole(row.get("YearBuilt"))
+
+        evidence = {
+            "occupancy": (
+                Provenance.REPORTED if occupancy in OED_OCCUPANCY else Provenance.UNRESOLVED
+            ),
+            "construction": (
+                Provenance.REPORTED if construction in OED_CONSTRUCTION else Provenance.IMPUTED
+            ),
+            "height": (
+                Provenance.DERIVED if storeys is not None and storeys >= 1 else Provenance.IMPUTED
+            ),
+            "design": (
+                Provenance.DERIVED
+                if year is not None and enrichment.design_levels(year)
+                else Provenance.IMPUTED
+            ),
+        }
+        found.append(
+            LocationEvidence(
+                account=str(row.get("AccNumber") or "").strip(),
+                location=str(row.get("LocNumber") or "").strip(),
+                tiv=sum((_money(row.get(column)) for column in TIV_COLUMNS), Decimal(0)),
+                evidence=evidence,
+            )
+        )
+    return ExposureLineage(enrichment=enrichment.reference, locations=tuple(found))
+
+
+def _whole(value: Any) -> int | None:
+    try:
+        text = str(value).strip()
+        return int(float(text)) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _money(value: Any) -> Decimal:
+    try:
+        text = str(value).strip() if value is not None else ""
+        return Decimal(text) if text else Decimal(0)
+    except InvalidOperation:
+        return Decimal(0)
 
 
 def require_model(model: VulnerabilityModel) -> None:

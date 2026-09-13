@@ -62,7 +62,8 @@ class VulnerabilitySetSerializer(serializers.ModelSerializer):
             "id", "country_code", "version", "source", "source_commit",
             "taxonomy_generation", "licence", "licence_cleared", "licence_note",
             "function_count", "imts_used", "unsupported_imts", "coverage_components",
-            "damage_bin_count", "publication_state", "is_frozen", "created_at",
+            "damage_bin_count", "assumption_variants", "publication_state", "is_frozen",
+            "created_at",
         ]
         read_only_fields = ["id", "unsupported_imts", "is_frozen", "created_at"]
 
@@ -109,6 +110,35 @@ class ModelVersionSerializer(serializers.ModelSerializer):
 
     def get_publication_blockers(self, obj) -> list[str]:
         return obj.publication_blockers()
+
+
+def catalogue_assumption_sets(model_version) -> list[dict]:
+    """The assumption sets a run against this version may name.
+
+    Only sets its vulnerability set carries functions for, the latest version of
+    each, and whether anyone has approved it: a run under an unapproved set
+    produces research output, and the analyst choosing one should see that
+    before choosing rather than after.
+    """
+    carried = list((model_version.vulnerability_set.assumption_variants or {}).keys())
+    latest: dict[str, AssumptionSet] = {}
+    for item in AssumptionSet.objects.filter(
+        country_code=model_version.country_code.upper()
+    ).order_by("-created_at"):
+        if item.flavour in carried:
+            latest.setdefault(item.flavour, item)
+    return [
+        {
+            "id": str(item.id),
+            "flavour": item.flavour,
+            "label": item.label,
+            "reference": item.reference,
+            "publication_state": item.publication_state,
+            "approved": item.publication_state
+            in (PublicationState.APPROVED, PublicationState.PUBLISHED),
+        }
+        for flavour, item in sorted(latest.items(), key=lambda pair: carried.index(pair[0]))
+    ]
 
 
 class AreaPerilGridViewSet(viewsets.ModelViewSet):
@@ -357,6 +387,7 @@ class ModelVersionViewSet(viewsets.ModelViewSet):
                     "peril_scope": item.peril_scope,
                     "unsupported_taxonomy_report": item.unsupported_taxonomy_report,
                     "blockers": item.publication_blockers(),
+                    "assumption_sets": catalogue_assumption_sets(item),
                 }
             )
         return Response({"models": rows})

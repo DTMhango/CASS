@@ -6,12 +6,17 @@ errors, reconciliation and lineage visible -- and without anyone opening the
 native Oasis interface. This module is the orchestration half of that. The
 protocol half is the adapter; nothing here speaks HTTP.
 
-Ten of the eleven stages in the analysis pipeline are performed here:
+All eleven stages of the analysis pipeline are performed here:
 
 ``validate_exposure``
     Validate the published files again, inside the run, and confirm they still
     match the version record, carry one currency and support the requested
     perspectives.
+
+``enrich``
+    Apply the run's assumption set by choosing the engine's vulnerability set,
+    and record which attributes each location stated, derived or left to the
+    assumption, as an enrichment run.
 
 ``publish_oed``
     Create the Oasis portfolio and upload the frozen OED artifacts.
@@ -49,10 +54,9 @@ Ten of the eleven stages in the analysis pipeline are performed here:
     return period, within the insured value -- and hold them at the gate when
     they are not.
 
-The eleventh, ``enrich``, belongs to the exposure-enrichment workstream. It is
-recorded in the manifest as not performed rather than skipped silently, because
-a manifest that omits a stage reads as though it passed, and ``smoke`` is
-recorded the same way on the occasions it cannot run.
+``smoke`` is the one stage that can decline to run. Where no footprint index is
+readable it is recorded in the manifest as not performed rather than skipped
+silently, because a manifest that omits a stage reads as though it passed.
 
 Two rules shape everything below. A run that stops must say why in terms an
 analyst can act on, and must never leave a published partial result: every
@@ -83,9 +87,19 @@ from apps.audit.models import Approval, AuditAction
 from apps.common.engines import oasis_adapter, oasis_model_triple
 from apps.common.storage import bucket, get_store
 from apps.exposure import services as exposure_services
+from apps.exposure.models import EnrichmentRun
 from apps.modelregistry.assets import ModelAssetError, load_grid, load_vulnerability
+from apps.modelregistry.models import PublicationState
 from cass_adapters.base import AdapterError, EngineState
 from cass_adapters.oasis import OasisPhase, PortfolioFileKind
+from cass_converter import pilot_enrichment
+from cass_converter.enrichment import (
+    Enrichment,
+    EnrichmentError,
+    assumption_variant,
+    exposure_lineage,
+)
+from cass_converter.model_build import BASELINE
 from cass_converter.oasis_package import PackageError, read_footprint_index
 from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_core.runs import RunState
@@ -109,6 +123,7 @@ OASIS_FILE_BY_ROLE: dict[str, PortfolioFileKind] = {
 #: Stages this service performs, in pipeline order.
 ENGINE_STAGES = (
     "validate_exposure",
+    "enrich",
     "publish_oed",
     "keys",
     "reconcile_keys",
@@ -122,11 +137,10 @@ ENGINE_STAGES = (
 
 #: Stages the analysis pipeline declares that this service does not perform,
 #: with the reason each is outstanding. Recorded in the manifest so a reader
-#: can tell "not done" from "done and clean". ``smoke`` joins these on a run
-#: where it could not choose an event set, with the reason it could not.
-UNPERFORMED_STAGES: dict[str, str] = {
-    "enrich": "Assumption sets are not yet applied within a run.",
-}
+#: can tell "not done" from "done and clean". Every stage is performed now;
+#: ``smoke`` joins these on a run where it could not choose an event set, with
+#: the reason it could not.
+UNPERFORMED_STAGES: dict[str, str] = {}
 
 #: How many events the smoke check runs. Enough to touch most of a regional
 #: book, few enough that a national event set of tens of thousands is checked
@@ -195,12 +209,22 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
     ``model_supplier_id``, ``model_name_id`` and ``model_settings`` are required
     by the server's settings schema. The first two name the resolved Oasis
     model, so the document cannot drift from the model the analysis is bound
-    to. ``model_settings`` is left empty on purpose: event set and occurrence
-    choices belong to the model's own defaults, and filling them in here would
-    put a CASS guess inside a model's configuration.
+    to. ``model_settings`` names the vulnerability set where the package carries
+    more than one (ADR 14) and nothing else: event set and occurrence choices
+    belong to the model's own defaults, and filling them in here would put a
+    CASS guess inside a model's configuration.
     """
+    vulnerability_set = vulnerability_set_for(analysis_run)
     if analysis_run.analysis_settings:
-        return dict(analysis_run.analysis_settings)
+        document = dict(analysis_run.analysis_settings)
+        chosen = dict(document.get("model_settings") or {})
+        if vulnerability_set and not chosen.get("vulnerability_set"):
+            # A package built with assumption sets carries no plain table, so a
+            # document naming none would reach the engine with no damage
+            # relationships at all. The run's own set is added rather than the
+            # document refused.
+            document["model_settings"] = {**chosen, "vulnerability_set": vulnerability_set}
+        return document
 
     requested = set(settings_perspectives(analysis_run))
 
@@ -211,7 +235,9 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
         "model_version_id": str(analysis_run.model_version_id),
         "model_supplier_id": model.supplier_id if model is not None else supplier,
         "model_name_id": model.model_id if model is not None else model_name,
-        "model_settings": {},
+        "model_settings": (
+            {"vulnerability_set": vulnerability_set} if vulnerability_set else {}
+        ),
     }
     for perspective, (flag, summaries) in _PERSPECTIVE_KEYS.items():
         wanted = perspective in requested
@@ -221,6 +247,21 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
                 {"id": 1, "ord_output": dict(DEFAULT_ORD_OUTPUT)}
             ]
     return settings_document
+
+
+def vulnerability_set_for(analysis_run: AnalysisRun) -> str | None:
+    """The vulnerability set the engine is asked for, or ``None`` for one plain table.
+
+    A package built with assumption sets carries no plain table (ADR 14), so an
+    analysis against it always names one: the set the run chose, or the
+    baseline where it chose none.
+    """
+    variants = analysis_run.model_version.vulnerability_set.assumption_variants or {}
+    if not variants:
+        return None
+    if analysis_run.assumption_set_id:
+        return analysis_run.assumption_set.flavour
+    return BASELINE
 
 
 def settings_perspectives(analysis_run: AnalysisRun) -> tuple[str, ...]:
@@ -449,12 +490,186 @@ def _served_package(analysis_run) -> dict:
             "again: this run would otherwise publish the other version's losses under "
             "this one's name."
         )
+
+    wanted = vulnerability_set_for(analysis_run)
+    carried = [str(item) for item in manifest.get("vulnerability_sets") or []]
+    if wanted and wanted not in carried:
+        described = (
+            f"the {', '.join(carried)} vulnerability sets" if carried
+            else "one plain vulnerability table"
+        )
+        raise AnalysisExecutionError(
+            f"The served package for {model_version.reference} carries {described}, and "
+            f"this run asks for {wanted}. Build the package again so it carries the "
+            "model version's assumption sets."
+        )
     return {
         "checked": True,
         "model_version": served,
         "package_version": manifest.get("package_version", ""),
         "hazard_set": provenance.get("hazard_set", ""),
         "events": manifest.get("events"),
+        "vulnerability_sets": carried,
+    }
+
+
+def _enrich(analysis_run, actor) -> dict:
+    """Apply the run's assumption set, and record what the run rests on.
+
+    Section 8 keeps reported data first and assumptions only for what is
+    missing, and section 5 asks every enrichment run to say how much of each
+    was which. An assumption set in CASS is a weighting of the mixtures the
+    model's classes are blended from (ADR 14). It changes the damage
+    relationship an unknown attribute is answered by, and never a value or a
+    stated attribute. So this stage settles which vulnerability set the engine
+    uses and records the lineage -- which attributes each location stated,
+    which were derived, which the mixture carries -- as an ``EnrichmentRun``,
+    with its table stored as an artifact.
+
+    The lineage is recorded under the rules the functions were built with,
+    which the vulnerability set holds. An assumption set whose record has
+    changed since would otherwise describe weights the functions do not have.
+    """
+    run = analysis_run.run
+    version = analysis_run.exposure_version
+    model_version = analysis_run.model_version
+    vulnerability = model_version.vulnerability_set
+    chosen = analysis_run.assumption_set
+    variants = vulnerability.assumption_variants or {}
+    key = chosen.flavour if chosen is not None else BASELINE
+
+    if chosen is not None:
+        if chosen.country_code.upper() != model_version.country_code.upper():
+            raise AnalysisExecutionError(
+                f"The {chosen} assumption set is for {chosen.country_code}, and "
+                f"{model_version.reference} models {model_version.country_code}."
+            )
+        if key not in variants:
+            raise AnalysisExecutionError(
+                f"{vulnerability} carries no functions for the "
+                f"{chosen.get_flavour_display().lower()} assumption set. Register the "
+                "vulnerability set again so it is built under every assumption set, "
+                "then build the package."
+            )
+        if chosen.rules and dict(chosen.rules) != variants[key]:
+            raise AnalysisExecutionError(
+                f"The {chosen} assumption set's rules have changed since {vulnerability} "
+                "was built, so the functions a run would use are not the ones the set "
+                "now describes. Register the vulnerability set again."
+            )
+
+    rules = variants.get(key, {})
+    try:
+        base = pilot_enrichment.enrichment(model_version.country_code)
+    except KeyError:
+        # A country with no pilot enrichment still has lineage: what the schedule
+        # states, with nothing derived from a year no era covers.
+        base = Enrichment(
+            name=f"{model_version.country_code.lower()}_no_pilot_enrichment",
+            version="0",
+            country_code=model_version.country_code.upper(),
+        )
+    try:
+        enrichment = (
+            base
+            if key == BASELINE and not rules
+            else assumption_variant(base, key=key, rules=rules)
+        )
+    except EnrichmentError as exc:
+        raise AnalysisExecutionError(str(exc)) from exc
+
+    try:
+        files = exposure_services.load_files(version)
+    except exposure_services.ExposureError as exc:
+        raise AnalysisExecutionError(str(exc)) from exc
+    lineage = exposure_lineage([dict(row.raw) for row in files.location.rows], enrichment)
+
+    source_tiv = Decimal(version.total_tiv or 0)
+    if lineage.total_tiv != source_tiv:
+        raise AnalysisExecutionError(
+            f"The enrichment read {lineage.total_tiv} of insured value from the published "
+            f"files, and the version records {source_tiv}. An assumption set moves no "
+            "value, so a difference is a defect in the reading rather than a result."
+        )
+
+    uri = _store_keys_file(
+        run, "enrichment_lineage", lineage.as_csv(), actor, retention=RetentionClass.RESULT
+    )
+    artifact = Artifact.objects.get(uri=uri)
+    counts = lineage.counts()
+    exceptions = lineage.exceptions()
+    engine_set = key if variants else ""
+
+    with transaction.atomic():
+        enrichment_run = EnrichmentRun.objects.create(
+            exposure_version=version,
+            assumption_set=chosen,
+            reported_count=counts["reported"],
+            derived_count=counts["derived"],
+            imputed_count=counts["imputed"],
+            mean_confidence=lineage.mean_confidence(),
+            missingness_profile=lineage.missingness(),
+            attribute_lineage={
+                "by_attribute": lineage.by_attribute(),
+                "unresolved": counts["unresolved"],
+                "enrichment": enrichment.as_dict(),
+                "vulnerability_set": engine_set,
+            },
+            reconciliation={
+                "source_tiv": str(source_tiv),
+                "enriched_tiv": str(lineage.total_tiv),
+                "difference": str(lineage.total_tiv - source_tiv),
+                "method": (
+                    "An assumption set re-weighs the mixture a class is blended from. "
+                    "It moves no value between locations or coverages, so the enriched "
+                    "value is the published value."
+                ),
+            },
+            reconciled=True,
+            exceptions=exceptions,
+            output_checksum=artifact.checksum,
+            created_by=actor,
+            updated_by=actor,
+        )
+        ArtifactLink.objects.update_or_create(
+            artifact=artifact,
+            subject_type="enrichment_run",
+            subject_id=enrichment_run.id,
+            role="enrichment_lineage",
+            direction="output",
+            defaults={"created_by": actor},
+        )
+        analysis_run.enrichment_run = enrichment_run
+        analysis_run.save(update_fields=["enrichment_run", "updated_at"])
+
+    label = chosen.label if chosen is not None else "The model's baseline weights"
+    run.advance(
+        "enrich",
+        actor=actor,
+        message=(
+            f"{label}: {enrichment_run.assumption_share:.0%} of attribute values rest on "
+            "the assumption rather than the schedule"
+            + (
+                f"; {len(exceptions)} location(s) have an occupancy no assumption can place."
+                if exceptions
+                else "."
+            )
+        ),
+        metrics={
+            "enrichment_run": str(enrichment_run.id),
+            "vulnerability_set": engine_set,
+            **counts,
+        },
+    )
+    return {
+        "enrichment_run": str(enrichment_run.id),
+        "assumption_set": chosen.reference if chosen is not None else "",
+        "vulnerability_set": engine_set,
+        "enrichment": enrichment.reference,
+        "counts": counts,
+        "mean_confidence": enrichment_run.mean_confidence,
+        "lineage": uri,
+        "checksum": artifact.checksum,
     }
 
 
@@ -1111,6 +1326,7 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
                 "state": (
                     ResultState.RESEARCH
                     if model_version.is_research_prototype
+                    or _assumption_is_unapproved(analysis_run)
                     else ResultState.DRAFT
                 ),
                 "average_annual_loss": metrics.average_annual_loss,
@@ -1119,12 +1335,7 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
                 or analysis_run.exposure_version.run_currency,
                 "return_period_losses": metrics.return_period_losses,
                 "model_version_reference": model_version.reference,
-                "assumption_set_reference": (
-                    analysis_run.enrichment_run.assumption_set.reference
-                    if analysis_run.enrichment_run_id
-                    and analysis_run.enrichment_run.assumption_set_id
-                    else ""
-                ),
+                "assumption_set_reference": _assumption_reference(analysis_run),
                 "valuation_date": analysis_run.exposure_version.valuation_date,
                 "exposure_quality": _exposure_quality(analysis_run),
                 "peril_scope": model_version.peril_scope,
@@ -1155,6 +1366,30 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
         )
 
     return {"published": published}
+
+
+def _assumption_is_unapproved(analysis_run) -> bool:
+    """Whether the run rests on an assumption set nobody has approved.
+
+    A result under a draft assumption set is research output whatever a
+    reviewer later does, for the reason a prototype model's is: approving the
+    number would approve the assumption behind it without anyone having
+    reviewed the assumption.
+    """
+    chosen = analysis_run.assumption_set
+    return chosen is not None and chosen.publication_state not in (
+        PublicationState.APPROVED,
+        PublicationState.PUBLISHED,
+    )
+
+
+def _assumption_reference(analysis_run) -> str:
+    """What the result's unknown attributes were weighted under."""
+    if analysis_run.assumption_set_id:
+        return analysis_run.assumption_set.reference
+    if analysis_run.enrichment_run_id:
+        return "baseline weights"
+    return ""
 
 
 def _exposure_quality(analysis_run) -> dict:
@@ -1442,6 +1677,7 @@ def execute(
             "exposure_validation",
             lambda: _validate_exposure(analysis_run, actor),
         ),
+        ("enrich", "enrichment", lambda: _enrich(analysis_run, actor)),
         ("publish_oed", "portfolio", lambda: _publish_oed(analysis_run, engine, actor)),
         ("keys", "keys", lambda: _keys(analysis_run, actor)),
         ("reconcile_keys", "reconciliation", lambda: _reconcile_keys(analysis_run, actor)),
@@ -1715,7 +1951,9 @@ def _keys_csv(records) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
-def _store_keys_file(run, role: str, payload: bytes, actor) -> str:
+def _store_keys_file(
+    run, role: str, payload: bytes, actor, *, retention=RetentionClass.DIAGNOSTIC
+) -> str:
     """Register one keys output against the run and return its URI.
 
     Kept as an artifact rather than a column because section 8 requires the
@@ -1728,7 +1966,7 @@ def _store_keys_file(run, role: str, payload: bytes, actor) -> str:
         f"analysis/{run.id}/{role}.csv",
         payload,
         content_type="text/csv",
-        retention=RetentionClass.DIAGNOSTIC,
+        retention=retention,
         access=AccessPolicy.PROJECT,
     )
     artifact, _ = Artifact.objects.update_or_create(

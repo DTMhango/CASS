@@ -367,6 +367,13 @@ class AnalysisRun(BaseModel):
         "exposure.EnrichmentRun", null=True, blank=True,
         on_delete=models.PROTECT, related_name="analysis_runs",
     )
+    #: The assumption set the run weighs unknown attributes under. Null means the
+    #: baseline weights the model was built with. What the enrich stage applied
+    #: is recorded as the ``enrichment_run`` above.
+    assumption_set = models.ForeignKey(
+        "modelregistry.AssumptionSet", null=True, blank=True,
+        on_delete=models.PROTECT, related_name="analysis_runs",
+    )
     model_version = models.ForeignKey(
         "modelregistry.ModelVersion", on_delete=models.PROTECT, related_name="analysis_runs"
     )

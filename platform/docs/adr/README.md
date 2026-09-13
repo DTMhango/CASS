@@ -21,6 +21,7 @@ revisit it. A decision that cannot name its alternatives was not a decision.
 | [0011](0011-intake-template-and-policy-id.md) | Portfolios arrive through the CASS intake template, joined on Policy ID | Accepted |
 | [0012](0012-national-classical-model-run-event-based.md) | A published national hazard model is converted to an event-based run | Accepted |
 | [0013](0013-product-areas-hold-tabs.md) | A product area holds its screens as tabs | Accepted |
+| [0014](0014-assumption-sets-as-vulnerability-sets.md) | An assumption set is a vulnerability set the engine selects per analysis | Accepted |
 
 Records 0007 to 0013 are where delivery moved the design away from build plan
 1.7. Plan 1.8 marks each affected statement *Changed in 1.8* and links here.

@@ -188,6 +188,16 @@ class VulnerabilitySet(BaseModel, FreezableModel):
         help_text="Structural, non-structural, contents or business interruption.",
     )
     damage_bin_count = models.IntegerField(default=0)
+    #: The assumption sets this set carries a function table for, each with the
+    #: rules its functions were weighted under. Empty for a set built without
+    #: them, whose one table is the baseline. A run may ask only for a set named
+    #: here, and its lineage is recorded under these rules rather than whatever
+    #: the assumption set record says today (ADR 14).
+    assumption_variants = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Assumption set flavour to the rules its function table was built under.",
+    )
 
     publication_state = models.CharField(
         max_length=16, choices=PublicationState.choices, default=PublicationState.DRAFT

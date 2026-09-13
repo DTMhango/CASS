@@ -4757,6 +4757,10 @@ components:
           type: string
           format: uuid
           nullable: true
+        assumption_set:
+          type: string
+          format: uuid
+          nullable: true
         model_version:
           type: string
           format: uuid
@@ -4820,6 +4824,10 @@ components:
           type: string
           format: uuid
         enrichment_run:
+          type: string
+          format: uuid
+          nullable: true
+        assumption_set:
           type: string
           format: uuid
           nullable: true
@@ -5501,6 +5509,7 @@ components:
           type: string
           format: uuid
           readOnly: true
+          nullable: true
         reported_count:
           type: integer
           readOnly: true
@@ -6887,6 +6896,10 @@ components:
           type: string
           format: uuid
           nullable: true
+        assumption_set:
+          type: string
+          format: uuid
+          nullable: true
         model_version:
           type: string
           format: uuid
@@ -7359,6 +7372,9 @@ components:
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
+        assumption_variants:
+          description: Assumption set flavour to the rules its function table was
+            built under.
         publication_state:
           $ref: '#/components/schemas/PublicationStateEnum'
     PerilEnum:
@@ -8075,6 +8091,9 @@ components:
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
+        assumption_variants:
+          description: Assumption set flavour to the rules its function table was
+            built under.
         publication_state:
           $ref: '#/components/schemas/PublicationStateEnum'
         is_frozen:
@@ -8138,6 +8157,9 @@ components:
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
+        assumption_variants:
+          description: Assumption set flavour to the rules its function table was
+            built under.
         publication_state:
           $ref: '#/components/schemas/PublicationStateEnum'
       required:

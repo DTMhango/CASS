@@ -64,9 +64,13 @@ export function AnalysisBuilder() {
 
   const [label, setLabel] = useState("");
   const [profile, setProfile] = useState("");
+  const [assumptionSet, setAssumptionSet] = useState("");
 
   const exposure = exposures?.find((item) => item.id === context.exposureId);
   const model = models?.find((item) => item.id === context.modelId);
+  // Looked up against the chosen model, so a set chosen for one version is not
+  // carried silently onto another that has no functions for it.
+  const chosenSet = model?.assumption_sets?.find((item) => item.id === assumptionSet);
 
   const perspectiveAvailability = exposure?.supported_perspectives?.find(
     (item) => item.perspective === context.perspective,
@@ -130,6 +134,7 @@ export function AnalysisBuilder() {
         perspectives: [context.perspective],
         label: label.trim(),
         execution_profile: profile || undefined,
+        assumption_set: chosenSet?.id,
       });
       await submit.mutateAsync(analysis.id);
       navigate(`/runs/${analysis.run}`);
@@ -192,6 +197,31 @@ export function AnalysisBuilder() {
                 <option key={item.id} value={item.id}>
                   {item.reference}
                   {item.is_research_prototype ? " (research only)" : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field
+            label="Assumption set"
+            htmlFor="builder-assumptions"
+            hint="How unknown construction, height and design are weighted. The keys and the insured value are the same under every set; only the damage behind them moves."
+          >
+            <Select
+              id="builder-assumptions"
+              value={chosenSet?.id ?? ""}
+              onChange={(event) => setAssumptionSet(event.target.value)}
+              disabled={!model?.assumption_sets?.length}
+            >
+              <option value="">
+                {model?.assumption_sets?.length
+                  ? "Baseline weights the model was built with"
+                  : "This model version carries no assumption sets"}
+              </option>
+              {model?.assumption_sets?.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                  {item.approved ? "" : " (not approved: research output)"}
                 </option>
               ))}
             </Select>
@@ -294,6 +324,13 @@ export function AnalysisBuilder() {
                   : "The run is queued in the background. You do not have to keep this page open."}
               </p>
             </div>
+
+            {ready && chosenSet && !chosenSet.approved ? (
+              <Notice tone="warning" title="This assumption set is not approved">
+                {chosenSet.label} has not cleared the exposure-enrichment gate, so the
+                result will be marked research output whatever the model version is.
+              </Notice>
+            ) : null}
 
             {ready && model?.is_research_prototype ? (
               <Notice tone="warning" title="This run will produce research output">

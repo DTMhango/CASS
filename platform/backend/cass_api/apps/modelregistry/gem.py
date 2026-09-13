@@ -48,8 +48,10 @@ from django.db import transaction
 
 from cass_converter import pilot_bins, pilot_enrichment
 from cass_converter.model_build import (
+    BASELINE,
     CountryBuild,
     build_country,
+    build_variants,
     dictionary,
     evidence_summary,
     mapping_csv,
@@ -65,9 +67,11 @@ from .assets import (
     attach_vulnerability_dictionary,
     attach_vulnerability_functions,
     attach_vulnerability_mapping,
+    attach_vulnerability_variant,
 )
 from .models import (
     INTERNAL_USE_LICENCE,
+    AssumptionSet,
     ModelVersion,
     PublicationState,
     VulnerabilitySet,
@@ -174,6 +178,66 @@ def build(
     )
 
 
+def assumption_rules(country_code: str) -> dict[str, dict[str, Any]]:
+    """The assumption sets a country's vulnerability build carries, with their rules.
+
+    Always the three section 8 names, baseline first. A registered set's own
+    rules win where it states any; otherwise the draft pilot tilt for its
+    flavour applies. The rules are recorded on the vulnerability set as they
+    were built, so a later change to an assumption set record does not quietly
+    re-describe functions that were weighted under the old rules.
+    """
+    variants: dict[str, dict[str, Any]] = {
+        key: ({"design_level_factors": dict(tilt)} if tilt else {})
+        for key, tilt in pilot_enrichment.ASSUMPTION_TILTS.items()
+    }
+    latest: dict[str, AssumptionSet] = {}
+    for item in AssumptionSet.objects.filter(country_code=country_code.upper()).order_by(
+        "-created_at"
+    ):
+        latest.setdefault(item.flavour, item)
+    for flavour, item in latest.items():
+        if item.rules:
+            variants[flavour] = dict(item.rules)
+    return variants
+
+
+def build_all(
+    country_code: str,
+    *,
+    root: str | pathlib.Path,
+    variants: dict[str, dict[str, Any]],
+    policy: ConversionPolicy | None = None,
+    coverage_types: tuple[int, ...] = (1, 2, 3, 4),
+) -> dict[str, CountryBuild]:
+    """Build one country's vulnerability set once per assumption set (ADR 14)."""
+    base = pathlib.Path(root)
+    if not base.is_dir():
+        raise GemRegistrationError(
+            f"{base} is not a directory. It should be the GEM {GEM_RELEASE} release "
+            "root, holding global_vulnerability_model and global_exposure_model."
+        )
+
+    chosen = policy or default_policy()
+    try:
+        models, prior, enrichment = pilot_enrichment.load(base, country_code)
+    except (KeyError, OSError) as exc:
+        raise GemRegistrationError(
+            f"The GEM model for {country_code} could not be read from {base}: {exc}"
+        ) from exc
+
+    return build_variants(
+        enrichment=enrichment,
+        variants=variants,
+        models=models,
+        prior=prior,
+        intensity_bins=pilot_bins.intensity_bins(chosen.imts),
+        damage_bins=pilot_bins.damage_bins(),
+        policy=chosen,
+        coverage_types=coverage_types,
+    )
+
+
 def default_policy() -> ConversionPolicy:
     """The policy a pilot vulnerability build runs under.
 
@@ -207,7 +271,9 @@ def register_vulnerability(
     the registry record in place, so running this twice does not produce two
     sets whose identifiers mean different things.
     """
-    built = build(country_code, root=root, policy=policy)
+    variants = assumption_rules(country_code)
+    builds = build_all(country_code, root=root, variants=variants, policy=policy)
+    built = builds[BASELINE]
     statement = licence or LicenceStatement()
     code = built.country_code.upper()
 
@@ -234,6 +300,7 @@ def register_vulnerability(
                 {str(item.coverage_type) for item in built.classes}
             ),
             "damage_bin_count": len(pilot_bins.damage_bins().bins),
+            "assumption_variants": {key: variants[key] for key in builds},
             "publication_state": PublicationState.DRAFT,
             "updated_by": actor,
         },
@@ -251,15 +318,29 @@ def register_vulnerability(
         filename=f"{code.lower()}-vuln-{VULNERABILITY_VERSION}.csv",
         actor=actor,
     )
+    for key, variant in builds.items():
+        attach_vulnerability_variant(
+            vulnerability_set,
+            key,
+            vulnerability_csv(variant),
+            filename=f"{code.lower()}-vuln-{VULNERABILITY_VERSION}-{key}.csv",
+            actor=actor,
+        )
     attach_damage_bins(
         vulnerability_set,
         damage_bins_to_csv(pilot_bins.damage_bins()),
         filename=f"damage-bins-{pilot_bins.PILOT_BIN_VERSION}.csv",
         actor=actor,
     )
+    provenance = dictionary(built)
+    # What each set's weights were, so a loss under one can be traced to the
+    # tilt that produced it.
+    provenance["assumption_sets"] = {
+        key: variant.enrichment.as_dict() for key, variant in builds.items()
+    }
     attach_vulnerability_dictionary(
         vulnerability_set,
-        json.dumps(dictionary(built), indent=2, sort_keys=True).encode("utf-8"),
+        json.dumps(provenance, indent=2, sort_keys=True).encode("utf-8"),
         filename=f"{code.lower()}-vuln-{VULNERABILITY_VERSION}-dictionary.json",
         actor=actor,
     )
