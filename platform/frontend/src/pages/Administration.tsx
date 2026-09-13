@@ -23,6 +23,7 @@ import { useState } from "react";
 
 import {
   useAuditEvents,
+  useDataStandards,
   useEngineStatus,
   usePlatformInfo,
   useProjects,
@@ -41,7 +42,7 @@ import {
   Spinner,
   TextInput,
 } from "@/components/primitives";
-import { formatDateTime } from "@/lib/format";
+import { formatCount, formatDateTime } from "@/lib/format";
 
 import "./Administration.css";
 
@@ -95,6 +96,8 @@ export function Administration() {
       ) : null}
 
       <EngineHealth />
+
+      <DataStandards />
 
       <div className="admin-grid">
         <Card title="This installation">
@@ -201,6 +204,77 @@ export function Administration() {
  * row reads as "nothing to see", which is the wrong thing to tell an operator
  * about a service the deployment is running.
  */
+/**
+ * Which version of the exposure standard this installation reads against.
+ *
+ * Section 17 pins the OED version rather than following whatever the installed
+ * library ships, and section 8 makes moving to OED 5 a decision taken against
+ * a field-level comparison. What this shows is the pin and, where the registry
+ * and the validator disagree, that they do -- because a registry nobody can
+ * trust is worse than none.
+ */
+function DataStandards() {
+  const { data: standards, error } = useDataStandards();
+
+  // A reader without the modeller role is refused the registry, which is a
+  // permission rather than a fault: the rest of the screen still stands.
+  if (error || !standards?.length) return null;
+
+  return (
+    <Card
+      title="Exposure data standards"
+      description="The version CASS validates and publishes exposure against, and the ones registered beside it."
+      padded={false}
+    >
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Standard</th>
+            <th scope="col">State</th>
+            <th scope="col" className="numeric">
+              Fields
+            </th>
+            <th scope="col">Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {standards.map((standard) => (
+            <tr key={standard.id}>
+              <th scope="row" className="mono">
+                {standard.standard} {standard.version}
+              </th>
+              <td>
+                <StatusBadge
+                  tone={standard.is_active ? "ok" : "idle"}
+                  size="sm"
+                  detail={
+                    standard.is_active
+                      ? "Exposure is validated and published against this version."
+                      : "Registered and comparable, but not what exposure is read against."
+                  }
+                >
+                  {standard.state}
+                </StatusBadge>
+                {standard.is_active && !standard.matches_the_reader ? (
+                  <StatusBadge
+                    tone="error"
+                    size="sm"
+                    detail="The registry and the validator name different versions."
+                  >
+                    disagrees with the reader
+                  </StatusBadge>
+                ) : null}
+              </td>
+              <td className="numeric">{formatCount(standard.field_count)}</td>
+              <td>{standard.source}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
 function EngineHealth() {
   const { data: engines, isLoading, error } = useEngineStatus();
 

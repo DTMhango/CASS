@@ -48,6 +48,7 @@ from apps.runs.api import (
     HazardRunViewSet,
     RunViewSet,
 )
+from apps.standards.api import DataStandardVersionViewSet
 
 router = DefaultRouter()
 router.register("projects", ProjectViewSet, basename="project")
@@ -77,6 +78,9 @@ router.register("analysis-runs", AnalysisRunViewSet, basename="analysis-run")
 
 router.register("results", ResultSetViewSet, basename="result")
 router.register("comparisons", ResultComparisonViewSet, basename="comparison")
+router.register(
+    "data-standards", DataStandardVersionViewSet, basename="data-standard"
+)
 
 api_patterns = [
     path("session/", SessionView.as_view(), name="session"),

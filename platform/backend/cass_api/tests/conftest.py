@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,19 @@ def client_for():
 @pytest.fixture()
 def api(client_for, analyst) -> APIClient:
     return client_for(analyst)
+
+
+@pytest.fixture(scope="session")
+def ods_data_path() -> Path:
+    """The pinned ODS Tools data directory, where the OED releases live."""
+    stated = os.environ.get("CASS_ODS_DATA_PATH")
+    path = Path(stated) if stated else None
+    if path is None or not path.is_dir():
+        pytest.skip(
+            "Set CASS_ODS_DATA_PATH to the ods_tools/data directory of the pinned "
+            "release to run this."
+        )
+    return path
 
 
 @pytest.fixture(scope="session")

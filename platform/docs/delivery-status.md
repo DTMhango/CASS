@@ -10,9 +10,9 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,715 backend tests pass, 1 skipped. 97 integration tests pass against the
-  real GEM v2026.0.0 files, the PuSGeN 2024 package and the 30 June workbook.
-  104 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+- 1,732 backend tests pass, 1 skipped. 98 integration tests pass against the
+  real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook and
+  the pinned ODS Tools specifications. 104 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -35,6 +35,12 @@ updated afterwards is a tracker somebody has to reconcile.
   events over 962 cells, all four intensity measures.
 - The official PiWind portfolio runs end to end through CASS in the live
   integration suite.
+- The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
+  field by field: 565 fields become 574, and every change is an addition of an
+  optional location field (the nine photovoltaic attributes). Nothing is
+  removed, no requirement changes and no type changes. CASS reads 28 of the
+  234 location fields, 17 of 286 account, 18 of 32 reinsurance info and 13 of
+  13 reinsurance scope, and no required field of any of them goes unread.
 
 ## Milestones (plan section 13)
 
@@ -143,7 +149,7 @@ decision number.
 | 3 | Currency conversion evidence captured and applied before generation | §8 | Done |
 | 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Partly done: event loss table and EP curve chart built. Geographic summaries, the map and scenario ranges need loss at a summary level below the portfolio, which is an engine settings change |
 | 5 | Financial structure workspace | §3, M5 | Partly done: accounts and layers, contracts, inuring order, scope preview and reconciliation are read from the published portfolio and checked. Building a structure on the platform, rather than importing one, is not built |
-| 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Not started |
+| 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Done |
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Not started |
 | 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Not started |
 | 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Not started |
@@ -181,6 +187,11 @@ machinery around one, the decision still has to be taken.
 - The brief's section 5.1 questions: coverage-component split, replacement cost
   or indemnity value, deductibles, limits and attachments, shared or scheduled
   multi-location limits, renewals.
+- Whether to adopt OED 5.0.0. The registry now has the comparison the decision
+  needs, and it is a small one: nine optional location fields added, nothing
+  removed or re-typed, and nothing CASS reads affected. Adoption still means
+  moving the reader and the pinned ODS Tools together, and re-running the
+  acceptance checks against PiWind and the KRE extract.
 - A full Indonesian grid run: 52,831 cells, hours of compute.
 - Production choices: identity provider, message broker, and availability and
   recovery targets.

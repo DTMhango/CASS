@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "apps.exposure",
     "apps.runs",
     "apps.results",
+    "apps.standards",
 ]
 
 MIDDLEWARE = [

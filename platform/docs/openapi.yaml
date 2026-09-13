@@ -1681,6 +1681,195 @@ paths:
               schema:
                 $ref: '#/components/schemas/CurrencyRate'
           description: ''
+  /api/v1/data-standards/:
+    get:
+      operationId: api_v1_data_standards_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: standard
+        schema:
+          type: string
+      - in: query
+        name: state
+        schema:
+          type: string
+          enum:
+          - active
+          - candidate
+          - superseded
+        description: |-
+          * `candidate` - Candidate
+          * `active` - Active
+          * `superseded` - Superseded
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDataStandardVersionList'
+          description: ''
+  /api/v1/data-standards/{id}/:
+    get:
+      operationId: api_v1_data_standards_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this data standard version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataStandardVersion'
+          description: ''
+  /api/v1/data-standards/{id}/adopt/:
+    post:
+      operationId: api_v1_data_standards_adopt_create
+      description: |-
+        Make this the version exposure is read against.
+
+        Section 8 requires the OED 5 decision to rest on a comparison against
+        PiWind, the KRE extract and the pinned engine. This records that
+        decision rather than taking it, and refuses a version the reader does
+        not implement -- a registry that said one thing while the validator did
+        another would be worse than no registry at all.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this data standard version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataStandardVersion'
+          description: ''
+  /api/v1/data-standards/{id}/coverage/:
+    get:
+      operationId: api_v1_data_standards_coverage_retrieve
+      description: |-
+        What CASS reads of this version, and what it does not.
+
+        A required field CASS does not read is a gap somebody chose; a column
+        CASS reads that the standard does not define is a local invention. Both
+        belong in front of whoever is deciding whether to adopt a version.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this data standard version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataStandardVersion'
+          description: ''
+  /api/v1/data-standards/{id}/fields/:
+    get:
+      operationId: api_v1_data_standards_fields_retrieve
+      description: Every field this version of the standard defines, by file.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this data standard version.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataStandardVersion'
+          description: ''
+  /api/v1/data-standards/diff/:
+    get:
+      operationId: api_v1_data_standards_diff_retrieve
+      description: What changed between two registered versions of one standard.
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+        description: Version compared from.
+      - in: query
+        name: standard
+        schema:
+          type: string
+        description: Defaults to OED.
+      - in: query
+        name: to
+        schema:
+          type: string
+        description: Version compared to.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataStandardVersion'
+          description: ''
   /api/v1/engines/:
     get:
       operationId: api_v1_engines_retrieve
@@ -5926,6 +6115,91 @@ components:
       - source
       - to_currency
       - valuation_date
+    DataStandardVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        standard:
+          type: string
+          readOnly: true
+          default: OED
+          description: The standard itself. OED is the only one CASS reads today.
+        version:
+          type: string
+          readOnly: true
+        state:
+          allOf:
+          - $ref: '#/components/schemas/DataStandardVersionStateEnum'
+          readOnly: true
+        source:
+          type: string
+          readOnly: true
+          description: Where the specification came from, such as the pinned ODS Tools
+            release.
+        reference_uri:
+          type: string
+          readOnly: true
+          description: The registered specification artifact this record was read
+            from.
+        checksum:
+          type: string
+          readOnly: true
+        file_kinds:
+          readOnly: true
+        field_count:
+          type: integer
+          readOnly: true
+        notes:
+          type: string
+          readOnly: true
+        adopted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+          readOnly: true
+        matches_the_reader:
+          type: boolean
+          description: |-
+            Whether this version is the one CASS actually reads exposure against.
+
+            A registry saying one thing while the reader does another is worse than
+            no registry, so the disagreement is reported rather than hidden.
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - adopted_at
+      - checksum
+      - created_at
+      - field_count
+      - file_kinds
+      - id
+      - is_active
+      - matches_the_reader
+      - notes
+      - reference_uri
+      - source
+      - standard
+      - state
+      - version
+    DataStandardVersionStateEnum:
+      enum:
+      - candidate
+      - active
+      - superseded
+      type: string
+      description: |-
+        * `candidate` - Candidate
+        * `active` - Active
+        * `superseded` - Superseded
     DecisionEnum:
       enum:
       - requested
@@ -7064,6 +7338,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CurrencyRate'
+    PaginatedDataStandardVersionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataStandardVersion'
     PaginatedEnrichmentRunList:
       type: object
       required:

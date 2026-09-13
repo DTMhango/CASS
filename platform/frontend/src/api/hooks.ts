@@ -24,6 +24,7 @@ import type {
   AreaPerilGridSummary,
   AuditEvent,
   CatalogueModel,
+  DataStandardVersion,
   EngineStatus,
   EventLossPage,
   ExposurePreview,
@@ -84,6 +85,7 @@ export const keys = {
   results: (projectId?: UUID) => ["results", projectId ?? "all"] as const,
   eventLosses: (id: UUID, limit: number) => ["results", id, "events", limit] as const,
   engines: ["engines"] as const,
+  dataStandards: ["data-standards"] as const,
   users: ["users"] as const,
   approvals: ["approvals"] as const,
 };
@@ -357,6 +359,21 @@ export function useRetryRun(id: UUID) {
   return useMutation({
     mutationFn: () => api.post<Run>(`/runs/${id}/retry/`),
     onSuccess: () => client.invalidateQueries({ queryKey: ["runs"] }),
+  });
+}
+
+/**
+ * The data standards this installation has pinned.
+ *
+ * Read-only here: adopting a version is a decision with a validation exercise
+ * behind it (section 8), not a control on a settings screen.
+ */
+export function useDataStandards() {
+  return useQuery({
+    queryKey: keys.dataStandards,
+    queryFn: async () =>
+      rows(await api.get<Paginated<DataStandardVersion>>("/data-standards/")),
+    retry: false,
   });
 }
 

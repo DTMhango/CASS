@@ -1076,3 +1076,24 @@ export interface FinancialStructureSummary {
   has_accounts: boolean;
   has_contracts: boolean;
 }
+
+// -- the data standards registry ---------------------------------------------
+
+/** One registered version of a data standard, as its owner published it. */
+export interface DataStandardVersion {
+  id: UUID;
+  standard: string;
+  version: string;
+  state: "candidate" | "active" | "superseded";
+  source: string;
+  reference_uri: string;
+  checksum: string;
+  file_kinds: Record<string, number>;
+  field_count: number;
+  notes: string;
+  adopted_at: string | null;
+  is_active: boolean;
+  /** Whether this is the version the validator actually implements. */
+  matches_the_reader: boolean;
+  created_at: string;
+}
