@@ -211,6 +211,14 @@ one. The published exposure keeps the values the business reported; the
 converted files the engine received are stored beside the run, and the rate
 travels with the result.
 
+**One correlation ID follows a run into the worker, and the platform reports on itself.**
+The request's correlation ID travels in the task's headers and is restored in the worker,
+whose log lines are the same structured JSON the API writes, and a run records the
+ID when it is queued. `/metrics/` serves Prometheus gauges for runs, profile capacity,
+recent failures, artifacts, results and open approvals, read from the records at
+scrape time rather than counted in memory, behind a scrape token. The API, the worker
+and the scheduler run one image, so a single build cannot leave a worker on stale code.
+
 **A run states what it is for before it runs.** The four modes of the brief's
 section 5.2 are a choice in the analysis builder: geometry only, which maps the
 book through CASS keys and stops without touching the engine; KRE-share
@@ -272,8 +280,8 @@ from what waits on a decision or an outside input. In short:
 - **Analyst product.** Maps, geographic summaries and scenario ranges. A result
   carries its exceedance curve and the events behind it; what it does not carry
   is loss below the portfolio level, which is an engine settings change.
-- **Production readiness.** Backup and restore, observability, single sign-on
-  and MFA, and signed releases. Uploads are scanned by content on every
+- **Production readiness.** Backup and restore, single sign-on and MFA, and
+  signed releases. Uploads are scanned by content on every
   installation; an antivirus engine is used where one is configured.
 
 ## Outstanding decisions that gate the model

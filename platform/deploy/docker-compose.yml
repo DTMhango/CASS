@@ -70,6 +70,14 @@ x-django-env: &django-env
   CASS_CONVERTER_URL: http://converter:8020
   CASS_CORS_ORIGINS: ${CASS_CORS_ORIGINS:-http://localhost:5173}
   CASS_CSRF_TRUSTED_ORIGINS: ${CASS_CSRF_TRUSTED_ORIGINS:-http://localhost:5173}
+  # Uploads and their scanning. An empty clamd host means none is configured,
+  # which each registered upload records rather than implying a scan.
+  CASS_MAX_UPLOAD_BYTES: ${CASS_MAX_UPLOAD_BYTES:-536870912}
+  CASS_UPLOAD_SESSION_SECONDS: ${CASS_UPLOAD_SESSION_SECONDS:-900}
+  CASS_CLAMD_HOST: ${CASS_CLAMD_HOST:-}
+  CASS_CLAMD_PORT: ${CASS_CLAMD_PORT:-3310}
+  # The scrape token for /metrics/. Empty leaves the metrics to administrators.
+  CASS_METRICS_TOKEN: ${CASS_METRICS_TOKEN:-}
 
 services:
   # -- control plane -------------------------------------------------------
@@ -149,6 +157,10 @@ services:
     restart: "no"
 
   api:
+    # One image for the API, the worker and the scheduler. They run the same
+    # code, and separate tags let a build of one leave the others behind: a
+    # worker on a stale image refuses tasks the API has just started sending.
+    image: cass/platform-api:local
     build:
       context: ..
       dockerfile: deploy/images/Dockerfile.api
@@ -183,6 +195,7 @@ services:
   # than inherited maximum parallelism, so concurrency is set explicitly and
   # the worker prefetches one task at a time.
   worker:
+    image: cass/platform-api:local
     build:
       context: ..
       dockerfile: deploy/images/Dockerfile.api
@@ -224,6 +237,7 @@ services:
   # a policy nothing enforces is not a policy. One replica only: two beats
   # would issue every scheduled task twice.
   beat:
+    image: cass/platform-api:local
     build:
       context: ..
       dockerfile: deploy/images/Dockerfile.api

@@ -5756,6 +5756,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/Health'
           description: ''
+  /metrics/:
+    get:
+      operationId: metrics_retrieve
+      description: |-
+        The scrape endpoint.
+
+        A scraper is not a person with a session, so it presents the token this
+        installation configures. Without one configured, only a platform
+        administrator may read the metrics: counts of runs and results are not
+        business data, but they are not public either.
+      tags:
+      - metrics
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+          description: Prometheus text format.
+        '403':
+          description: No scrape token and not an administrator.
 components:
   schemas:
     AccessEnum:

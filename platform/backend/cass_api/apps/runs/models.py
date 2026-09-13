@@ -230,6 +230,14 @@ class Run(BaseModel):
         match new_state:
             case RunState.QUEUED:
                 self.queued_at = self.queued_at or now
+                # Section 4: one correlation ID follows the run everywhere.
+                # Stamped here, where every kind of run passes, from whatever
+                # is current -- the request, or the task the broker carried it
+                # into -- so a run's record and its log lines share one key.
+                if not self.correlation_id:
+                    from apps.audit.middleware import current_correlation_id
+
+                    self.correlation_id = current_correlation_id()[:64]
             case RunState.RUNNING:
                 self.started_at = self.started_at or now
             case RunState.FAILED:

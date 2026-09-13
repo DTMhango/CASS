@@ -25,6 +25,7 @@ from apps.accounts.api import (
 )
 from apps.artifacts.api import ArtifactUploadView, ArtifactViewSet
 from apps.audit.api import ApprovalViewSet, AuditEventViewSet
+from apps.audit.metrics import MetricsView
 from apps.exposure.api import (
     AssumptionCatalogueView,
     CurrencyRateViewSet,
@@ -110,6 +111,8 @@ api_patterns = [
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", HealthView.as_view(), name="health"),
+    # Where a Prometheus scraper looks, beside the probe it already uses.
+    path("metrics/", MetricsView.as_view(), name="metrics"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "api/docs/",

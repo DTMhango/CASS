@@ -150,6 +150,11 @@ CASS_UPLOAD_SESSION_SECONDS = int(env("CASS_UPLOAD_SESSION_SECONDS", "900"))
 CASS_CLAMD_HOST = env("CASS_CLAMD_HOST", "")
 CASS_CLAMD_PORT = int(env("CASS_CLAMD_PORT", "3310"))
 
+#: The bearer token a metrics scraper presents. Empty means only a platform
+#: administrator's session may read /metrics/, which suits an installation with
+#: no scraper yet and refuses an anonymous one either way.
+CASS_METRICS_TOKEN = env("CASS_METRICS_TOKEN", "")
+
 # -- background execution ---------------------------------------------------
 
 CELERY_BROKER_URL = env("CASS_BROKER_URL", "redis://localhost:6379/0")

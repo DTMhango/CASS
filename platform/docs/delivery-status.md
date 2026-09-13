@@ -10,7 +10,7 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,820 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,837 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   106 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -47,6 +47,15 @@ updated afterwards is a tracker somebody has to reconcile.
   checksum it was sent with, and a tampered upload and an executable declared
   as CSV were both quarantined. No antivirus engine is configured on this
   installation, and the registered artifact's note says so.
+- On the live stack the worker was found running an image built hours before
+  the scheduler that fed it: compose gave the API, the worker and the
+  scheduler separate image tags, and a build of the API alone left the other
+  two behind, so the worker refused the retention sweep as an unregistered
+  task. All three now share one image, and a single build put them on the
+  same image ID. On that worker the retention sweep and the stale-run task
+  are registered and ran, and a sweep published under a request's
+  correlation ID was logged by the worker as structured JSON carrying that
+  ID. The metrics were collected from the live Postgres.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
   optional location field (the nine photovoltaic attributes). Nothing is
@@ -171,7 +180,7 @@ decision number.
 | 13 | Keys and converter HTTP services | §4 | Not started |
 | 14 | Artifact retention expiry | §5 | Done: a scheduled sweep expires due payloads and keeps their records, and refuses anything a running run is reading, anything behind an approved result, and published exposure |
 | 15 | Administration: users and roles, queues, storage, retention, support bundle | §3, §4 | Not started |
-| 16 | Observability: metrics, correlation IDs through background tasks | §4 | Not started |
+| 16 | Observability: metrics, correlation IDs through background tasks | §4 | Done: the request's correlation ID travels in task headers into the worker and is stamped on the run when it is queued; /metrics/ serves run, profile, failure, artifact, result and approval gauges read from the records, behind a scrape token |
 | 17 | Multi-factor authentication and single sign-on configuration | §10 | Not started |
 | 18 | Backup and restore tooling, and a restore drill | §11, M7 | Not started |
 | 19 | CI: Oasis worker image build and scan, SBOMs, integration workflow | §10, §17 | Not started |
