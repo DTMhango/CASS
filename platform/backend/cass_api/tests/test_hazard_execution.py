@@ -334,6 +334,42 @@ def test_a_completed_run_registers_a_hazard_set_from_its_exports(hazard_run):
     assert hazard_run.run.manifest["hazard"]["hazard_set"]["id"] == str(hazard_set.id)
 
 
+def test_the_hazard_set_records_the_calculation_it_was_computed_from(hazard_run):
+    """A reference comparison is chained onto that calculation, so the id survives.
+
+    The checksum already said whether two sets came from the same calculation.
+    Only the id says which one, and without it the comparison would have to
+    compute its own ground motion -- which is a different calculation, however
+    carefully it was configured.
+    """
+    from apps.modelregistry.models import HazardSet
+
+    run_it(hazard_run, FakeEngine())
+
+    assert HazardSet.objects.get().openquake_calculation_id == "77"
+
+
+def test_a_set_registered_before_the_id_was_kept_is_backfilled_from_its_run(hazard_run):
+    """Migration 0011: the set names the run in its version, so the run is findable."""
+    import importlib
+
+    from django.apps import apps as django_apps
+
+    from apps.modelregistry.models import HazardSet
+
+    run_it(hazard_run, FakeEngine())
+    HazardSet.objects.update(openquake_calculation_id="")
+
+    migration = importlib.import_module(
+        "apps.modelregistry.migrations.0011_hazardset_openquake_calculation_id"
+    )
+    migration.backfill(django_apps, None)
+
+    hazard_set = HazardSet.objects.get()
+    assert hazard_set.version.endswith(str(hazard_run.run_id)[:8])
+    assert hazard_set.openquake_calculation_id == "77"
+
+
 def test_a_calculation_with_no_realizations_output_still_registers_its_hazard(
     hazard_run,
 ):

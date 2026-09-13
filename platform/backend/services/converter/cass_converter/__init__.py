@@ -16,6 +16,12 @@ On top of those sits the enrichment: ``enrichment`` decides which GEM buildings
 a Klapton Re risk might be and how much of that was assumed, ``pilot_enrichment``
 holds the draft answers for the pilot countries, and ``model_build`` turns the
 whole thing into the classes, channels and Oasis tables of one country release.
+
+Beside those sit the measurements. ``qa`` and ``benchmark`` check a conversion
+against its own arithmetic and against approved reference curves; ``reference``
+builds the OpenQuake risk calculation that measures the whole representation --
+binned intensity, discretised damage, measures carried as channels -- against
+the engine's own answer for the same portfolio on the same events.
 """
 
 from .beta import BetaError, cdf, partial_expectation, shape_parameters

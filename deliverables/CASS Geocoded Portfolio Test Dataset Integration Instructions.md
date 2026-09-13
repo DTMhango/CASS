@@ -406,5 +406,5 @@ The source now reaches CASS through the CASS intake template rather than as the 
 | WP1 Secure importer | Done, then superseded by the intake template |
 | WP2 Eligibility and review interface | Done |
 | WP3 Area-peril and keys test | Partly done: mapping, outside-domain reporting and the geometry-only run; Cohort B sensitivity and OpenQuake site comparison not built |
-| WP4 Controlled Oasis earthquake test | Steps 1 to 8 done against the fixture model; step 9, the OpenQuake reference comparison, not built |
+| WP4 Controlled Oasis earthquake test | Steps 1 to 8 done against the fixture model; step 9 built and run on the live stack, putting the Oasis representation at 0.904 of the engine's own average annual loss |
 | WP5 Portfolio-loss readiness | Partly done: enrichment applied in a run under a named assumption set, and the run modes separate what a number may claim; section 5.1 questions unanswered |

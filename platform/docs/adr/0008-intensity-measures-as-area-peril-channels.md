@@ -60,8 +60,15 @@ refused.
 Collecting storeys is now the cheapest way to raise modelled value, because
 height is what resolves a class to one measure.
 
-The section 6 study is not closed. This is the implemented prototype, and the
-OpenQuake reference comparison that would validate it is still outstanding.
+The section 6 study is not closed. This is the implemented prototype.
+
+*Measured 13 September 2026.* The OpenQuake reference comparison now exists
+(tracker item 9) and has run once, on the Jakarta–Bandung book: the channel
+representation produced 0.904 of the engine's own average annual loss on the
+same events and the same GEM functions, and between 0.70 and 1.26 at the
+reported return periods. One book is not a finding about the representation,
+and the candidates have not been measured against each other, which is what
+tracker item 21 is for.
 
 The channel arithmetic allows at most ten measures per cell.
 

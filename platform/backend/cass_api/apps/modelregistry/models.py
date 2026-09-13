@@ -412,6 +412,11 @@ class HazardSet(BaseModel, FreezableModel):
     engine_version = models.CharField(max_length=32, blank=True)
     calculation_checksum = models.CharField(max_length=64, blank=True)
     job_checksum = models.CharField(max_length=64, blank=True)
+    #: The calculation on the engine, where it was run on this platform. The
+    #: checksum says whether two sets came from the same calculation; this says
+    #: which one, so a later job -- the OpenQuake reference comparison -- can be
+    #: chained onto the ground-motion fields this footprint was built from.
+    openquake_calculation_id = models.CharField(max_length=32, blank=True)
 
     investigation_time = models.FloatField(default=0.0)
     stochastic_event_sets = models.IntegerField(default=0)

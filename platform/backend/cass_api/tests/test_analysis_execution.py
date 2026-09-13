@@ -2434,3 +2434,310 @@ def test_an_artifact_expired_under_its_retention_class_is_not_offered_for_downlo
     assert row["state"] == "expired"
     assert row["readable"] is False
     assert row["checksum"] == keys.checksum
+
+
+# -- the OpenQuake reference comparison (work package 4, step 9) ----------------
+
+#: What the fixture model's two identifiers are blended from. A real dictionary
+#: carries hundreds of these; two is enough to hold the arithmetic that matters,
+#: which is that value splits by weight and lands back where it started.
+REFERENCE_DICTIONARY = {
+    "country_code": "ID",
+    "build_version": "1.0.0",
+    "entries": [
+        {
+            "vulnerability_id": 1,
+            "coverage_type": 1,
+            "loss_category": "structural",
+            "required_imt": "SA(0.3)",
+            "channel_weight": 1.0,
+            "blended_from": [
+                {"taxonomy": "CR/LFINF/CDM+ERM/H:3/RES", "weight": 0.6},
+                {"taxonomy": "MUR/LWAL/CDN+ERN/H:2/RES", "weight": 0.4},
+            ],
+        },
+        {
+            "vulnerability_id": 3,
+            "coverage_type": 3,
+            "loss_category": "contents",
+            "required_imt": "SA(0.3)",
+            "channel_weight": 1.0,
+            "blended_from": [{"taxonomy": "CR/LFINF/CDM+ERM/H:3/RES", "weight": 1.0}],
+        },
+    ],
+}
+
+#: One risk export: an event with loss under two loss types, a smaller one, and
+#: an event that did nothing.
+RISK_BY_EVENT = (
+    '#,,,"generated_by=\'OpenQuake engine 3.23.4\'"\n'
+    "event_id,agg_id,loss_id,loss\n"
+    "0,0,0,4000000.0\n"
+    "0,0,1,1000000.0\n"
+    "1,0,0,600000.0\n"
+    "2,0,0,0.0\n"
+)
+
+
+class ReferenceEngine:
+    """An OpenQuake server that runs one risk job the way we script it."""
+
+    def __init__(self, *, statuses=("complete",), losses=RISK_BY_EVENT):
+        self.statuses = list(statuses)
+        self.losses = losses
+        self.submitted: dict = {}
+        self.files: dict = {}
+
+    def request(self, method, url, **kwargs):
+        import io as _io
+        import zipfile
+
+        if url.endswith("engine_version"):
+            return FakeResponse(200, text="3.23.4")
+        if url.endswith("engine_info"):
+            return FakeResponse(404, text="not found")
+        if url.endswith("calc/run"):
+            self.submitted = dict(kwargs.get("data") or {})
+            for _field, (_name, payload, _type) in kwargs.get("files", []):
+                with zipfile.ZipFile(_io.BytesIO(payload)) as bundle:
+                    self.files = {
+                        name: bundle.read(name) for name in bundle.namelist()
+                    }
+            return FakeResponse(200, {"job_id": 91})
+        if url.endswith("/status"):
+            status = (
+                self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+            )
+            return FakeResponse(200, {"status": status})
+        if url.endswith("/results"):
+            return FakeResponse(
+                200,
+                [
+                    {
+                        "id": 5,
+                        "name": "risk_by_event",
+                        "type": "risk_by_event",
+                        "outtypes": ["csv"],
+                    }
+                ],
+            )
+        if "calc/result/5" in url:
+            response = FakeResponse(200, chunks=[self.losses.encode()])
+            response.headers = {
+                "Content-Disposition": "attachment; filename=5-risk_by_event_91.csv"
+            }
+            return response
+        if url.endswith("/traceback"):
+            return FakeResponse(200, ["ValueError: the exposure found no hazard"])
+        if "/log/" in url:
+            return FakeResponse(200, [["t", "INFO", "job", "computing risk"]])
+        raise AssertionError(f"unscripted call {method} {url}")
+
+
+def prepare_reference(
+    analysis_run,
+    hazard_set,
+    modeller,
+    analyst,
+    tmp_path,
+    *,
+    loss_types=("structural", "contents"),
+    calculation="3",
+):
+    """A finished run, a hazard set naming its calculation, and GEM files."""
+    import json
+
+    from apps.modelregistry.assets import attach_vulnerability_dictionary
+
+    hazard_set.openquake_calculation_id = calculation
+    hazard_set.save()
+    attach_vulnerability_dictionary(
+        analysis_run.model_version.vulnerability_set,
+        json.dumps(REFERENCE_DICTIONARY).encode(),
+        actor=modeller,
+    )
+    directory = (
+        tmp_path / "gem" / "global_vulnerability_model" / "Southeast_Asia" / "Indonesia"
+    )
+    directory.mkdir(parents=True)
+    for name in loss_types:
+        (directory / f"vulnerability_{name}.xml").write_bytes(b"<nrml/>")
+    run_oasis(analysis_run, oasis_server(output=ord_package()), analyst)
+    return tmp_path / "gem"
+
+
+def compare_run(analysis_run, gem_root, engine, monkeypatch, **options):
+    from django.core.management import call_command
+
+    from cass_adapters.openquake import OpenQuakeAdapter
+
+    monkeypatch.setattr(
+        "apps.runs.management.commands.compare_with_openquake.openquake_adapter",
+        lambda **kwargs: OpenQuakeAdapter(
+            "http://openquake:8800",
+            session=engine,
+            retries=1,
+            retry_delay=0,
+            sleep=lambda _: None,
+        ),
+    )
+    call_command(
+        "compare_with_openquake",
+        "--run",
+        str(analysis_run.run_id)[:8],
+        "--gem-root",
+        str(gem_root),
+        "--poll-interval",
+        "0",
+        **options,
+    )
+
+
+def stored_report(analysis_run):
+    import json
+
+    from apps.common.storage import get_store
+
+    link = ArtifactLink.objects.get(
+        subject_type="analysis_run",
+        subject_id=analysis_run.run_id,
+        role="openquake_reference",
+    )
+    with get_store().open(link.artifact.uri) as handle:
+        return json.load(handle)
+
+
+def test_the_reference_job_runs_on_the_events_the_footprint_was_built_from(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    """Chained onto the hazard calculation, so neither side computes new ground motion."""
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+    engine = ReferenceEngine()
+
+    compare_run(analysis_run, gem_root, engine, monkeypatch)
+
+    assert engine.submitted["hazard_job_id"] == "3"
+    assert engine.submitted["job_ini"] == "job.ini"
+    assert b"calculation_mode = event_based_risk" in engine.files["job.ini"]
+    assert "vulnerability_structural.xml" in engine.files
+    assert "vulnerability_contents.xml" in engine.files
+
+
+def test_the_exposure_sent_carries_the_value_the_run_mapped(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    """Same money on both sides, split across the taxonomies behind each identifier."""
+    from decimal import Decimal
+
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+    engine = ReferenceEngine()
+
+    compare_run(analysis_run, gem_root, engine, monkeypatch)
+
+    rows = engine.files["exposure.csv"].decode().splitlines()
+    assert rows[0] == "id,lon,lat,taxonomy,number,structural,contents"
+    structural = sum(Decimal(row.split(",")[5]) for row in rows[1:])
+    contents = sum(Decimal(row.split(",")[6]) for row in rows[1:])
+    # The three-location fixture book: 8,450,000 building and 1,450,000 contents.
+    assert structural == Decimal("8450000")
+    assert contents == Decimal("1450000")
+
+    report = stored_report(analysis_run)
+    assert report["exposure"]["reconciles"] is True
+    assert report["exposure"]["taxonomies"] == 2
+
+
+def test_the_assets_sit_on_the_cells_the_keys_mapped_them_to(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    """So OpenQuake reads the ground motion CASS read, rather than a neighbour's."""
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+    engine = ReferenceEngine()
+
+    compare_run(analysis_run, gem_root, engine, monkeypatch)
+
+    rows = engine.files["exposure.csv"].decode().splitlines()[1:]
+    placed = {(row.split(",")[1], row.split(",")[2]) for row in rows}
+    # The fixture grid's two cells: 106-108/-7--6 and 112-113/-8--7.
+    assert placed == {("107.000000", "-6.500000"), ("112.500000", "-7.500000")}
+    assert stored_report(analysis_run)["exposure"]["placement"] == {"cell_centroid": 6}
+
+
+def test_the_comparison_is_reported_and_not_decided_without_a_tolerance(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+
+    compare_run(analysis_run, gem_root, ReferenceEngine(), monkeypatch)
+
+    report = stored_report(analysis_run)
+    [measurement] = report["measurements"]
+    # 5.6m of loss over 1,000 years of events against the fixture package's AAL.
+    assert measurement["openquake"] == "5600"
+    assert measurement["cass"] == "232122.90"
+    assert measurement["decided"] is False
+    assert report["decided"] is False
+    assert report["hazard_calculation"] == "3"
+
+
+def test_an_approved_tolerance_decides_it(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+
+    compare_run(
+        analysis_run,
+        gem_root,
+        ReferenceEngine(),
+        monkeypatch,
+        tolerance_aal=0.10,
+    )
+
+    report = stored_report(analysis_run)
+    assert report["decided"] is True
+    # The fixture numbers are far apart, which is what an untuned comparison
+    # looks like; what matters is that a tolerance decides rather than describes.
+    assert report["within_tolerance"] is False
+
+
+def test_a_hazard_set_that_did_not_run_here_has_nothing_to_chain_onto(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    """A set registered from exports alone names no calculation to reuse."""
+    from django.core.management.base import CommandError
+
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path, calculation=""
+    )
+
+    with pytest.raises(CommandError, match="chain a reference calculation onto"):
+        compare_run(analysis_run, gem_root, ReferenceEngine(), monkeypatch)
+
+
+def test_value_with_no_vulnerability_file_is_refused_rather_than_run_as_zero(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    """OpenQuake would report zero for it, which reads as no damage."""
+    from django.core.management.base import CommandError
+
+    gem_root = prepare_reference(
+        analysis_run,
+        attached_hazard,
+        modeller,
+        analyst,
+        tmp_path,
+        loss_types=("structural",),
+    )
+
+    with pytest.raises(CommandError, match="contents value"):
+        compare_run(analysis_run, gem_root, ReferenceEngine(), monkeypatch)

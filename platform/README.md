@@ -193,6 +193,17 @@ counted once and then read in batches that fit. Memory follows the budget
 rather than the size of the calculation, which is what makes a national run
 possible without writing a second copy of the ground motion as text.
 
+**The conversion is measured against the engine's own answer.** A finished
+analysis run can be compared with an OpenQuake risk calculation on the same
+events: `compare_with_openquake` rebuilds the run's keys and blend weights as
+GEM taxonomies, at the centroids of the cells they mapped to and carrying the
+same value to the cent, and chains the risk job onto the hazard calculation the
+footprint was built from. What is left between the two sides is the conversion
+itself — binned intensity, discretised damage, and measures carried as channels.
+On the live stack the Jakarta–Bandung book came back at 0.904 of the engine's
+average annual loss. The report carries ratios and grades none of them, because
+no tolerance is approved.
+
 **CASS builds the Oasis model package.** A model version with a hazard set
 attached becomes the directory the Oasis worker loads. CASS writes the binaries,
 held byte-for-byte against PiWind's, and vendors its lookup inside, so the

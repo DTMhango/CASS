@@ -904,7 +904,7 @@ The deployment audience, pilot countries, operating modes and fixed adaptive-gri
 | Pilot countries | Indonesia and Nepal using GEM earthquake source models | Confirmed | Establishes the first two scientific validation workstreams |
 | Hazard spatial basis | Fixed, versioned, adaptive area-peril grid for each country; portfolio-specific sites reserved for validation and specialist studies | Confirmed | Enables reusable footprints while controlling storage and spatial approximation |
 | Event representation | Occurrence per event, recorded on each package by its converter-candidate approval; the formal study is dropped | Settled after 1.8 | Controls frequency, uncertainty, correlation and footprint probabilities |
-| Multi-IMT representation | Correlated area-peril channels implemented for classes resolving to one measure; multi-measure classes refused; OpenQuake reference comparison outstanding ([ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md)) | Open: CASS to measure and decide, tracker item 21 | Determines whether GEM vulnerability can be represented faithfully in Oasis |
+| Multi-IMT representation | Correlated area-peril channels implemented for classes resolving to one measure; multi-measure classes refused; the OpenQuake reference comparison has run once, at 0.904 of the engine's average annual loss ([ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md)) | Open: CASS to measure the candidates against each other and decide, tracker item 21 | Determines whether GEM vulnerability can be represented faithfully in Oasis |
 | Initial IMT scope | Superseded: the converter produces PGA, SA(0.3), SA(0.6) and SA(1.0) footprints ([ADR 8](../platform/docs/adr/0008-intensity-measures-as-area-peril-channels.md)) | Changed in 1.8 | The SA-only scope left PGA-routed exposure with no function |
 | Realisation weighting | One logic-tree path sampled per hazard run until a weighting rule is decided ([ADR 12](../platform/docs/adr/0012-national-classical-model-run-event-based.md)) | Open: CASS to measure and decide, tracker item 22 | A single path understates hazard uncertainty |
 | Indonesia hazard source | PuSGeN 2024 national model, converted from classical to event-based ([ADR 12](../platform/docs/adr/0012-national-classical-model-run-event-based.md)) | Changed in 1.8 | Determines the hazard behind every Indonesian loss |
@@ -1036,7 +1036,7 @@ This section is a summary at 13 September 2026. The working tracker, which moves
 | M1 Foundation | Met | — |
 | M2 Engine integration | Met, including the pre-loss smoke check | — |
 | M3 Hazard | Partly met: PuSGeN 2024 run on the Jakarta–Bandung region with published Vs30 | Benchmark gate, full-country run, a realisation-weighting rule (tracker item 22) |
-| M4 Conversion | Partly met: four-measure footprints, frequency preserved, package built under approval, the HDF5 datastore read in slices, QA measured | Approved QA tolerances, OpenQuake reference comparison |
+| M4 Conversion | Partly met: four-measure footprints, frequency preserved, package built under approval, the HDF5 datastore read in slices, QA measured, and the OpenQuake reference comparison run on the pilot book | Approved QA tolerances |
 | M5 Loss | Partly met: ground-up, insured and reinsurance run with keys reconciliation, an assumption set applied within a run and compared live against the baseline, currency conversion under an approved rate, and the financial structure read and reconciled | Building a financial structure on the platform |
 | M6 Product | Partly met: result approval, export, comparison, EP chart, event loss table and the financial structure workspace | Maps, geographic summaries, scenario ranges |
 | M7 Production | Not pursued after 1.8: CASS is a research tool ([ADR 15](../platform/docs/adr/0015-research-tool-and-gem-permission.md)) | — |
@@ -1058,7 +1058,7 @@ This section is a summary at 13 September 2026. The working tracker, which moves
 
 ### What remains
 
-Buildable in code, scoped for research after 1.8: the OpenQuake reference comparison; Cohort B sensitivity; maps, geographic summaries and scenario ranges; building a financial structure on the platform; backup and restore of research work; CI coverage of the patched worker and the integration workflow; and pinned image digests so a run can be repeated. Not pursued after 1.8: separately deployed keys and converter services, MFA and single sign-on, SBOMs, and a signed release bundle.
+Buildable in code, scoped for research after 1.8: Cohort B sensitivity; maps, geographic summaries and scenario ranges; building a financial structure on the platform; backup and restore of research work; CI coverage of the patched worker and the integration workflow; and pinned image digests so a run can be repeated. Not pursued after 1.8: separately deployed keys and converter services, MFA and single sign-on, SBOMs, and a signed release bundle.
 
 Needing a decision or outside input: secondary-peril and business-interruption scope; approved benchmark curves and QA tolerances; the brief's section 5.1 data questions; whether to adopt OED 5.0.0; and a full-country hazard run.
 

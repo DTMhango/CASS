@@ -129,6 +129,7 @@ def register(
     grid: AreaPerilGrid | None = None,
     label: str = "",
     job: HazardJob | None = None,
+    calculation_id: str = "",
     actor=None,
 ) -> tuple[HazardSet, ConvertedHazard]:
     """Register one calculation as a versioned hazard set with its tables.
@@ -170,6 +171,7 @@ def register(
             "job_checksum": (
                 hazard_build.hazard_job.job_checksum(job) if job is not None else ""
             ),
+            "openquake_calculation_id": str(calculation_id or "")[:32],
             "investigation_time": converted.metadata.investigation_time or 0.0,
             "stochastic_event_sets": converted.metadata.ses_per_logic_tree_path or 0,
             "event_count": len(converted.events),

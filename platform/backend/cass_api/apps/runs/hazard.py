@@ -518,6 +518,9 @@ def _register_hazard_set(hazard_run: HazardRun, exports: dict[str, bytes], actor
                 source=source,
                 grid=hazard_run.grid,
                 label=f"{model.label}, {spec.name}",
+                # Kept so a later job can be chained onto the same ground-motion
+                # fields, which is what makes a reference comparison a comparison.
+                calculation_id=hazard_run.openquake_calculation_id,
                 actor=actor,
             )
         except hazard_registry.HazardRegistrationError as exc:

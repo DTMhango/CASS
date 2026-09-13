@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,863 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,901 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   112 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -75,6 +75,16 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- The OpenQuake reference comparison was run on the live stack for the
+  Jakarta–Bandung book: 432 assets over 64 locations and 14 GEM taxonomies,
+  carrying the book's value to the cent, each at the centroid of the cell CASS
+  mapped it to. OpenQuake calculation 4 was chained onto the hazard calculation
+  the footprint was built from, so both sides read one set of ground-motion
+  fields, and 2,644 of its events produced loss. Against the engine's own
+  answer the Oasis representation is 10% low on average annual loss — 566,728
+  against 626,732, a ratio of 0.904 — and between 0.70 and 1.26 at the reported
+  return periods, with the 500- and 1,000-year ranks resting on two events and
+  one. No tolerance is approved, so nothing passed or failed.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
   optional location field (the nine photovoltaic attributes). Nothing is
@@ -89,7 +99,7 @@ run. Production items that serve only a governed deployment are not pursued
 | M1 Foundation | Met | Sign in, projects, OED attach, validation, preview, publication, background runs | — |
 | M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; a full-country run; a realisation-weighting rule (item 22). Nepal acquires no hazard: it was a test country and Indonesia is covered |
-| M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances; OpenQuake reference comparison |
+| M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
 | M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table and the financial structure workspace | Maps, geographic summaries, scenario ranges |
 | M7 Production | Not pursued | CI builds and scans the CASS images | Nothing as a milestone: CASS is a research tool, so no production release gate applies ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Backing up research work stays in the backlog as item 18 |
@@ -166,7 +176,7 @@ reviewed research result, not a basis for pricing or reserving.
 | WP1 Secure importer | Done, then superseded by the intake template ([ADR 11](adr/0011-intake-template-and-policy-id.md)); acceptance counts in `test_extract_acceptance.py` |
 | WP2 Eligibility and review interface | Done |
 | WP3 Area-peril and keys test | Partly done: mapping, offshore and outside-domain reporting, and a geometry-only run that reports eligibility without a loss. Cohort B sensitivity and OpenQuake site comparison not built |
-| WP4 Controlled Oasis earthquake test | Steps 1 to 8 done against the fixture model; step 9, the OpenQuake reference comparison, not built |
+| WP4 Controlled Oasis earthquake test | Steps 1 to 8 done against the fixture model; step 9 built and run on the live stack, putting the Oasis representation at 0.904 of the engine's own average annual loss |
 | WP5 Portfolio-loss readiness | Partly done: enrichment applied in a run under a named assumption set, and the four run modes separate what a number may claim. Section 5.1 questions unanswered |
 
 ## Where the design changed
@@ -196,7 +206,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Done |
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Done |
 | 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Done as machinery. Both gates still stand open, because no benchmark curves and no tolerances have been approved — which is a decision, not code |
-| 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Not started |
+| 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Done: `compare_with_openquake` rebuilds the run's own keys and blend weights as GEM taxonomies at the cells they mapped to, chains the risk job onto the hazard calculation so both sides read one set of ground-motion fields, and reports ratios it does not grade. First measurement on the live stack: 0.904 of the engine's average annual loss |
 | 10 | Cohort B geocoding sensitivity | WP3 | Not started |
 | 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Done: sessions are issued into the owning project's prefix to someone who may write there, completion reads back and checksums what arrived, and a content check plus an optional clamd engine scan it before release. An installation with no antivirus engine says so on each artifact |
 | 12 | Execution profiles enforced: time limits and admission control | §11 | Done |
@@ -208,7 +218,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 18 | Backup and restore of research work: the database and the artifact store | §11 | Not started. Re-scoped from a production restore drill to a procedure that keeps research work from being lost |
 | 19 | CI: Oasis worker image build and the integration workflow | §17 | Not started. Re-scoped: SBOMs for releases dropped |
 | 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Not started. Re-scoped: the signed release bundle for approved local installations dropped |
-| 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Not started. Needs item 9. Classes whose taxonomies span measures are refused until it is decided ([ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md)) |
+| 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Not started. Item 9 is the measurement, and its first run puts the channel representation 10% below the engine on the pilot book. The decision needs the candidates measured against each other, and classes whose taxonomies span measures stay refused until it is taken ([ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md)) |
 | 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Not started. The hazard behind every Indonesian loss is one sampled path until it is decided ([ADR 12](adr/0012-national-classical-model-run-event-based.md)) |
 | 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |
 
