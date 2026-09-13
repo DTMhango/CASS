@@ -57,6 +57,7 @@ import type {
   RunMode,
   RunStageEvent,
   Session,
+  SupportBundle,
   User,
   UUID,
   ValidationSummary,
@@ -713,6 +714,69 @@ export function useUsers() {
     queryKey: keys.users,
     queryFn: async () => rows(await api.get<Paginated<User>>("/users/")),
     staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * Change what somebody may do: their platform role, job title, local-install
+ * approval, or whether they are active.
+ *
+ * The API refuses the changes that would lock the installation out -- an
+ * administrator removing their own administration, or the last active
+ * administrator going -- and the refusal is left on the mutation for the
+ * screen to show, rather than predicted here.
+ */
+export function useUpdateUser() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      changes,
+    }: {
+      id: UUID;
+      changes: Partial<
+        Pick<User, "platform_role" | "job_title" | "local_install_approved"> & {
+          is_active: boolean;
+        }
+      >;
+    }) => api.patch<User>(`/users/${id}/`, changes),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.users }),
+  });
+}
+
+/**
+ * The support bundle, for an administrator.
+ *
+ * Fetched only when asked for: it probes the engines, which is slow when one of
+ * them is the reason the bundle is wanted.
+ */
+export function useSupportBundle(enabled: boolean) {
+  return useQuery({
+    queryKey: ["support-bundle"] as const,
+    queryFn: () => api.get<SupportBundle>("/support-bundle/"),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Take the support bundle away as a file.
+ *
+ * A separate request from the one that shows the numbers, because the API
+ * audits looking and downloading as different acts.
+ */
+export function useDownloadSupportBundle() {
+  return useMutation({
+    mutationFn: async () => {
+      const bundle = await api.get<SupportBundle>("/support-bundle/", { download: true });
+      const stamp = bundle.generated_at.replace(/[:.]/g, "-");
+      saveBlob(
+        new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }),
+        `cass-support-bundle-${stamp}.json`,
+      );
+      return bundle;
+    },
   });
 }
 

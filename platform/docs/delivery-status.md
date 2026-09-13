@@ -10,10 +10,10 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,837 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,854 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
-  106 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  112 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -135,7 +135,7 @@ decision number.
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
 | Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, caveats, approval, export, comparison | Maps, geographic summaries, scenario ranges |
 | Model build workspace | Built, Hazard and Build tabs | Benchmark and QA evidence views |
-| Administration | Partly built: installation facts, compatibility, profiles, engine health, users, audit search | User and role changes, queues, storage, retention, support bundle |
+| Administration | Built: installation facts, compatibility, profiles, engine health, data standards, users with role and access changes, queues, storage, retention, support bundle, audit search | — |
 
 ## Geocoded portfolio brief
 
@@ -179,7 +179,7 @@ decision number.
 | 12 | Execution profiles enforced: time limits and admission control | §11 | Done |
 | 13 | Keys and converter HTTP services | §4 | Not started |
 | 14 | Artifact retention expiry | §5 | Done: a scheduled sweep expires due payloads and keeps their records, and refuses anything a running run is reading, anything behind an approved result, and published exposure |
-| 15 | Administration: users and roles, queues, storage, retention, support bundle | §3, §4 | Not started |
+| 15 | Administration: users and roles, queues, storage, retention, support bundle | §3, §4 | Done: an administrator changes a person's role or access, and the API refuses any change that would leave nobody able to undo it; the screen shows what each profile is running, what the store holds and what the retention sweep removes next; the support bundle carries settings by allowlist and failures by stage, never secrets or portfolio contents, and viewing it is audited apart from downloading it |
 | 16 | Observability: metrics, correlation IDs through background tasks | §4 | Done: the request's correlation ID travels in task headers into the worker and is stamped on the run when it is queued; /metrics/ serves run, profile, failure, artifact, result and approval gauges read from the records, behind a scrape token |
 | 17 | Multi-factor authentication and single sign-on configuration | §10 | Not started |
 | 18 | Backup and restore tooling, and a restore drill | §11, M7 | Not started |

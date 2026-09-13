@@ -21,18 +21,24 @@
 
 import { useState } from "react";
 
+import { ApiError } from "@/api/client";
+
 import {
   useAuditEvents,
   useDataStandards,
+  useDownloadSupportBundle,
   useEngineStatus,
   usePlatformInfo,
   useProjects,
   useSession,
+  useSupportBundle,
+  useUpdateUser,
   useUsers,
 } from "@/api/hooks";
-import type { AuditEvent, EngineStatus } from "@/api/types";
+import type { AuditEvent, EngineStatus, User } from "@/api/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
+  Button,
   Card,
   EmptyState,
   Field,
@@ -42,7 +48,7 @@ import {
   Spinner,
   TextInput,
 } from "@/components/primitives";
-import { formatCount, formatDateTime } from "@/lib/format";
+import { formatBytes, formatCount, formatDateTime } from "@/lib/format";
 
 import "./Administration.css";
 
@@ -98,6 +104,8 @@ export function Administration() {
       <EngineHealth />
 
       <DataStandards />
+
+      {isAdmin ? <Operations /> : null}
 
       <div className="admin-grid">
         <Card title="This installation">
@@ -204,6 +212,104 @@ export function Administration() {
  * row reads as "nothing to see", which is the wrong thing to tell an operator
  * about a service the deployment is running.
  */
+/**
+ * Queues, storage and retention: what the installation is doing with its room.
+ *
+ * Section 3 puts queues, storage and retention on this screen and section 11
+ * adds the support bundle. The numbers come from the bundle, read as a read;
+ * taking the bundle away is a separate button, audited as a download.
+ */
+function Operations() {
+  const { data: bundle, isLoading, error } = useSupportBundle(true);
+  const download = useDownloadSupportBundle();
+  const refusal = (error ?? download.error) as ApiError | null;
+
+  return (
+    <Card
+      title="Queues, storage and retention"
+      description="What each resource profile is running, what the store holds, and what the retention sweep removes next."
+    >
+      {refusal ? (
+        <Notice tone="error" title="The installation could not be read">
+          {refusal.message}
+        </Notice>
+      ) : null}
+      {isLoading ? <Spinner label="Reading the installation" /> : null}
+      {bundle ? (
+        <>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Profile</th>
+                <th scope="col" className="numeric">
+                  Running
+                </th>
+                <th scope="col" className="numeric">
+                  Admits at once
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {bundle.capacity.map((item) => (
+                <tr key={item.profile}>
+                  <th scope="row" className="mono">
+                    {item.profile}
+                  </th>
+                  <td className="numeric">{formatCount(item.running)}</td>
+                  <td className="numeric">
+                    {formatCount(item.max_concurrent)}
+                    {item.is_full ? " (full)" : ""}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Retention class</th>
+                <th scope="col">State</th>
+                <th scope="col" className="numeric">
+                  Artifacts
+                </th>
+                <th scope="col" className="numeric">
+                  Size
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {bundle.artifacts.map((item) => (
+                <tr key={`${item.retention}-${item.state}`}>
+                  <th scope="row">{item.retention}</th>
+                  <td>{item.state}</td>
+                  <td className="numeric">{formatCount(item.count)}</td>
+                  <td className="numeric">{formatBytes(item.bytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <ul className="admin-retention">
+            <li>{formatCount(bundle.retention.due_now)} due to expire</li>
+            <li>{formatCount(bundle.retention.kept_as_evidence)} kept as evidence</li>
+            <li>{formatCount(bundle.retention.abandoned_uploads)} abandoned uploads</li>
+          </ul>
+
+          <Button
+            variant="ghost"
+            busy={download.isPending}
+            onClick={() => download.mutate()}
+            title="Versions, health, capacity and counts. No secrets and nothing from inside a portfolio."
+          >
+            Download support bundle
+          </Button>
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
 /**
  * Which version of the exposure standard this installation reads against.
  *
@@ -398,9 +504,20 @@ function EngineRow({ name, engine }: { name: string; engine: EngineStatus }) {
   );
 }
 
-/** Who has which platform role. Membership of a project is set on the project. */
+/**
+ * Who has which platform role. Membership of a project is set on the project.
+ *
+ * An administrator changes a role or deactivates somebody here. The API refuses
+ * the changes that would lock the installation out -- an administrator
+ * removing their own administration, or the last active one going -- and the
+ * refusal is shown as the API wrote it rather than predicted in the browser.
+ */
 function Directory() {
   const { data: users, isLoading } = useUsers();
+  const { data: session } = useSession();
+  const update = useUpdateUser();
+  const mayAdminister = session?.user?.capabilities.administer_platform ?? false;
+  const refusal = update.error as ApiError | null;
 
   return (
     <Card
@@ -408,6 +525,11 @@ function Directory() {
       description="A platform role decides what somebody may do anywhere; project membership decides where."
       padded={false}
     >
+      {refusal ? (
+        <Notice tone="error" title="The change was refused">
+          {refusal.message}
+        </Notice>
+      ) : null}
       {isLoading ? (
         <div className="admin-engines__message">
           <Spinner label="Loading the directory" />
@@ -421,39 +543,85 @@ function Directory() {
               <th scope="col">May publish models</th>
               <th scope="col">May decide gates</th>
               <th scope="col">Local install</th>
+              {mayAdminister ? <th scope="col">Access</th> : null}
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
-              <tr key={user.id}>
-                <th scope="row">
-                  {user.full_name || user.username}
-                  {user.job_title ? (
-                    <span className="muted"> · {user.job_title}</span>
+            {users.map((user) => {
+              const name = user.full_name || user.username;
+              const active = user.is_active !== false;
+              return (
+                <tr key={user.id}>
+                  <th scope="row">
+                    {name}
+                    {user.job_title ? (
+                      <span className="muted"> · {user.job_title}</span>
+                    ) : null}
+                  </th>
+                  <td>
+                    {mayAdminister ? (
+                      <Select
+                        aria-label={`Platform role for ${name}`}
+                        value={user.platform_role}
+                        disabled={update.isPending}
+                        onChange={(event) =>
+                          update.mutate({
+                            id: user.id,
+                            changes: { platform_role: event.target.value as User["platform_role"] },
+                          })
+                        }
+                      >
+                        {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      (ROLE_LABELS[user.platform_role] ?? user.platform_role)
+                    )}
+                  </td>
+                  <td>
+                    <Permitted allowed={user.capabilities.publish_models} />
+                  </td>
+                  <td>
+                    <Permitted allowed={user.capabilities.approve_gates} />
+                  </td>
+                  <td>
+                    <StatusBadge
+                      tone={user.local_install_approved ? "ok" : "idle"}
+                      size="sm"
+                      detail={
+                        user.local_install_approved
+                          ? "May run an approved local installation."
+                          : "Uses the hosted installation only."
+                      }
+                    >
+                      {user.local_install_approved ? "approved" : "hosted only"}
+                    </StatusBadge>
+                  </td>
+                  {mayAdminister ? (
+                    <td>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={update.isPending}
+                        onClick={() =>
+                          update.mutate({ id: user.id, changes: { is_active: !active } })
+                        }
+                        title={
+                          active
+                            ? "Stop this person signing in. Their history stays."
+                            : "Let this person sign in again."
+                        }
+                      >
+                        {active ? "Deactivate" : "Reactivate"}
+                      </Button>
+                    </td>
                   ) : null}
-                </th>
-                <td>{ROLE_LABELS[user.platform_role] ?? user.platform_role}</td>
-                <td>
-                  <Permitted allowed={user.capabilities.publish_models} />
-                </td>
-                <td>
-                  <Permitted allowed={user.capabilities.approve_gates} />
-                </td>
-                <td>
-                  <StatusBadge
-                    tone={user.local_install_approved ? "ok" : "idle"}
-                    size="sm"
-                    detail={
-                      user.local_install_approved
-                        ? "May run an approved local installation."
-                        : "Uses the hosted installation only."
-                    }
-                  >
-                    {user.local_install_approved ? "approved" : "hosted only"}
-                  </StatusBadge>
-                </td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       ) : (

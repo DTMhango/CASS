@@ -63,3 +63,14 @@
   padding: var(--space-4);
   border-bottom: 1px solid var(--grey-100);
 }
+
+/* What the retention sweep will do next. Three facts on one line, because
+   "due to expire" and "kept as evidence" are read against each other. */
+.admin-retention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}

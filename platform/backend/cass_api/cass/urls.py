@@ -26,6 +26,7 @@ from apps.accounts.api import (
 from apps.artifacts.api import ArtifactUploadView, ArtifactViewSet
 from apps.audit.api import ApprovalViewSet, AuditEventViewSet
 from apps.audit.metrics import MetricsView
+from apps.common.support import SupportBundleView
 from apps.exposure.api import (
     AssumptionCatalogueView,
     CurrencyRateViewSet,
@@ -101,6 +102,9 @@ api_patterns = [
         name="artifact-upload",
     ),
     path("platform/", PlatformInfoView.as_view(), name="platform-info"),
+    # What an operator sends when something is wrong: versions and health, no
+    # secrets and nothing from inside a portfolio.
+    path("support-bundle/", SupportBundleView.as_view(), name="support-bundle"),
     path("engines/", EngineStatusView.as_view(), name="engine-status"),
     path(
         "assumptions/", AssumptionCatalogueView.as_view(), name="assumption-catalogue"

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
+from django.db import models
 from drf_spectacular.utils import extend_schema, inline_serializer
-from rest_framework import serializers, status, viewsets
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -25,9 +26,11 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "username", "email", "first_name", "last_name", "full_name",
-            "platform_role", "job_title", "local_install_approved", "capabilities",
+            "platform_role", "job_title", "local_install_approved", "is_active",
+            "capabilities",
         ]
-        read_only_fields = ["id", "full_name", "capabilities"]
+        # Changed through the administration serializer, never through this one.
+        read_only_fields = ["id", "full_name", "is_active", "capabilities"]
 
     def get_capabilities(self, obj) -> dict:
         """What the interface should offer this person.
@@ -103,14 +106,115 @@ class SessionView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    """User directory, used when granting project membership."""
+class UserAdministrationSerializer(serializers.ModelSerializer):
+    """What an administrator may change about a person, and nothing else.
+
+    Not the username, the password or the name: identity is the identity
+    provider's, and a platform screen that edited it would make two sources of
+    truth for who somebody is. What is the platform's to decide is what they
+    may do here.
+    """
+
+    class Meta:
+        model = User
+        fields = ["platform_role", "job_title", "local_install_approved", "is_active"]
+
+
+class UserViewSet(mixins.UpdateModelMixin, viewsets.ReadOnlyModelViewSet):
+    """User directory, used when granting project membership.
+
+    Everyone signed in may read it. Only a platform administrator may change a
+    person's role, job title, local-install approval or whether they are active
+    -- and never in a way that leaves the installation with nobody who can.
+    """
 
     queryset = User.objects.filter(is_active=True).order_by("username")
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ["platform_role"]
     search_fields = ["username", "first_name", "last_name", "email"]
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_queryset(self):
+        """Administrators see inactive people too, or nobody could reactivate one."""
+        user = self.request.user
+        if getattr(user, "is_platform_admin", False):
+            return User.objects.order_by("username")
+        return super().get_queryset()
+
+    def get_serializer_class(self):
+        if self.action == "partial_update":
+            return UserAdministrationSerializer
+        return super().get_serializer_class()
+
+    def partial_update(self, request, *args, **kwargs):
+        """Change what somebody may do, refusing the changes that lock everyone out.
+
+        Two refusals, both about the same failure. An administrator may not
+        remove their own administration or deactivate themselves: the next
+        request would be from somebody who can no longer undo it. And no change
+        may leave the installation with no active administrator at all, which
+        is the same lock-out reached by changing somebody else.
+        """
+        if not request.user.is_platform_admin:
+            return Response(
+                {"detail": "Changing a person's role requires a platform administrator."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        person = self.get_object()
+        serializer = UserAdministrationSerializer(person, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        changes = serializer.validated_data
+
+        keeps_admin = (
+            changes.get("platform_role", person.platform_role) == "admin"
+            or person.is_superuser
+        ) and changes.get("is_active", person.is_active)
+
+        if person.pk == request.user.pk and not keeps_admin:
+            return Response(
+                {
+                    "detail": (
+                        "You may not remove your own administration or deactivate "
+                        "yourself. Ask another administrator, so the change can be "
+                        "undone by somebody who still can."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if person.is_platform_admin and not keeps_admin:
+            others = (
+                User.objects.filter(is_active=True)
+                .exclude(pk=person.pk)
+                .filter(models.Q(platform_role="admin") | models.Q(is_superuser=True))
+                .exists()
+            )
+            if not others:
+                return Response(
+                    {
+                        "detail": (
+                            "This would leave the installation with no active "
+                            "administrator, and nobody able to reverse it."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+        before = {field: getattr(person, field) for field in changes}
+        serializer.save()
+        audit.record(
+            action=AuditAction.UPDATE,
+            subject_type="user",
+            subject_id=person.id,
+            actor=request.user,
+            subject_label=str(person),
+            before=before,
+            after={field: getattr(person, field) for field in changes},
+            request=request,
+        )
+        return Response(UserSerializer(person).data)
 
     @extend_schema(responses=UserSerializer)
     @action(detail=False, methods=["get"])

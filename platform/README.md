@@ -211,6 +211,17 @@ one. The published exposure keeps the values the business reported; the
 converted files the engine received are stored beside the run, and the rate
 travels with the result.
 
+**Administration is an administrator's, and cannot lock the installation out.**
+An administrator changes a person's role or access on the Administration screen;
+the API refuses an administrator removing their own administration, and any
+change that would leave no active administrator. The same screen shows what
+each resource profile is running, what the store holds by retention class and
+what the nightly sweep will remove next. The support bundle an operator sends
+when something is wrong carries settings by allowlist, so a secret added later
+is left out by default, and failures by stage and correlation ID rather than by
+their text, which names the portfolio. Viewing it is audited as a read and
+downloading it as a download.
+
 **One correlation ID follows a run into the worker, and the platform reports on itself.**
 The request's correlation ID travels in the task's headers and is restored in the worker,
 whose log lines are the same structured JSON the API writes, and a run records the

@@ -34,6 +34,8 @@ export interface User {
   platform_role: PlatformRole;
   job_title: string;
   local_install_approved: boolean;
+  /** Whether they may sign in. Only an administrator's directory lists inactive people. */
+  is_active?: boolean;
   capabilities: Capabilities;
 }
 
@@ -1113,4 +1115,36 @@ export interface DataStandardVersion {
   /** Whether this is the version the validator actually implements. */
   matches_the_reader: boolean;
   created_at: string;
+}
+
+// -- the support bundle --------------------------------------------------------
+
+/** What an operator sends when something is wrong: no secrets, no portfolio contents. */
+export interface SupportBundle {
+  generated_at: string;
+  installation: {
+    api_version: string;
+    oed_schema_version: string;
+    python: string;
+    packages: Record<string, string>;
+    migrations: Record<string, string>;
+  };
+  /** Whether each secret is set, never its value. */
+  configured: Record<string, boolean>;
+  engines: Record<string, unknown>;
+  capacity: ProfileCapacity[];
+  runs: { kind: string; state: string; count: number }[];
+  /** Where failures happened, not what they said: a summary names the portfolio. */
+  recent_failures: {
+    run: UUID;
+    kind: string;
+    stage: string;
+    profile: string;
+    correlation_id: string;
+    finished_at: string | null;
+  }[];
+  artifacts: { state: string; retention: string; count: number; bytes: number }[];
+  retention: { due_now: number; kept_as_evidence: number; abandoned_uploads: number };
+  results: { state: string; count: number }[];
+  open_approvals: number;
 }

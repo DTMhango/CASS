@@ -5452,10 +5452,52 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/support-bundle/:
+    get:
+      operationId: api_v1_support_bundle_retrieve
+      description: |-
+        The support bundle, for a platform administrator.
+
+        An administrator rather than anyone signed in: the bundle is written to
+        leave the installation, and deciding what leaves is an administrator's act.
+
+        Looking at it and taking it away are audited as different acts. The
+        administration screen reads the bundle to show queues, storage and
+        retention; recording every visit to that screen as a download would bury
+        the one download that matters under a hundred that did not happen. So
+        ``?download=1`` is the download -- served as a file and audited as one --
+        and anything else is a read.
+      parameters:
+      - in: query
+        name: download
+        schema:
+          type: boolean
+        description: Serve as a file and audit as a download rather than a read.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: Versions, health, capacity and counts; no secrets, no portfolio
+            contents.
+        '403':
+          description: Not a platform administrator.
   /api/v1/users/:
     get:
       operationId: api_v1_users_list
-      description: User directory, used when granting project membership.
+      description: |-
+        User directory, used when granting project membership.
+
+        Everyone signed in may read it. Only a platform administrator may change a
+        person's role, job title, local-install approval or whether they are active
+        -- and never in a way that leaves the installation with nobody who can.
       parameters:
       - name: limit
         required: false
@@ -5508,7 +5550,12 @@ paths:
   /api/v1/users/{id}/:
     get:
       operationId: api_v1_users_retrieve
-      description: User directory, used when granting project membership.
+      description: |-
+        User directory, used when granting project membership.
+
+        Everyone signed in may read it. Only a platform administrator may change a
+        person's role, job title, local-install approval or whether they are active
+        -- and never in a way that leaves the installation with nobody who can.
       parameters:
       - in: path
         name: id
@@ -5529,10 +5576,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
           description: ''
+    patch:
+      operationId: api_v1_users_partial_update
+      description: |-
+        Change what somebody may do, refusing the changes that lock everyone out.
+
+        Two refusals, both about the same failure. An administrator may not
+        remove their own administration or deactivate themselves: the next
+        request would be from somebody who can no longer undo it. And no change
+        may leave the installation with no active administrator at all, which
+        is the same lock-out reached by changing somebody else.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUserAdministrationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUserAdministrationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUserAdministrationRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAdministration'
+          description: ''
   /api/v1/users/me/:
     get:
       operationId: api_v1_users_me_retrieve
-      description: User directory, used when granting project membership.
+      description: |-
+        User directory, used when granting project membership.
+
+        Everyone signed in may read it. Only a platform administrator may change a
+        person's role, job title, local-install approval or whether they are active
+        -- and never in a way that leaves the installation with nobody who can.
       tags:
       - api
       security:
@@ -9019,6 +9112,38 @@ components:
         uncertainty_attribution:
           description: Contribution of hazard, conversion, exposure, vulnerability
             and financial uncertainty.
+    PatchedUserAdministrationRequest:
+      type: object
+      description: |-
+        What an administrator may change about a person, and nothing else.
+
+        Not the username, the password or the name: identity is the identity
+        provider's, and a platform screen that edited it would make two sources of
+        truth for who somebody is. What is the platform's to decide is what they
+        may do here.
+      properties:
+        platform_role:
+          allOf:
+          - $ref: '#/components/schemas/PlatformRoleEnum'
+          description: |-
+            Service-wide capability. Project access is granted separately.
+
+            * `analyst` - Portfolio analyst
+            * `modeller` - Catastrophe modeller
+            * `underwriter` - Underwriter or pricing user
+            * `reviewer` - Reviewer or approver
+            * `admin` - Platform administrator
+        job_title:
+          type: string
+          maxLength: 120
+        local_install_approved:
+          type: boolean
+          description: Whether this user may run an approved local Docker installation.
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
     PatchedVulnerabilitySetRequest:
       type: object
       properties:
@@ -9725,6 +9850,12 @@ components:
         local_install_approved:
           type: boolean
           description: Whether this user may run an approved local Docker installation.
+        is_active:
+          type: boolean
+          readOnly: true
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
         capabilities:
           type: object
           additionalProperties: {}
@@ -9738,7 +9869,40 @@ components:
       - capabilities
       - full_name
       - id
+      - is_active
       - username
+    UserAdministration:
+      type: object
+      description: |-
+        What an administrator may change about a person, and nothing else.
+
+        Not the username, the password or the name: identity is the identity
+        provider's, and a platform screen that edited it would make two sources of
+        truth for who somebody is. What is the platform's to decide is what they
+        may do here.
+      properties:
+        platform_role:
+          allOf:
+          - $ref: '#/components/schemas/PlatformRoleEnum'
+          description: |-
+            Service-wide capability. Project access is granted separately.
+
+            * `analyst` - Portfolio analyst
+            * `modeller` - Catastrophe modeller
+            * `underwriter` - Underwriter or pricing user
+            * `reviewer` - Reviewer or approver
+            * `admin` - Platform administrator
+        job_title:
+          type: string
+          maxLength: 120
+        local_install_approved:
+          type: boolean
+          description: Whether this user may run an approved local Docker installation.
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
     VulnerabilitySet:
       type: object
       properties:
