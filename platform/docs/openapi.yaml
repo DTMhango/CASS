@@ -4348,6 +4348,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ResultSet'
           description: ''
+  /api/v1/results/{id}/event-losses/:
+    get:
+      operationId: api_v1_results_event_losses_retrieve
+      description: |-
+        The events behind this number, largest loss first.
+
+        Section 3 asks the results workspace to show what drives a result. The
+        table is one row per event that produced a loss, which on a national
+        event set is tens of thousands, so it is served a page at a time from
+        the artifact rather than held in the control plane.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
   /api/v1/results/{id}/export/:
     get:
       operationId: api_v1_results_export_retrieve

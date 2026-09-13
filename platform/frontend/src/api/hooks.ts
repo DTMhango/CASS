@@ -25,6 +25,7 @@ import type {
   AuditEvent,
   CatalogueModel,
   EngineStatus,
+  EventLossPage,
   ExposurePreview,
   ConfiguredRun,
   ExposureVersion,
@@ -78,6 +79,7 @@ export const keys = {
   runArtifacts: (id: UUID) => ["runs", id, "artifacts"] as const,
   analysisForRun: (id: UUID) => ["analysis-runs", "by-run", id] as const,
   results: (projectId?: UUID) => ["results", projectId ?? "all"] as const,
+  eventLosses: (id: UUID, limit: number) => ["results", id, "events", limit] as const,
   engines: ["engines"] as const,
   users: ["users"] as const,
   approvals: ["approvals"] as const,
@@ -350,6 +352,27 @@ export function useResults(projectId?: UUID) {
           projectId ? { project: projectId } : undefined,
         ),
       ),
+  });
+}
+
+/**
+ * The events behind one result, largest loss first.
+ *
+ * Read from the API a page at a time rather than held whole: a national event
+ * set produces a row for every event that caused a loss, and a browser has no
+ * business holding tens of thousands of them to show twenty-five.
+ */
+export function useEventLosses(resultId?: UUID, limit = 25) {
+  return useQuery({
+    queryKey: keys.eventLosses(resultId ?? "none", limit),
+    enabled: Boolean(resultId),
+    queryFn: async () =>
+      api.get<EventLossPage>(`/results/${resultId}/event-losses/`, {
+        limit: String(limit),
+      }),
+    // A result whose run predates the event table has none, and that is an
+    // answer rather than a fault to retry.
+    retry: false,
   });
 }
 

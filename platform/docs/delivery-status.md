@@ -10,9 +10,9 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,696 backend tests pass, 1 skipped. 97 integration tests pass against the
+- 1,699 backend tests pass, 1 skipped. 97 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package and the 30 June workbook.
-  96 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  98 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -45,7 +45,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells | Benchmark gate; full-country run; realisation weighting; Nepal source model |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval | Reading the HDF5 datastore instead of CSV exports; QA gate; OpenQuake reference comparison |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate | Financial structure workspace |
-| M6 Product | Partly met | Result approval, export and two-result comparison | Maps, EP charts, event loss tables, geographic summaries, financial structure workspace, scenario ranges |
+| M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart and event loss table | Maps, geographic summaries, financial structure workspace, scenario ranges |
 | M7 Production | Not met | CI builds and scans the CASS images | Backup and restore drill, and the rest of sections 10 and 11 |
 
 ## Pipelines
@@ -63,7 +63,7 @@ updated afterwards is a tracker somebody has to reconcile.
 | `validate_inputs` | Done; compares Oasis's lookup with the CASS keys result |
 | `smoke` | Done. The served package's 25 largest-footprint events run through every requested perspective using `event_ids`, and their event losses are checked before the full event set. Recorded as not performed where no package is readable. On the live stack: 25 events in 19 seconds |
 | `losses` | Done: ground-up, insured, reinsurance (reinsurance at portfolio level only, [ADR 10](adr/0010-patched-oasis-worker.md)) |
-| `collect` | Done: ORD package stored, result sets published as draft under a decision-use run and research under any other |
+| `collect` | Done: ORD package stored, the event loss table kept beside each result, and result sets published as draft under a decision-use run and research under any other |
 | `review` | Done. Published results must not be negative, must rise with return period, stay within the insured value, and insured must not exceed ground-up. A failure holds the run at the gate until a run exception is cleared; results are then approved one by one |
 
 ### Run modes (brief section 5.2)
@@ -106,7 +106,7 @@ decision number.
 | Financial structure workspace | Not built | Accounts and layers, contracts, scope preview, inuring, reconciliation |
 | Analysis builder | Built, including the assumption set and the run mode | Output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
-| Results workspace | Partly built: AAL, return-period table, caveats, approval, export, comparison | Maps, EP curve charts, event tables, scenario ranges |
+| Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, caveats, approval, export, comparison | Maps, geographic summaries, scenario ranges |
 | Model build workspace | Built, Hazard and Build tabs | Benchmark and QA evidence views |
 | Administration | Partly built: installation facts, compatibility, profiles, engine health, users, audit search | User and role changes, queues, storage, retention, support bundle |
 
@@ -141,7 +141,7 @@ decision number.
 | 1b | `enrich`: applying an assumption set within a run, with reconciliation | §8, M5 | Done; two sets compared live on one book |
 | 2 | Run modes: geometry-only, technical loss, research, decision use | Brief §5.2 | Done |
 | 3 | Currency conversion evidence captured and applied before generation | §8 | Done |
-| 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Not started |
+| 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Partly done: event loss table and EP curve chart built. Geographic summaries, the map and scenario ranges need loss at a summary level below the portfolio, which is an engine settings change |
 | 5 | Financial structure workspace | §3, M5 | Not started |
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Not started |
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Not started |

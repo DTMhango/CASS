@@ -2300,3 +2300,63 @@ def test_a_rate_from_a_currency_to_itself_is_refused(api):
 
     assert refused.status_code == 400
     assert "converts nothing" in str(refused.data["to_currency"])
+
+
+# -- the events behind the number (section 3) --------------------------------
+
+MELT_ROWS = [
+    # Two sample types for the same event: the table must read the one the
+    # headline number was taken on, not both.
+    "101,1,1,0.004,0.8,900000.00,50000.00,2000000.00,50000000,40000000,45000000",
+    "101,1,2,0.004,0.8,1000000.00,60000.00,2500000.00,50000000,40000000,45000000",
+    "102,1,2,0.002,0.5,5000000.00,250000.00,9000000.00,80000000,70000000,75000000",
+    "103,1,2,0.010,0.2,0.00,0.00,0.00,10000000,0,0",
+]
+
+
+def test_the_events_behind_a_result_are_kept_with_it(analysis_run, oasis_is, api):
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package(melt_rows=MELT_ROWS)))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+
+    listing = api.get(f"{API}/results/{result.id}/event-losses/")
+
+    assert listing.status_code == 200
+    rows = listing.data["results"]
+    # Largest first, the zero-loss event left out, and the sample basis only.
+    assert [row["event_id"] for row in rows] == ["102", "101"]
+    assert rows[0]["mean_loss"] == "5000000.00"
+    assert rows[1]["mean_loss"] == "1000000.00"
+    assert listing.data["count"] == 2
+    assert listing.data["currency"] == "IDR"
+
+
+def test_the_event_table_is_read_a_page_at_a_time(analysis_run, oasis_is, api):
+    """A national event set produces tens of thousands of rows."""
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package(melt_rows=MELT_ROWS)))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+
+    page = api.get(f"{API}/results/{result.id}/event-losses/?limit=1&offset=1")
+
+    assert page.data["count"] == 2
+    assert [row["event_id"] for row in page.data["results"]] == ["101"]
+
+
+def test_a_result_with_no_event_table_says_so_rather_than_showing_nothing(
+    analysis_run, oasis_is, api
+):
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+
+    missing = api.get(f"{API}/results/{result.id}/event-losses/")
+
+    assert missing.status_code == 404
+    assert "no moment event loss table" in missing.data["detail"]

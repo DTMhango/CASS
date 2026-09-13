@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import csv
+import io
+
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.artifacts.models import ArtifactLink
 from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from apps.common.permissions import IsProjectMember
 from apps.common.queries import visible_projects
+from apps.common.storage import get_store
 
 from . import comparison as comparison_service
 from .models import ResultComparison, ResultSet, ResultState
@@ -163,6 +168,56 @@ class ResultSetViewSet(viewsets.ModelViewSet):
             request=request,
         )
         return Response(self.get_serializer(result).data)
+
+    @action(detail=True, methods=["get"], url_path="event-losses")
+    def event_losses(self, request, pk=None, version=None):
+        """The events behind this number, largest loss first.
+
+        Section 3 asks the results workspace to show what drives a result. The
+        table is one row per event that produced a loss, which on a national
+        event set is tens of thousands, so it is served a page at a time from
+        the artifact rather than held in the control plane.
+        """
+        result = self.get_object()
+        link = (
+            ArtifactLink.objects.filter(
+                subject_type="result_set", subject_id=result.id, role="event_losses"
+            )
+            .select_related("artifact")
+            .first()
+        )
+        if link is None or not link.artifact.is_readable:
+            return Response(
+                {
+                    "detail": (
+                        "No event loss table was collected for this result. The run may "
+                        "predate it, or the package carried no moment event loss table."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            limit = min(max(int(request.query_params.get("limit", 50)), 1), 1000)
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except ValueError:
+            return Response(
+                {"detail": "limit and offset must be whole numbers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with get_store().open(link.artifact.uri) as handle:
+            rows = list(csv.DictReader(io.StringIO(handle.read().decode("utf-8"))))
+
+        return Response(
+            {
+                "count": len(rows),
+                "limit": limit,
+                "offset": offset,
+                "currency": result.currency,
+                "results": rows[offset : offset + limit],
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def export(self, request, pk=None, version=None):

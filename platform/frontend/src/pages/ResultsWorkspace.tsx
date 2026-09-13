@@ -25,6 +25,7 @@ import {
   useComparisons,
   useCreateComparison,
   useExportResult,
+  useEventLosses,
   useResults,
   useSession,
 } from "@/api/hooks";
@@ -51,6 +52,7 @@ import {
 } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
 import {
+  formatCount,
   formatDate,
   formatDateTime,
   formatMoney,
@@ -490,6 +492,14 @@ function ResultCard({ result }: { result: ResultSet }) {
         ))}
       </div>
 
+      {returnPeriods.length > 1 ? (
+        <ExceedanceChart
+          curve={returnPeriods}
+          currency={result.currency}
+          label={result.label}
+        />
+      ) : null}
+
       {returnPeriods.length > 2 ? (
         <Disclosure summary="Full exceedance probability table">
           <table className="data-table">
@@ -515,8 +525,175 @@ function ResultCard({ result }: { result: ResultSet }) {
         </Disclosure>
       ) : null}
 
+      <EventLossTable result={result} />
+
       <CaveatBlock result={result} />
     </Card>
+  );
+}
+
+/**
+ * The exceedance curve, drawn from the losses the server computed.
+ *
+ * Nothing is calculated here beyond the pixel positions: every loss is a
+ * decimal string from the API, and ADR 5 keeps money arithmetic on the server.
+ * The return-period axis is logarithmic because an EP curve read on a linear
+ * one is a vertical line at the left and a flat line everywhere else.
+ *
+ * The table below it remains the accessible reading of the same numbers, so
+ * this carries a description rather than trying to be one.
+ */
+function ExceedanceChart({
+  curve,
+  currency,
+  label,
+}: {
+  curve: [string, string][];
+  currency: string;
+  label: string;
+}) {
+  const points = curve
+    .map(([period, loss]) => ({ period: Number(period), loss: Number(loss) }))
+    .filter((point) => Number.isFinite(point.period) && Number.isFinite(point.loss))
+    .sort((a, b) => a.period - b.period);
+  if (points.length < 2) return null;
+
+  const width = 640;
+  const height = 220;
+  const pad = { top: 16, right: 16, bottom: 34, left: 72 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+
+  const minPeriod = Math.log10(points[0].period);
+  const maxPeriod = Math.log10(points[points.length - 1].period);
+  const maxLoss = Math.max(...points.map((point) => point.loss));
+  const span = maxPeriod - minPeriod || 1;
+
+  const x = (period: number) =>
+    pad.left + ((Math.log10(period) - minPeriod) / span) * plotWidth;
+  const y = (loss: number) =>
+    pad.top + plotHeight - (maxLoss ? (loss / maxLoss) * plotHeight : 0);
+
+  const line = points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${x(point.period)},${y(point.loss)}`)
+    .join(" ");
+
+  return (
+    <figure className="ep-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="ep-chart__plot"
+        role="img"
+        aria-label={`Exceedance probability curve for ${label}, ${points.length} return periods from ${points[0].period} to ${points[points.length - 1].period} years, peaking at ${formatMoney(String(maxLoss))} ${currency}.`}
+      >
+        <line
+          x1={pad.left}
+          y1={pad.top + plotHeight}
+          x2={pad.left + plotWidth}
+          y2={pad.top + plotHeight}
+          className="ep-chart__axis"
+        />
+        <line
+          x1={pad.left}
+          y1={pad.top}
+          x2={pad.left}
+          y2={pad.top + plotHeight}
+          className="ep-chart__axis"
+        />
+        <path d={line} className="ep-chart__line" />
+        {points.map((point) => (
+          <circle
+            key={point.period}
+            cx={x(point.period)}
+            cy={y(point.loss)}
+            r={3}
+            className="ep-chart__point"
+          >
+            <title>
+              {point.period}-year: {formatMoneyExact(String(point.loss))} {currency}
+            </title>
+          </circle>
+        ))}
+        {points.map((point) => (
+          <text
+            key={`label-${point.period}`}
+            x={x(point.period)}
+            y={pad.top + plotHeight + 18}
+            className="ep-chart__tick"
+            textAnchor="middle"
+          >
+            {point.period}
+          </text>
+        ))}
+        <text x={pad.left - 8} y={pad.top + 6} className="ep-chart__tick" textAnchor="end">
+          {formatMoney(String(maxLoss))}
+        </text>
+        <text
+          x={pad.left - 8}
+          y={pad.top + plotHeight}
+          className="ep-chart__tick"
+          textAnchor="end"
+        >
+          0
+        </text>
+      </svg>
+      <figcaption className="muted">
+        Loss ({currency}) against return period (years, logarithmic). The table below
+        carries the same numbers exactly.
+      </figcaption>
+    </figure>
+  );
+}
+
+/** Which events drive the number, from the moment event loss table. */
+function EventLossTable({ result }: { result: ResultSet }) {
+  const { data, error, isPending } = useEventLosses(result.id);
+
+  if (isPending) return null;
+  if (error || !data?.results?.length) return null;
+
+  return (
+    <Disclosure
+      summary={`Events behind this number (${formatCount(data.count)} with a loss)`}
+    >
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Event</th>
+            <th scope="col" className="numeric">
+              Mean loss ({data.currency})
+            </th>
+            <th scope="col" className="numeric">
+              Standard deviation
+            </th>
+            <th scope="col" className="numeric">
+              Largest sampled loss
+            </th>
+            <th scope="col" className="numeric">
+              Annual rate
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.results.map((event) => (
+            <tr key={event.event_id}>
+              <th scope="row" className="mono">
+                {event.event_id}
+              </th>
+              <td className="numeric">{formatMoneyExact(event.mean_loss)}</td>
+              <td className="numeric">{formatMoney(event.standard_deviation)}</td>
+              <td className="numeric">{formatMoney(event.maximum_loss)}</td>
+              <td className="numeric">{event.event_rate ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data.count > data.results.length ? (
+        <p className="muted">
+          The {formatCount(data.results.length)} largest of {formatCount(data.count)}.
+        </p>
+      ) : null}
+    </Disclosure>
   );
 }
 

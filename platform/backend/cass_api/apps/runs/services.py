@@ -1487,11 +1487,13 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
                 "updated_by": actor,
             },
         )
+        events = _store_event_losses(run, result, package, perspective, actor)
         published.append(
             {
                 "perspective": perspective,
                 "result_set": str(result.id),
                 "basis": metrics.basis,
+                "events_with_loss": events,
             }
         )
 
@@ -1506,6 +1508,62 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
         )
 
     return {"published": published}
+
+
+def _store_event_losses(run, result, package, perspective: str, actor) -> int:
+    """Keep the event loss table beside the result, and say how long it is.
+
+    Section 3 asks the results workspace to show which events drive a number.
+    The table is one row per event that produced a loss -- tens of thousands of
+    them on a national event set -- so it lives in the artifact store and is
+    read a page at a time, rather than in a column of the results table.
+    """
+    rows = ord_results.event_losses(package, perspective=perspective)
+    if not rows:
+        return 0
+
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        buffer, fieldnames=list(rows[0].as_dict()), lineterminator="\n"
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row.as_dict())
+
+    store = get_store()
+    ref = store.put_bytes(
+        bucket("result"),
+        f"analysis/{run.id}/{perspective}_event_losses.csv",
+        buffer.getvalue().encode("utf-8"),
+        content_type="text/csv",
+        retention=RetentionClass.RESULT,
+        access=AccessPolicy.PROJECT,
+    )
+    artifact, _ = Artifact.objects.update_or_create(
+        uri=ref.uri,
+        defaults={
+            "checksum": ref.checksum,
+            "size_bytes": ref.size_bytes,
+            "content_type": ref.content_type,
+            "retention": str(ref.retention),
+            "access": str(ref.access),
+            "state": ArtifactState.REGISTERED,
+            "project": run.project,
+            "role": "event_losses",
+            "original_filename": f"{perspective}_event_losses.csv",
+            "created_by": actor,
+            "updated_by": actor,
+        },
+    )
+    ArtifactLink.objects.update_or_create(
+        artifact=artifact,
+        subject_type="result_set",
+        subject_id=result.id,
+        role="event_losses",
+        direction="output",
+        defaults={"created_by": actor},
+    )
+    return len(rows)
 
 
 def _assumption_is_unapproved(analysis_run) -> bool:

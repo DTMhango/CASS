@@ -156,6 +156,13 @@ const COMPARISON: ResultComparison = {
 
 let comparisons: ResultComparison[] = [];
 let results: ResultSet[] = [];
+let eventLosses: Record<string, unknown> = {
+  count: 0,
+  limit: 25,
+  offset: 0,
+  currency: "USD",
+  results: [],
+};
 
 function routeFor(url: string): unknown {
   if (url.includes("/session/")) {
@@ -182,6 +189,9 @@ function routeFor(url: string): unknown {
   if (url.includes("/comparisons/")) {
     return { count: comparisons.length, next: null, previous: null, results: comparisons };
   }
+  if (url.includes("/event-losses/")) {
+    return eventLosses;
+  }
   if (url.includes("/results/")) {
     return { count: results.length, next: null, previous: null, results };
   }
@@ -206,6 +216,7 @@ function renderScreen() {
 beforeEach(() => {
   results = [BASELINE, SAME_BASIS, OTHER_PERSPECTIVE, OTHER_CURRENCY];
   comparisons = [];
+  eventLosses = { count: 0, limit: 25, offset: 0, currency: "USD", results: [] };
   // A comparison belongs to a project, so the screen needs one selected. The
   // working context restores it from storage exactly as a reload would.
   window.localStorage.setItem(
@@ -316,6 +327,55 @@ describe("ResultsWorkspace", () => {
     expect(
       await screen.findByText(/difference lies in the exposure or the run settings/),
     ).toBeInTheDocument();
+  });
+
+  it("draws the exceedance curve from the losses the server computed", async () => {
+    results = [
+      makeResult({
+        id: "aaaaaaaa-0000-0000-0000-000000000010",
+        label: "Q2 with a curve",
+        return_period_losses: {
+          "10": "633300.00",
+          "100": "5000000.00",
+          "250": "9000000.00",
+        },
+      }),
+    ];
+    renderScreen();
+
+    const chart = await screen.findByRole("img", { name: /Exceedance probability curve/ });
+
+    // Drawn from what arrived: three return periods, ending at 250 years.
+    expect(chart).toHaveAccessibleName(/3 return periods from 10 to 250 years/);
+  });
+
+  it("lists the events behind a number, largest first", async () => {
+    results = [BASELINE];
+    eventLosses = {
+      count: 27313,
+      limit: 25,
+      offset: 0,
+      currency: "USD",
+      results: [
+        {
+          event_id: "102",
+          mean_loss: "5000000.00",
+          standard_deviation: "250000.00",
+          maximum_loss: "9000000.00",
+          event_rate: "0.002",
+          chance_of_loss: "0.5",
+          impacted_exposure: "70000000",
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderScreen();
+
+    await user.click(await screen.findByText(/Events behind this number/));
+
+    expect(screen.getByText("102")).toBeInTheDocument();
+    // The count is the whole table, not the page.
+    expect(screen.getByText(/27,313 with a loss/)).toBeInTheDocument();
   });
 
   it("shows the rate a converted number rests on", async () => {

@@ -136,3 +136,42 @@
 .compare__driver-name {
   font-weight: 600;
 }
+
+/* The exceedance curve. The table beneath it is the accessible reading, so
+   this is deliberately plain: one line, its points, and the two ends of the
+   loss axis. */
+.ep-chart {
+  margin: var(--space-4) 0 0;
+}
+
+.ep-chart__plot {
+  width: 100%;
+  height: auto;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.ep-chart__axis {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.ep-chart__line {
+  fill: none;
+  stroke: var(--kre-blue);
+  stroke-width: 2;
+}
+
+.ep-chart__point {
+  fill: var(--kre-blue);
+}
+
+.ep-chart__tick {
+  fill: var(--grey-600);
+  font-size: 11px;
+}
+
+.ep-chart figcaption {
+  margin-top: var(--space-2);
+}

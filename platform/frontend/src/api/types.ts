@@ -349,6 +349,25 @@ export interface ResultSet {
   created_at: string;
 }
 
+/** One event's loss to the portfolio, as the moment event loss table reports it. */
+export interface EventLoss {
+  event_id: string;
+  mean_loss: string;
+  standard_deviation: string | null;
+  maximum_loss: string | null;
+  event_rate: string | null;
+  chance_of_loss: string | null;
+  impacted_exposure: string | null;
+}
+
+export interface EventLossPage {
+  count: number;
+  limit: number;
+  offset: number;
+  currency: string;
+  results: EventLoss[];
+}
+
 export interface PlatformInfo {
   api_version: string;
   oed_schema_version: string;

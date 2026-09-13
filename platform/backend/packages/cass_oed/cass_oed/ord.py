@@ -248,6 +248,75 @@ def metrics_for(
     )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class EventLoss:
+    """One event's loss to the portfolio, as the moment table reports it."""
+
+    event_id: int
+    mean_loss: Decimal
+    standard_deviation: Decimal | None
+    maximum_loss: Decimal | None
+    event_rate: Decimal | None
+    chance_of_loss: Decimal | None
+    impacted_exposure: Decimal | None
+
+    def as_dict(self) -> dict[str, Any]:
+        def text(value: Decimal | None) -> str | None:
+            return str(value) if value is not None else None
+
+        return {
+            "event_id": self.event_id,
+            "mean_loss": str(self.mean_loss),
+            "standard_deviation": text(self.standard_deviation),
+            "maximum_loss": text(self.maximum_loss),
+            "event_rate": text(self.event_rate),
+            "chance_of_loss": text(self.chance_of_loss),
+            "impacted_exposure": text(self.impacted_exposure),
+        }
+
+
+def event_losses(
+    package: OrdPackage,
+    *,
+    perspective: str,
+    summary_level: int = 1,
+    sample_type: int = 2,
+    limit: int | None = None,
+) -> list[EventLoss]:
+    """The event loss table, largest loss first.
+
+    Section 3 asks the results workspace to show which events drive a number,
+    and this is where that comes from: the moment event loss table, one row per
+    event, read on the same sample basis as the headline metrics so the table
+    and the number above it describe the same calculation.
+
+    Events that produced no loss are left out. A table padded with zeroes would
+    be tens of thousands of rows long and say nothing.
+    """
+    found: list[EventLoss] = []
+    for row in package.rows(perspective, summary_level, "melt"):
+        if _int(row.get("SampleType")) != sample_type:
+            continue
+        event_id = _int(row.get("EventId"))
+        mean = _decimal(row.get("MeanLoss"))
+        if event_id is None or mean is None or mean <= 0:
+            continue
+        found.append(
+            EventLoss(
+                event_id=event_id,
+                mean_loss=mean,
+                standard_deviation=_decimal(row.get("SDLoss")),
+                maximum_loss=_decimal(row.get("MaxLoss")),
+                event_rate=_decimal(row.get("EventRate")),
+                chance_of_loss=_decimal(row.get("ChanceOfLoss")),
+                impacted_exposure=_decimal(row.get("MeanImpactedExposure")),
+            )
+        )
+
+    found.sort(key=lambda item: item.mean_loss, reverse=True)
+    return found[:limit] if limit else found
+
+
 # -- the tables -------------------------------------------------------------
 
 def _average_loss(
