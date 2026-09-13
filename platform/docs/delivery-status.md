@@ -221,6 +221,9 @@ reviewed research result, not a basis for pricing or reserving.
 | 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Not started. Item 9 is the measurement, and its first run puts the channel representation 10% below the engine on the pilot book. The decision needs the candidates measured against each other, and classes whose taxonomies span measures stay refused until it is taken ([ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md)) |
 | 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Not started. The hazard behind every Indonesian loss is one sampled path until it is decided ([ADR 12](adr/0012-national-classical-model-run-event-based.md)) |
 | 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |
+| 24 | Build an area-peril grid on the platform, for any country, from a written specification | §6 | Not started. The geometry is in `cass_keys.grids` and it is general; what is missing is the door. Only the two pilot prototypes and a CSV upload reach the registry today, which makes a grid something CASS ships rather than something a modeller builds |
+| 25 | Build a vulnerability set for any country GEM covers | §6, §8 | Not started. `modelregistry.gem` builds one from a GEM release, but where a country sits in that release, and the design-era judgement behind its mixtures, are written into the two pilots |
+| 26 | Event representation study: build one calculation both ways, compare each against the OpenQuake reference, and decide | §6, §16 | Not started. Occurrence per event is in use and rupture-binned is the alternative; item 9 is how either is measured. It ends in a decision record, not an approval |
 
 ## Needs a decision or outside input
 
@@ -245,19 +248,21 @@ machinery around one, the decision still has to be taken.
 
 ### Answered on 13 September 2026
 
-- **The event representation study.** Not needed, and dropped from the workflow.
-  Occurrence per event stands as built, recorded on each package by the
-  converter approval that named it
-  ([ADR 4](adr/0004-converter-refuses-unapproved-policy.md)).
+- **Sign-off of the event representation study.** The sign-off is dropped: no
+  named reviewer approves it. The study itself stays, as research CASS does —
+  item 26 — and every package still records the event identity it was built
+  under ([ADR 4](adr/0004-converter-refuses-unapproved-policy.md)).
 - **Legal review before model data, or a package derived from it, leaves KRE.**
   Cleared. GEM Foundation's permission covers the use KRE described to it
   ([ADR 15](adr/0015-research-tool-and-gem-permission.md)); anything
   redistributed still carries GEM's share-alike terms and credits the authors
   and GEM.
 - **A Nepal seismic source model, a denser Vs30 source, and the licensed GEM
-  ~1 km exposure.** Not needed. Indonesia and Nepal were chosen as test
-  countries and Indonesia is covered, so Nepal keeps its grid and its keys and
-  acquires no hazard.
+  ~1 km exposure.** Not needed, and the reason changes what CASS builds rather
+  than what it acquires. Indonesia and Nepal were test countries: somebody using
+  a finished CASS builds the grid and the keys for the country they work on, so
+  the pilot data is disposable and the native path is what matters. That path is
+  items 24 and 25.
 - **The multi-IMT representation, the realisation-weighting rule and the
   footprint storage format.** Not waiting on anybody else: CASS is to research
   each and decide. They are backlog items 21, 22 and 23, and each ends in a
