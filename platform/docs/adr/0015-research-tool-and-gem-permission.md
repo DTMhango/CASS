@@ -1,4 +1,4 @@
-# 15. CASS is a research tool, and GEM has permitted use of its exposure and vulnerability models
+# 15. CASS is a research tool, and GEM has permitted use of the data and models it publishes
 
 Status: Accepted
 Date: 2026-09-13
@@ -18,8 +18,10 @@ to support pricing or reserving.
 Separately, ADR 7 held all model data under one internal-use basis and left
 GEM's written position open. GEM Foundation has now replied to KRE's email of
 11 September 2026. It acknowledged that the use KRE described does not violate
-its terms of use, and granted explicit permission to use the public Global
-Exposure and Vulnerability models as that email described.
+its terms of use, and granted explicit permission under the Data and Models
+section of those terms. That section covers everything GEM makes publicly
+available: the Global Exposure and Vulnerability models, and the national hazard
+models in its mosaic, such as PuSGeN 2024.
 
 ## Decision
 
@@ -45,20 +47,24 @@ basis for pricing or reserving.
   - the CI integration workflow;
   - pinned engine image digests, so a run can be repeated on the same engines.
 
-**GEM's exposure and vulnerability models are used under GEM's permission.**
+**GEM's publicly available data and models are used under GEM's permission.**
 
-- `apps.modelregistry.gem.GEM_PERMISSION` records the permission.
-- A GEM vulnerability set is cleared under it by default.
-- Migration `modelregistry.0009_gem_permission` records it against the sets
-  already registered from GEM, including the demonstration seed.
-- The licence the data carries, CC BY-NC-SA 4.0, is still recorded beside the
-  permission. GEM Foundation must be credited, and a model or derivative that is
-  redistributed carries the same licence.
+- `apps.modelregistry.models.GEM_PERMISSION` records the permission.
+- A vulnerability set built from GEM is cleared under it by default.
+- A hazard model whose publisher names GEM is held under it when it is uploaded,
+  and a hazard set computed from that model carries the same note.
+- Migrations `modelregistry.0009_gem_permission` and
+  `modelregistry.0010_gem_permission_public_models` record it against what was
+  already registered:
+  - the GEM vulnerability sets, including the demonstration seed;
+  - the PuSGeN 2024 hazard model, and the hazard sets computed from it.
+- The licence each carries, CC BY-NC-SA 4.0, is still recorded beside the
+  permission. The authors and GEM Foundation must be credited, and a model or
+  derivative that is redistributed carries the same licence.
 
-The permission covers those two models and nothing else:
+What stays outside the permission:
 
-- The PuSGeN 2024 hazard package, and any other hazard source model or
-  third-party data, stays under the internal-use basis of ADR 7.
+- Data GEM does not publish stays under the internal-use basis of ADR 7.
 - OpenQuake stays unmodified and under the AGPL. A modified version would have
   to be released under the AGPL.
 
@@ -71,13 +77,23 @@ exists to support.
 **Remove the governance already built.** Rewriting working roles, approvals and
 gates would cost more than keeping them, and they do no harm to research use.
 
-**Record the permission as a new installation-wide basis.** It would clear hazard
-source models that GEM's permission does not mention.
+**Read the reply as naming only the exposure and vulnerability models.** It was
+first recorded that way, and PuSGeN 2024 was left under the internal-use basis.
+GEM answered under the Data and Models section of its terms, which covers
+everything it makes publicly available, so migration 0010 corrects it.
+
+**Record the permission as the installation-wide basis.** It would also clear
+data GEM does not publish, such as a hazard model from another agency uploaded
+later.
 
 ## Consequences
 
-- The licence question no longer stands against GEM vulnerability sets, and a
-  model version built from them is no longer held back by it.
+- The licence question no longer stands against GEM vulnerability sets or
+  GEM-published hazard models, and a model version built from them is no longer
+  held back by it.
+- Whether a hazard model is GEM-published is read from its publisher. A model
+  uploaded without naming GEM keeps the internal-use basis until its record says
+  otherwise.
 - The decision-use mode and result approval still work as before.
 - An approved result is a reviewed research result. Anybody reading "decision use"
   on a screen should read it that way.

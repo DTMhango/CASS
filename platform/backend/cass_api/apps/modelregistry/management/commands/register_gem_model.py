@@ -10,8 +10,8 @@ doing the build. Without it there is no vulnerability set and no model version,
 which is the honest state of a fresh installation: the platform can hold
 exposure and refuse to model it, and cannot invent a damage relationship.
 
-A set is cleared under GEM Foundation's written permission for its public
-exposure and vulnerability models (ADR 15), and records that permission. A
+A set is cleared under GEM Foundation's written permission for the data and
+models it makes publicly available (ADR 15), and records that permission. A
 different entitlement is stated with ``--licence-reference``, and
 ``--licence-cleared`` records it as a clearance, so whatever the registry holds
 names the thing that grants it.

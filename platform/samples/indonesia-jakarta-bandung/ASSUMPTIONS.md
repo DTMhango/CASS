@@ -74,8 +74,8 @@ having first discovered it the hard way.
 
 The model version is published as a **research prototype**: the grid version is
 a draft and no end-to-end validation date has been recorded. The GEM
-vulnerability functions are used under GEM Foundation's written permission, and
-the PuSGeN 2024 hazard under the installation's internal-use basis. So every
+vulnerability functions and the PuSGeN 2024 hazard are both publicly available
+from GEM, and are used under GEM Foundation's written permission. So every
 result carries "not usable for decisions", which is the honest state, and the
 AAL and PML below are a demonstration that the pipeline computes them, not a
 view of Indonesian earthquake risk. CASS is a research tool in any case: no

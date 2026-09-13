@@ -1,8 +1,8 @@
 # 7. Model data is held under one internal-use basis
 
 Status: Amended by [0015](0015-research-tool-and-gem-permission.md), which
-records GEM Foundation's permission for its exposure and vulnerability models
-and that CASS is a research tool
+records GEM Foundation's permission for the data and models it makes publicly
+available, and that CASS is a research tool
 Date: 2026-09-13
 
 ## Context

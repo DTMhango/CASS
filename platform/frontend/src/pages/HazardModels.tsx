@@ -294,7 +294,7 @@ function UploadPanel() {
             <Field
               label="Published by"
               htmlFor="hazard-org"
-              hint="Nothing in the archive records this, and a footprint that cannot name its sources is untraceable."
+              hint="Nothing in the archive records this, and a footprint that cannot name its sources is untraceable. Name GEM where the model comes from a GEM release: GEM's permission is then recorded against it."
             >
               <TextInput
                 id="hazard-org"

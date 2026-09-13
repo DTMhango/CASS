@@ -94,9 +94,9 @@ class SourceStatement:
                 f"Use of {self.model} has not been cleared. This hazard set may be "
                 "used for platform development until it is."
             ) + (f" {self.note}" if self.note else "")
-        return f"Cleared under {self.reference}." + (
-            f" {self.note}" if self.note else ""
-        )
+        # The reference is the basis in full -- GEM's permission, or the
+        # internal-use basis -- and reads as written.
+        return self.reference + (f" {self.note}" if self.note else "")
 
 
 def build(

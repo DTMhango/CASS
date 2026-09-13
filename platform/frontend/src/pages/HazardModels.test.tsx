@@ -273,9 +273,10 @@ describe("HazardModels", () => {
   });
 
   it("does not ask the person uploading a model about its licence", async () => {
-    /* One internal-use basis covers everything on this installation, recorded
-       once in Administration. Asking again per upload invited a different
-       answer each time about a fact that does not vary. */
+    /* The basis follows from who published the model: GEM's permission for one
+       GEM makes publicly available, the internal-use basis otherwise. Asking
+       per upload invited a different answer each time about a fact that does
+       not vary. */
     const user = userEvent.setup();
     renderScreen();
     await user.upload(

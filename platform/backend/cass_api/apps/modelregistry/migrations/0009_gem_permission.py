@@ -6,8 +6,9 @@ already registered from those models were cleared under the installation's
 internal-use basis, or, in the demonstration seed, not cleared at all while
 exactly this answer was awaited. They now name what clears them.
 
-Hazard models and hazard sets are untouched: the permission does not cover a
-hazard source model such as PuSGeN 2024.
+Hazard models and hazard sets are left to migration 0010, which records the
+permission against them: it covers every model GEM makes publicly available,
+PuSGeN 2024 included.
 """
 
 from django.db import migrations

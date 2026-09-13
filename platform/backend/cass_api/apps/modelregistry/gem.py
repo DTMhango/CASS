@@ -19,8 +19,8 @@ different questions and a set missing any of them is not reproducible:
 
 Three things this deliberately does not decide.
 
-**The licence.** GEM Foundation has given explicit written permission to use its
-public Global Exposure and Vulnerability models for the use KRE described
+**The licence.** GEM Foundation has given explicit written permission to use the
+data and models it makes publicly available, these among them, for the use KRE described
 (ADR 15), so a set built here is cleared under that permission by default and
 says so. The licence the data carries is recorded beside it, because GEM must be
 credited and anything redistributed carries the same terms. A narrower
@@ -71,6 +71,7 @@ from .assets import (
     attach_vulnerability_variant,
 )
 from .models import (
+    GEM_PERMISSION,
     AssumptionSet,
     ModelVersion,
     PublicationState,
@@ -89,16 +90,6 @@ GEM_SOURCE = f"GEM Global Vulnerability Model and Global Exposure Model {GEM_REL
 #: GEM Foundation must be credited and anything redistributed carries the same
 #: terms whatever KRE is permitted to do with it.
 GEM_LICENCE = "CC BY-NC-SA 4.0"
-
-#: GEM Foundation's written permission, which is what clears a GEM set here
-#: (ADR 15). It covers these two models only: a hazard source model such as
-#: PuSGeN 2024 is held under the installation's internal-use basis instead.
-GEM_PERMISSION = (
-    "GEM Foundation has granted explicit permission to use the public Global "
-    "Exposure and Vulnerability models for the use KRE described in its email of "
-    "11 September 2026. Credit GEM Foundation as the source; anything "
-    "redistributed carries the same licence."
-)
 
 #: GEM's taxonomy generation. Distinct from the OED codes a schedule states:
 #: the whole enrichment step exists to get from one to the other.

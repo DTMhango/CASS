@@ -127,12 +127,23 @@ class AreaPerilGrid(BaseModel, FreezableModel):
 #: used inside the company, is not redistributed outside it, and earns nothing
 #: on its own account. It is a fact about the installation rather than a
 #: question to ask of each upload, so it is recorded here, applied by default,
-#: and shown once in Administration instead of on every screen. GEM's exposure
-#: and vulnerability models carry GEM Foundation's written permission instead
-#: (``apps.modelregistry.gem.GEM_PERMISSION``, ADR 15).
+#: and shown once in Administration instead of on every screen. Data and models
+#: GEM makes publicly available carry GEM Foundation's written permission
+#: instead, below.
 INTERNAL_USE_LICENCE = (
     "Internal use within Klapton Re only: no redistribution outside the company "
     "and no commercial exploitation."
+)
+
+#: GEM Foundation's written permission (ADR 15). Its reply to KRE covers what the
+#: Data and Models section of its terms covers: everything GEM makes publicly
+#: available, which includes the Global Exposure and Vulnerability models and
+#: the national hazard models in its mosaic, such as PuSGeN 2024.
+GEM_PERMISSION = (
+    "GEM Foundation has granted explicit permission to use the data and models it "
+    "makes publicly available, for the use KRE described in its email of "
+    "11 September 2026. Credit the authors and GEM Foundation as the source; "
+    "anything redistributed carries the same licence."
 )
 
 

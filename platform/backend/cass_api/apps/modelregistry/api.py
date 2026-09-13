@@ -740,8 +740,9 @@ class HazardModelViewSet(viewsets.ReadOnlyModelViewSet):
                 publication_reference=str(
                     request.data.get("publication_reference") or ""
                 ),
-                # Not asked for on upload: this installation holds everything
-                # under one internal-use basis, recorded once rather than
+                # Not asked for on upload: the basis follows from who published
+                # the model -- GEM's permission for one GEM makes publicly
+                # available, the internal-use basis otherwise -- rather than being
                 # re-stated by whoever happens to be uploading.
                 actor=request.user,
             )
@@ -882,11 +883,11 @@ class HazardModelViewSet(viewsets.ReadOnlyModelViewSet):
                 },
                 status=status.HTTP_409_CONFLICT,
             )
-        # Everything on this installation is held under one internal-use basis,
-        # so this is normally cleared and the run is an ordinary one. It stays
-        # here for the case it was written for: data somebody has deliberately
-        # marked as not usable here, which still calculates but cannot support
-        # a decision.
+        # Everything on this installation is held under GEM's permission or the
+        # internal-use basis, so this is normally cleared and the run is an
+        # ordinary one. It stays here for the case it was written for: data
+        # somebody has deliberately marked as not usable here, which still
+        # calculates and is labelled research only.
         research_only = not model.licence_cleared
 
         try:

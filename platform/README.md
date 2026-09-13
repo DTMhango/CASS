@@ -317,14 +317,16 @@ tab:
 | Oasis static storage format | Interim ktools binaries; Parquet not measured | Earthquake footprints may be too large for uncompressed CSV |
 | Secondary peril scope | Declare per country release | Defines what "earthquake loss" means |
 
-GEM Foundation has given explicit written permission to use its public Global
-Exposure and Vulnerability models for the use KRE described to it, and a GEM
-vulnerability set records that permission
-([ADR 15](docs/adr/0015-research-tool-and-gem-permission.md)). GEM must be
-credited as the source, and anything redistributed carries the same CC BY-NC-SA
-terms. Other model data, including the PuSGeN 2024 hazard package, is held
-under the internal-use basis: used inside Klapton Re, not redistributed and not
-sold ([ADR 7](docs/adr/0007-internal-use-licence-basis.md)). OpenQuake is used
+GEM Foundation has given explicit written permission to use the data and models
+it makes publicly available, for the use KRE described to it: the Global
+Exposure and Vulnerability models, and the national hazard models in its
+mosaic, PuSGeN 2024 among them. GEM vulnerability sets and GEM-published hazard
+models record that permission
+([ADR 15](docs/adr/0015-research-tool-and-gem-permission.md)). The authors and
+GEM must be credited as the source, and anything redistributed carries the same
+CC BY-NC-SA terms. Data GEM does not publish is held under the internal-use
+basis: used inside Klapton Re, not redistributed and not sold
+([ADR 7](docs/adr/0007-internal-use-licence-basis.md)). OpenQuake is used
 unmodified under the AGPL. Legal review is still needed before model data, or a
 package derived from it, leaves KRE.
 

@@ -38,6 +38,7 @@ import dataclasses
 import hashlib
 import io
 import pathlib
+import re
 import tempfile
 import zipfile
 from collections.abc import Mapping
@@ -50,6 +51,7 @@ from cass_converter.job_config import JobConfig, JobConfigError
 
 from .assets import attach_hazard_model_file
 from .models import (
+    GEM_PERMISSION,
     INTERNAL_USE_LICENCE,
     AreaPerilGrid,
     HazardJobSpec,
@@ -75,9 +77,24 @@ MAX_ARCHIVE_BYTES = 500 * 1024 * 1024
 #: entries escape the directory they are extracted into.
 MAX_PATH_DEPTH = 8
 
+#: How a publisher is recognised as GEM: the acronym as a word, which is how the
+#: mosaic packages credit it -- "PuSGeN, with the GEM Foundation (2026 mosaic)".
+GEM_PUBLISHER = re.compile(r"\bGEM\b")
+
 
 class HazardModelError(Exception):
     """Raised when an uploaded package cannot be read or configured."""
+
+
+def licence_basis(publisher: str) -> str:
+    """The basis a hazard model is held under, read from who published it.
+
+    A model GEM makes publicly available is held under GEM Foundation's written
+    permission (ADR 15), and anything else under the installation's internal-use
+    basis. It follows from the publisher rather than being asked of whoever
+    uploads, because it is a fact about the model.
+    """
+    return GEM_PERMISSION if GEM_PUBLISHER.search(publisher or "") else INTERNAL_USE_LICENCE
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -285,7 +302,7 @@ def register_model(
             "publication_reference": publication_reference,
             "licence": licence,
             "licence_cleared": licence_cleared,
-            "licence_note": licence_note or INTERNAL_USE_LICENCE,
+            "licence_note": licence_note or licence_basis(source_organisation),
             "archive_checksum": package.checksum,
             "archive_bytes": package.size_bytes,
             "file_manifest": [item.as_dict() for item in package.files],
