@@ -27,7 +27,15 @@ from apps.projects.models import Project
 from cass_core.runs import RunState, describe
 
 from . import services
-from .models import AnalysisRun, ConversionRun, HazardRun, Run, RunKind, RunStageEvent
+from .models import (
+    AnalysisRun,
+    ConversionRun,
+    HazardRun,
+    Run,
+    RunKind,
+    RunMode,
+    RunStageEvent,
+)
 
 
 class RunStageEventSerializer(serializers.ModelSerializer):
@@ -123,7 +131,7 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
         model = AnalysisRun
         fields = [
             "id", "run", "run_detail", "exposure_version", "enrichment_run", "assumption_set",
-            "model_version", "perspectives", "analysis_settings", "run_currency",
+            "model_version", "mode", "perspectives", "analysis_settings", "run_currency",
             "oasis_analysis_id", "oasis_portfolio_id", "keys_summary",
             "keys_reconciled", "may_proceed_past_keys", "exception_approval",
             "created_at",
@@ -230,6 +238,38 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
                             f"{model_version.reference} carries no functions for the "
                             f"{assumption_set.get_flavour_display().lower()} assumption "
                             "set, so a run could not use it."
+                        )
+                    }
+                )
+
+        # Brief section 5.2: decision use is permitted only once scientific
+        # validation and licensing are complete, so the mode is refused here
+        # rather than discovered when a reviewer tries to approve the number.
+        # The other three modes have nothing to prove: they claim less.
+        mode = attrs.get("mode") or AnalysisRun._meta.get_field("mode").default
+        if RunMode(mode) is RunMode.DECISION:
+            if model_version.is_research_prototype:
+                raise serializers.ValidationError(
+                    {
+                        "mode": (
+                            f"{model_version.reference} is a research prototype, so a "
+                            "run against it cannot be for decision use. Outstanding: "
+                            + "; ".join(model_version.publication_blockers())
+                        )
+                    }
+                )
+            chosen_set = attrs.get("assumption_set")
+            if chosen_set is not None and chosen_set.publication_state not in (
+                PublicationState.PUBLISHED,
+                PublicationState.APPROVED,
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "mode": (
+                            f"{chosen_set} is "
+                            f"{chosen_set.get_publication_state_display().lower()}. "
+                            "A decision-use run cannot rest on an assumption set "
+                            "nobody has approved."
                         )
                     }
                 )
@@ -448,6 +488,9 @@ class RunViewSet(viewsets.ReadOnlyModelViewSet):
                 enrichment_run=analysis.enrichment_run,
                 assumption_set=analysis.assumption_set,
                 model_version=analysis.model_version,
+                # A retry answers the same question as the run it replaces, so
+                # it may not quietly claim more than that run did.
+                mode=analysis.mode,
                 perspectives=analysis.perspectives,
                 analysis_settings=analysis.analysis_settings,
                 run_currency=analysis.run_currency,

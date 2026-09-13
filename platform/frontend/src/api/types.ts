@@ -92,6 +92,12 @@ export interface ValidationSummary {
 
 export type PerspectiveKey = "ground_up" | "insured" | "reinsurance";
 
+/**
+ * What a run is for, and so what its output may claim (brief section 5.2).
+ * Only a decision-use run can produce a result a reviewer may approve.
+ */
+export type RunMode = "geometry_only" | "technical" | "research" | "decision";
+
 export interface PerspectiveAvailability {
   perspective: PerspectiveKey;
   label: string;
@@ -285,6 +291,7 @@ export interface RunStageEvent {
 export interface ResultCaveats {
   model_version: string;
   assumption_set: string;
+  run_mode: RunMode | "";
   valuation_date: string | null;
   perspective: string;
   currency: string;
@@ -309,6 +316,8 @@ export interface ResultSet {
   return_period_losses: Record<string, string>;
   model_version_reference: string;
   assumption_set_reference: string;
+  /** The mode the run was made under. Blank on results published before modes. */
+  run_mode: RunMode | "";
   valuation_date: string | null;
   exposure_quality: Record<string, unknown>;
   peril_scope: Record<string, unknown>;
@@ -596,6 +605,8 @@ export interface AnalysisRun {
   /** The assumption set chosen; null means the model's baseline weights. */
   assumption_set?: UUID | null;
   model_version: UUID;
+  /** What the run is for. Decides how far it goes and what it may claim. */
+  mode: RunMode;
   perspectives: PerspectiveKey[];
   analysis_settings: Record<string, unknown>;
   run_currency: string;
@@ -828,6 +839,13 @@ export interface ComparisonDifferences {
     baseline: boolean;
     candidate: boolean;
     both_approved: boolean;
+    warning: string;
+  };
+  /** Brief section 5.2: two modes are never compared without a warning. */
+  run_modes: {
+    baseline: RunMode | "";
+    candidate: RunMode | "";
+    mixed: boolean;
     warning: string;
   };
 }

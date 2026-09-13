@@ -29,7 +29,7 @@ import {
   usePlatformInfo,
   useSubmitAnalysis,
 } from "@/api/hooks";
-import type { PerspectiveKey } from "@/api/types";
+import type { PerspectiveKey, RunMode } from "@/api/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
@@ -52,6 +52,34 @@ interface Precondition {
   fix?: { to: string; label: string };
 }
 
+/**
+ * The four modes of section 5.2 of the portfolio brief, in the order they are
+ * reached: a mapping report, then a technical loss, then research, and decision
+ * use last of all.
+ */
+const RUN_MODES: { value: RunMode; label: string; note: string }[] = [
+  {
+    value: "geometry_only",
+    label: "Geometry only — map the book, calculate no loss",
+    note: "It maps coordinates to the model grid and reports which risks the model can answer for. No loss is calculated and no result is published.",
+  },
+  {
+    value: "technical",
+    label: "KRE-share technical loss",
+    note: "A loss on reported KRE-share value under the stated allocation. The output is research and cannot be approved for decision use.",
+  },
+  {
+    value: "research",
+    label: "Portfolio-loss research",
+    note: "A loss under a versioned assumption set, for comparing alternatives. The output is research and cannot be approved for decision use.",
+  },
+  {
+    value: "decision",
+    label: "Decision use",
+    note: "The output may be approved for pricing, capital or underwriting once a reviewer has released it.",
+  },
+];
+
 export function AnalysisBuilder() {
   const context = useWorkingContext();
   const navigate = useNavigate();
@@ -65,6 +93,7 @@ export function AnalysisBuilder() {
   const [label, setLabel] = useState("");
   const [profile, setProfile] = useState("");
   const [assumptionSet, setAssumptionSet] = useState("");
+  const [mode, setMode] = useState<RunMode>("technical");
 
   const exposure = exposures?.find((item) => item.id === context.exposureId);
   const model = models?.find((item) => item.id === context.modelId);
@@ -75,6 +104,14 @@ export function AnalysisBuilder() {
   const perspectiveAvailability = exposure?.supported_perspectives?.find(
     (item) => item.perspective === context.perspective,
   );
+
+  // The brief permits decision use only once the model is validated and
+  // licensed and the assumption behind it is approved. Offering it in any other
+  // case would put a refusal behind the submit button instead of in front of it.
+  const decisionUseAvailable = Boolean(
+    model && !model.is_research_prototype && (!chosenSet || chosenSet.approved),
+  );
+  const chosenMode = decisionUseAvailable || mode !== "decision" ? mode : "technical";
 
   const preconditions = useMemo<Precondition[]>(
     () => [
@@ -135,6 +172,7 @@ export function AnalysisBuilder() {
         label: label.trim(),
         execution_profile: profile || undefined,
         assumption_set: chosenSet?.id,
+        mode: chosenMode,
       });
       await submit.mutateAsync(analysis.id);
       navigate(`/runs/${analysis.run}`);
@@ -225,6 +263,34 @@ export function AnalysisBuilder() {
                 </option>
               ))}
             </Select>
+          </Field>
+
+          <Field
+            label="What this run is for"
+            htmlFor="builder-mode"
+            hint="It decides how far the run goes and what its output may claim. Decision use comes last, after validation, licensing and an approved assumption set."
+          >
+            <Select
+              id="builder-mode"
+              value={mode}
+              onChange={(event) => setMode(event.target.value as RunMode)}
+            >
+              {RUN_MODES.map((item) => (
+                <option
+                  key={item.value}
+                  value={item.value}
+                  disabled={item.value === "decision" && !decisionUseAvailable}
+                >
+                  {item.label}
+                  {item.value === "decision" && !decisionUseAvailable
+                    ? " — not yet available"
+                    : ""}
+                </option>
+              ))}
+            </Select>
+            <p className="muted builder__mode-note">
+              {RUN_MODES.find((item) => item.value === chosenMode)?.note}
+            </p>
           </Field>
 
           <Field
@@ -324,6 +390,14 @@ export function AnalysisBuilder() {
                   : "The run is queued in the background. You do not have to keep this page open."}
               </p>
             </div>
+
+            {ready && chosenMode === "geometry_only" ? (
+              <Notice tone="info" title="This run calculates no loss">
+                It maps the book to the model and stops at the keys report. Value
+                the model cannot map is reported rather than held for an approval,
+                because there is no loss for it to be missing from.
+              </Notice>
+            ) : null}
 
             {ready && chosenSet && !chosenSet.approved ? (
               <Notice tone="warning" title="This assumption set is not approved">

@@ -33,6 +33,7 @@ import type {
   ComparedReturnPeriod,
   ResultComparison,
   ResultSet,
+  RunMode,
 } from "@/api/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -57,6 +58,15 @@ import {
 } from "@/lib/format";
 
 import "./ResultsWorkspace.css";
+
+/** What each run mode claims, in the words the brief's section 5.2 uses. */
+const RUN_MODE_LABELS: Record<RunMode | "", string> = {
+  geometry_only: "Geometry only — no loss calculated",
+  technical: "KRE-share technical loss",
+  research: "Portfolio-loss research",
+  decision: "Decision use",
+  "": "not recorded",
+};
 
 export function ResultsWorkspace() {
   const context = useWorkingContext();
@@ -237,6 +247,12 @@ function ComparisonReport({ comparison }: { comparison: ResultComparison }) {
         comparison.candidate_detail?.label ?? "candidate"
       }`}
     >
+      {differences?.run_modes?.warning ? (
+        <Notice tone="warning" title="These runs were made for different purposes">
+          {differences.run_modes.warning}
+        </Notice>
+      ) : null}
+
       {differences?.decision_use?.warning ? (
         <Notice tone="warning" title="Not a decision number">
           {differences.decision_use.warning}
@@ -519,6 +535,7 @@ function CaveatBlock({ result }: { result: ResultSet }) {
         <Caveat term="Assumption set">
           <span className="mono">{caveats.assumption_set || "not recorded"}</span>
         </Caveat>
+        <Caveat term="Run mode">{RUN_MODE_LABELS[caveats.run_mode] ?? "not recorded"}</Caveat>
         <Caveat term="Valuation date">{formatDate(caveats.valuation_date)}</Caveat>
         <Caveat term="Perspective">{caveats.perspective}</Caveat>
         <Caveat term="Currency">{caveats.currency || "not recorded"}</Caveat>

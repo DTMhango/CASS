@@ -4764,6 +4764,16 @@ components:
         model_version:
           type: string
           format: uuid
+        mode:
+          allOf:
+          - $ref: '#/components/schemas/ModeEnum'
+          description: |-
+            What this analysis is for, and therefore what its output may claim.
+
+            * `geometry_only` - Geometry only, no loss calculated
+            * `technical` - KRE-share technical loss
+            * `research` - Portfolio-loss research
+            * `decision` - Decision use
         perspectives:
           description: Requested perspectives, checked against the source data.
         analysis_settings: {}
@@ -4834,6 +4844,16 @@ components:
         model_version:
           type: string
           format: uuid
+        mode:
+          allOf:
+          - $ref: '#/components/schemas/ModeEnum'
+          description: |-
+            What this analysis is for, and therefore what its output may claim.
+
+            * `geometry_only` - Geometry only, no loss calculated
+            * `technical` - KRE-share technical loss
+            * `research` - Portfolio-loss research
+            * `decision` - Decision use
         perspectives:
           description: Requested perspectives, checked against the source data.
         analysis_settings: {}
@@ -6225,6 +6245,18 @@ components:
         * `hazard` - Hazard run
         * `conversion` - Conversion run
         * `analysis` - Analysis run
+    ModeEnum:
+      enum:
+      - geometry_only
+      - technical
+      - research
+      - decision
+      type: string
+      description: |-
+        * `geometry_only` - Geometry only, no loss calculated
+        * `technical` - KRE-share technical loss
+        * `research` - Portfolio-loss research
+        * `decision` - Decision use
     ModelVersion:
       type: object
       properties:
@@ -6903,6 +6935,16 @@ components:
         model_version:
           type: string
           format: uuid
+        mode:
+          allOf:
+          - $ref: '#/components/schemas/ModeEnum'
+          description: |-
+            What this analysis is for, and therefore what its output may claim.
+
+            * `geometry_only` - Geometry only, no loss calculated
+            * `technical` - KRE-share technical loss
+            * `research` - Portfolio-loss research
+            * `decision` - Decision use
         perspectives:
           description: Requested perspectives, checked against the source data.
         analysis_settings: {}
@@ -7651,6 +7693,11 @@ components:
         assumption_set_reference:
           type: string
           maxLength: 120
+        run_mode:
+          type: string
+          readOnly: true
+          description: What the run that produced this was for, and so what it may
+            claim.
         valuation_date:
           type: string
           format: date
@@ -7696,6 +7743,7 @@ components:
       - perspective
       - project
       - run
+      - run_mode
       - usable_for_decisions
     ResultSetRequest:
       type: object

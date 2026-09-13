@@ -96,3 +96,8 @@
 .builder__facts + .notice {
   margin-top: var(--space-3);
 }
+
+.builder__mode-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+}

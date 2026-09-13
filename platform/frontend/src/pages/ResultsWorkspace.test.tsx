@@ -39,6 +39,7 @@ function makeResult(overrides: Partial<ResultSet> & { id: string; label: string 
     return_period_losses: { "250": "9000000.00" },
     model_version_reference: "id-eq-0.1.0",
     assumption_set_reference: "id-baseline-1.0",
+    run_mode: "decision",
     valuation_date: "2026-06-30",
     exposure_quality: {},
     peril_scope: {},
@@ -51,6 +52,7 @@ function makeResult(overrides: Partial<ResultSet> & { id: string; label: string 
     caveats: {
       model_version: "id-eq-0.1.0",
       assumption_set: "id-baseline-1.0",
+      run_mode: "decision",
       valuation_date: "2026-06-30",
       perspective: "Ground-up loss",
       currency: "USD",
@@ -141,6 +143,12 @@ const COMPARISON: ResultComparison = {
       baseline: true,
       candidate: true,
       both_approved: true,
+      warning: "",
+    },
+    run_modes: {
+      baseline: "decision",
+      candidate: "decision",
+      mixed: false,
       warning: "",
     },
   },
@@ -307,6 +315,31 @@ describe("ResultsWorkspace", () => {
 
     expect(
       await screen.findByText(/difference lies in the exposure or the run settings/),
+    ).toBeInTheDocument();
+  });
+
+  it("warns when the two runs were made for different purposes", async () => {
+    comparisons = [
+      {
+        ...COMPARISON,
+        differences: {
+          ...COMPARISON.differences,
+          run_modes: {
+            baseline: "decision",
+            candidate: "research",
+            mixed: true,
+            warning:
+              "These results come from runs made for different purposes (decision against research), so the difference between them is not a like-for-like one.",
+          },
+        },
+      },
+    ];
+    renderScreen();
+
+    await user_expand();
+
+    expect(
+      await screen.findByText(/not a like-for-like one/),
     ).toBeInTheDocument();
   });
 

@@ -26,14 +26,14 @@ class ResultSetSerializer(serializers.ModelSerializer):
             "id", "run", "project", "label", "perspective", "state",
             "average_annual_loss", "standard_deviation", "currency",
             "return_period_losses", "model_version_reference",
-            "assumption_set_reference", "valuation_date", "exposure_quality",
+            "assumption_set_reference", "run_mode", "valuation_date", "exposure_quality",
             "peril_scope", "material_exclusions", "uncertainty_attribution",
             "usable_for_decisions", "caveats", "approved_at", "is_frozen",
             "created_at",
         ]
         read_only_fields = [
-            "id", "usable_for_decisions", "caveats", "approved_at", "is_frozen",
-            "created_at",
+            "id", "usable_for_decisions", "caveats", "run_mode", "approved_at",
+            "is_frozen", "created_at",
         ]
 
     def get_caveats(self, obj) -> dict:
@@ -122,6 +122,22 @@ class ResultSetViewSet(viewsets.ModelViewSet):
                     "detail": (
                         f"The run is in state {result.run.state}. Only a successful run "
                         "may release results."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if result.state == ResultState.RESEARCH:
+            # Research output is research whatever a reviewer does. Approving
+            # it would approve the prototype model, the unapproved assumption
+            # set or the run mode behind it without anyone having reviewed
+            # those -- which is the substitution section 9 exists to prevent.
+            return Response(
+                {
+                    "detail": (
+                        "This is research output and cannot be approved for decision "
+                        "use. Clear what makes it research -- the model version, the "
+                        "assumption set or the mode the run was made under -- and run "
+                        "it again for decision use."
                     )
                 },
                 status=status.HTTP_409_CONFLICT,

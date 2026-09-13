@@ -62,6 +62,14 @@ class ResultSet(BaseModel, FreezableModel):
     #: Section 9 decision-use controls. These are required on export.
     model_version_reference = models.CharField(max_length=120, blank=True)
     assumption_set_reference = models.CharField(max_length=120, blank=True)
+    #: The mode the run was made under, copied here rather than followed
+    #: through the run: section 5.2 of the brief forbids mixing modes in one
+    #: comparison, and a comparison reads results.
+    run_mode = models.CharField(
+        max_length=16,
+        blank=True,
+        help_text="What the run that produced this was for, and so what it may claim.",
+    )
     valuation_date = models.DateField(null=True, blank=True)
     exposure_quality = models.JSONField(
         default=dict,
@@ -109,6 +117,7 @@ class ResultSet(BaseModel, FreezableModel):
         return {
             "model_version": self.model_version_reference,
             "assumption_set": self.assumption_set_reference,
+            "run_mode": self.run_mode,
             "valuation_date": self.valuation_date.isoformat() if self.valuation_date else None,
             "perspective": self.get_perspective_display(),
             "currency": self.currency,

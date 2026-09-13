@@ -34,7 +34,7 @@ from apps.modelregistry.models import (
     PublicationState,
     VulnerabilitySet,
 )
-from apps.runs.models import AnalysisRun, Run, RunKind
+from apps.runs.models import AnalysisRun, Run, RunKind, RunMode
 from apps.runs.services import (
     DEFAULT_ORD_OUTPUT,
     ENGINE_STAGES,
@@ -1305,6 +1305,8 @@ def test_a_published_result_is_never_approved_by_the_pipeline(
 
     model_version.is_research_prototype = False
     model_version.save()
+    analysis_run.mode = RunMode.DECISION
+    analysis_run.save()
     oasis_is(oasis_server(output=ord_package()))
     api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
 
@@ -1982,3 +1984,142 @@ def test_an_exception_cleared_at_one_gate_does_not_release_another(
     assert run.stage == "review"
     refused = api.post(f"{API}/analysis-runs/{analysis_run.id}/resume/")
     assert refused.status_code == 409
+
+
+# -- run modes (brief section 5.2) -------------------------------------------
+
+def test_a_geometry_only_run_maps_the_book_and_calculates_no_loss(
+    analysis_run, oasis_is, api, analyst
+):
+    """Brief section 5.2: eligibility without a financial claim."""
+    from apps.results.models import ResultSet
+
+    analysis_run.mode = RunMode.GEOMETRY_ONLY
+    analysis_run.save()
+    session = oasis_server(output=ord_package())
+    oasis_is(session)
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.SUCCEEDED
+    assert run.stage == "reconcile_keys"
+    # Nothing was submitted to the engine, so no portfolio was ever published.
+    assert session.calls == []
+    assert not ResultSet.objects.filter(run=run).exists()
+    # It is a mapping report, and it says so.
+    assert run.manifest["mode"] == RunMode.GEOMETRY_ONLY
+    assert run.manifest["keys"]["mapped_locations"] == 3
+    assert "no financial claim" in run.manifest["stages_not_performed"]["losses"]
+
+
+def test_a_geometry_only_run_reports_unmapped_value_rather_than_holding_for_it(
+    analysis_run, partial_grid, oasis_is, api
+):
+    """The gate protects a loss. This run calculates none, so it reports instead."""
+    analysis_run.mode = RunMode.GEOMETRY_ONLY
+    analysis_run.save()
+    oasis_is(oasis_server())
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.SUCCEEDED
+    assert run.manifest["reconciliation"]["unmapped_reported_not_gated"] is True
+    assert Decimal(run.manifest["reconciliation"]["failed_tiv"]) > 0
+
+
+def test_a_technical_run_produces_research_output_whatever_the_model_says(
+    analysis_run, oasis_is, api, model_version
+):
+    """Brief section 5.2 blocks decision-use approval for a technical run."""
+    from apps.results.models import ResultSet, ResultState
+
+    model_version.is_research_prototype = False
+    model_version.save()
+    assert analysis_run.mode == RunMode.TECHNICAL
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    assert result.state == ResultState.RESEARCH
+    assert result.run_mode == RunMode.TECHNICAL
+    assert result.export_caveats()["run_mode"] == RunMode.TECHNICAL
+
+
+def test_research_output_cannot_be_approved_for_decision_use(
+    analysis_run, oasis_is, api, client_for, reviewer, project
+):
+    """Approving it would approve the reason it is research, unreviewed."""
+    from apps.projects.models import ProjectMembership, ProjectRole
+    from apps.results.models import ResultSet, ResultState
+
+    ProjectMembership.objects.create(
+        project=project, user=reviewer, role=ProjectRole.CONTRIBUTOR
+    )
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+
+    refused = client_for(reviewer).post(f"{API}/results/{result.id}/approve/")
+
+    assert refused.status_code == 409
+    assert "research output" in refused.data["detail"]
+    result.refresh_from_db()
+    assert result.state == ResultState.RESEARCH
+
+
+def test_a_decision_run_against_a_prototype_is_refused_with_what_is_outstanding(
+    api, project, published_exposure, published_model_version
+):
+    """Decision use comes last: after validation and licensing, not before."""
+    response = configure(
+        api, project, published_exposure, published_model_version,
+        mode=RunMode.DECISION,
+    )
+
+    assert response.status_code == 400
+    assert "research prototype" in str(response.data["mode"])
+    # And it says what is outstanding rather than only that something is.
+    assert "No end-to-end validation date" in str(response.data["mode"])
+
+
+def test_a_decision_run_cannot_rest_on_an_unapproved_assumption_set(
+    api, project, published_exposure, published_model_version, more_vulnerable
+):
+    published_model_version.is_research_prototype = False
+    published_model_version.save()
+
+    response = configure(
+        api, project, published_exposure, published_model_version,
+        mode=RunMode.DECISION, assumption_set=str(more_vulnerable.id),
+    )
+
+    assert response.status_code == 400
+    assert "nobody has approved" in str(response.data["mode"])
+
+
+def test_an_unlabelled_run_is_a_technical_one_rather_than_a_decision_one(
+    api, project, published_exposure, published_model_version
+):
+    """A run nobody labelled must not be able to produce a decision number."""
+    response = configure(api, project, published_exposure, published_model_version)
+
+    assert response.status_code == 201, response.data
+    analysis = AnalysisRun.objects.get(id=response.data["id"])
+    assert analysis.mode == RunMode.TECHNICAL
+    assert analysis.may_produce_decision_output is False
+
+
+def test_a_retry_claims_no_more_than_the_run_it_replaces(
+    analysis_run, oasis_is, api, analyst
+):
+    analysis_run.mode = RunMode.RESEARCH
+    analysis_run.save()
+    oasis_is(oasis_server(loss_status="RUN_ERROR"))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.FAILED
+
+    retried = api.post(f"{API}/runs/{analysis_run.run_id}/retry/")
+
+    assert retried.status_code == 201, retried.data
+    replacement = AnalysisRun.objects.get(run_id=retried.data["id"])
+    assert replacement.mode == RunMode.RESEARCH

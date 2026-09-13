@@ -33,6 +33,27 @@ class RunKind(models.TextChoices):
     ANALYSIS = "analysis", "Analysis run"
 
 
+class RunMode(models.TextChoices):
+    """What an analysis is for, and therefore what it may be used to claim.
+
+    Section 5.2 of the geocoded portfolio brief requires the mode to be
+    explicit, and requires that outputs from different modes are never mixed in
+    one comparison without a warning. It is stated on the run rather than
+    inferred from what the run happens to contain, because the claim a number
+    makes is a decision somebody takes before the calculation, not a property
+    the calculation acquires afterwards.
+
+    The default is the technical mode rather than decision use: a run nobody
+    labelled must not be capable of producing a decision number, and decision
+    use is what the brief permits last.
+    """
+
+    GEOMETRY_ONLY = "geometry_only", "Geometry only, no loss calculated"
+    TECHNICAL = "technical", "KRE-share technical loss"
+    RESEARCH = "research", "Portfolio-loss research"
+    DECISION = "decision", "Decision use"
+
+
 class Run(BaseModel):
     """The lifecycle record shared by every kind of run."""
 
@@ -378,6 +399,17 @@ class AnalysisRun(BaseModel):
         "modelregistry.ModelVersion", on_delete=models.PROTECT, related_name="analysis_runs"
     )
 
+    #: What the run is for (brief section 5.2). It decides how far the pipeline
+    #: goes and what the results may claim, so it is chosen when the run is
+    #: created and never afterwards.
+    mode = models.CharField(
+        max_length=16,
+        choices=RunMode.choices,
+        default=RunMode.TECHNICAL,
+        db_index=True,
+        help_text="What this analysis is for, and therefore what its output may claim.",
+    )
+
     perspectives = models.JSONField(
         default=list, help_text="Requested perspectives, checked against the source data."
     )
@@ -399,6 +431,30 @@ class AnalysisRun(BaseModel):
 
     def __str__(self) -> str:
         return f"analysis {self.run_id}"
+
+    @property
+    def run_mode(self) -> RunMode:
+        return RunMode(self.mode)
+
+    @property
+    def calculates_loss(self) -> bool:
+        """Whether this run submits anything to the engine at all.
+
+        A geometry-only run maps coordinates to the grid and reports which
+        risks the model can answer for. It makes no financial claim, so it
+        stops at the keys report rather than producing a loss nobody asked for.
+        """
+        return self.run_mode is not RunMode.GEOMETRY_ONLY
+
+    @property
+    def may_produce_decision_output(self) -> bool:
+        """Whether a result from this run may ever be approved for decision use.
+
+        Only the decision mode, and the brief permits that mode only once
+        scientific validation, licensing and data-quality thresholds are
+        complete -- which is why choosing it is checked when the run is made.
+        """
+        return self.run_mode is RunMode.DECISION
 
     @property
     def unmapped_tiv(self):

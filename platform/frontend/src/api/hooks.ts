@@ -51,6 +51,7 @@ import type {
   ReviewQueue,
   Run,
   RunArtifact,
+  RunMode,
   RunStageEvent,
   Session,
   User,
@@ -534,6 +535,7 @@ export function useCreateAnalysis() {
       label?: string;
       execution_profile?: string;
       assumption_set?: UUID;
+      mode?: RunMode;
     }) => api.post<AnalysisRun>("/analysis-runs/", input),
     onSuccess: () => client.invalidateQueries({ queryKey: ["runs"] }),
   });

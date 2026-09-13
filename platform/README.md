@@ -194,6 +194,15 @@ compared, with the arithmetic done on the server in `Decimal`. The invented
 Jakarta–Bandung book in `samples/` runs ground-up, insured and reinsurance to
 results against the live stack.
 
+**A run states what it is for before it runs.** The four modes of the brief's
+section 5.2 are a choice in the analysis builder: geometry only, which maps the
+book through CASS keys and stops without touching the engine; KRE-share
+technical loss; portfolio-loss research; and decision use. Only the last can
+produce a result a reviewer may approve, and it is refused at configuration
+against a research prototype or an unapproved assumption set. A run nobody
+labelled is a technical one, because a number nobody characterised must not be
+able to become a decision. A comparison that mixes two modes says so.
+
 **A portfolio arrives through the intake template.** Risks and policies are
 joined on the Policy ID stated on both sheets, value is read in three recorded
 tiers, and storeys are collected because height decides which intensity measure

@@ -154,6 +154,14 @@ def _drivers(baseline: ResultSet, candidate: ResultSet) -> list[dict[str, Any]]:
         "A different assumption set fills the same gaps differently.",
     )
     differs(
+        "run_mode",
+        "Run mode",
+        baseline.run_mode,
+        candidate.run_mode,
+        "The two runs were made for different purposes, so they do not answer "
+        "the same question and their difference is not a like-for-like one.",
+    )
+    differs(
         "valuation_date",
         "Valuation date",
         baseline.valuation_date.isoformat() if baseline.valuation_date else "",
@@ -231,12 +239,31 @@ def differences(baseline: ResultSet, candidate: ResultSet) -> dict[str, Any]:
         # list, which reads as "no cause" rather than "no cause recorded".
         "unexplained": not drivers,
         "unexplained_note": (
-            "Both results name the same model version, assumption set and "
-            "valuation date, so the difference lies in the exposure or the run "
-            "settings rather than in anything recorded here."
+            "Both results name the same model version, assumption set, run mode "
+            "and valuation date, so the difference lies in the exposure or the "
+            "run settings rather than in anything recorded here."
             if not drivers
             else ""
         ),
+        # Brief section 5.2: outputs from different modes are never mixed in one
+        # comparison without an explicit warning. A geometry-only run against a
+        # technical one, or a research number against a decision one, compares
+        # two different claims rather than two answers to one question.
+        "run_modes": {
+            "baseline": baseline.run_mode,
+            "candidate": candidate.run_mode,
+            "mixed": baseline.run_mode != candidate.run_mode,
+            "warning": (
+                ""
+                if baseline.run_mode == candidate.run_mode
+                else (
+                    "These results come from runs made for different purposes "
+                    f"({baseline.run_mode or 'unrecorded'} against "
+                    f"{candidate.run_mode or 'unrecorded'}), so the difference "
+                    "between them is not a like-for-like one."
+                )
+            ),
+        },
         "decision_use": {
             "baseline": baseline.usable_for_decisions,
             "candidate": candidate.usable_for_decisions,

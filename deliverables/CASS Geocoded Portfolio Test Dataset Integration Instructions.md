@@ -392,8 +392,8 @@ The source now reaches CASS through the CASS intake template rather than as the 
 | Repeatable import with the expected counts and no fan-out | Done; checked in `test_extract_acceptance.py` against the real workbook |
 | Visible Cohort A, B and C assignments with reasons | Done, on the Import review tab |
 | Fixed-grid mapping report for Indonesia and Nepal | Partly done: keys reports per run against the prototype grids; Cohort B sensitivity not built |
-| Geometry-only run making no financial claim | Not built |
-| KRE-share USD end-to-end run, labelled and blocked from decision use | Done against the fixture model |
+| Geometry-only run making no financial claim | Done: an explicit run mode that maps the book through CASS keys and stops before the engine |
+| KRE-share USD end-to-end run, labelled and blocked from decision use | Done against the fixture model, and the block is now the run's own mode rather than the model version's state |
 | Exact policy-level TIV reconciliation under every allocation scenario | Done |
 | Documented list of unresolved component, financial-term and taxonomy questions | Listed in section 5.1 and the tracker; unanswered |
 | Masked automated fixtures covering the structural edge cases | Done |
@@ -403,6 +403,6 @@ The source now reaches CASS through the CASS intake template rather than as the 
 | --- | --- |
 | WP1 Secure importer | Done, then superseded by the intake template |
 | WP2 Eligibility and review interface | Done |
-| WP3 Area-peril and keys test | Partly done: mapping and outside-domain reporting; Cohort B sensitivity and OpenQuake site comparison not built |
+| WP3 Area-peril and keys test | Partly done: mapping, outside-domain reporting and the geometry-only run; Cohort B sensitivity and OpenQuake site comparison not built |
 | WP4 Controlled Oasis earthquake test | Steps 1 to 8 done against the fixture model; step 9, the OpenQuake reference comparison, not built |
-| WP5 Portfolio-loss readiness | Not started |
+| WP5 Portfolio-loss readiness | Partly done: enrichment applied in a run under a named assumption set, and the run modes separate what a number may claim; section 5.1 questions unanswered |

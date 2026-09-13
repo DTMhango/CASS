@@ -120,6 +120,20 @@ OASIS_FILE_BY_ROLE: dict[str, PortfolioFileKind] = {
     "oed_reins_scope": PortfolioFileKind.REINSURANCE_SCOPE,
 }
 
+#: The stages a geometry-only run performs. It maps coordinates to the grid and
+#: reports which risks the model can answer for, and stops: brief section 5.2
+#: makes it a run that calculates no portfolio loss, so nothing is submitted to
+#: the engine and no result set is published.
+GEOMETRY_ONLY_STAGES = ("validate_exposure", "enrich", "keys", "reconcile_keys")
+
+#: The stages that reach the engine. Named rather than taken as the span from
+#: the first to the last, because the keys reconciliation sits between two of
+#: them and uses no engine at all: a geometry-only run that stops there must
+#: not ask Oasis for its version to do it.
+ENGINE_CALLING_STAGES = frozenset(
+    {"publish_oed", "generate_inputs", "validate_inputs", "smoke", "losses", "collect"}
+)
+
 #: Stages this service performs, in pipeline order.
 ENGINE_STAGES = (
     "validate_exposure",
@@ -694,7 +708,9 @@ def _publish_oed(analysis_run, engine, actor) -> dict:
     run.advance(
         "publish_oed",
         actor=actor,
-        message=f"Published {len(uploaded)} OED files to Oasis portfolio {portfolio_id}.",
+        message=(
+            f"Published {len(uploaded)} OED files to Oasis portfolio {portfolio_id}."
+        ),
         metrics={"oasis_portfolio_id": portfolio_id, "bytes_by_role": uploaded},
     )
     return {"oasis_portfolio_id": portfolio_id, "files": uploaded}
@@ -841,9 +857,15 @@ def _reconcile_keys(analysis_run, actor) -> dict:
     approval = analysis_run.exception_approval
     approved = approval is not None and approval.is_cleared
 
+    # A geometry-only run is the one that exists to find this out. It makes no
+    # financial claim, so value the model cannot map is its finding rather than
+    # a gate: holding it for an approval would ask somebody to accept an
+    # unmapped share of a loss nobody is going to calculate.
+    reports_only = not analysis_run.calculates_loss
+
     # One definition of the gate, shared with the API through the model, so a
     # screen cannot show a run as clear while the service holds it.
-    if not analysis_run.may_proceed_past_keys:
+    if not reports_only and not analysis_run.may_proceed_past_keys:
         raise RunBlocked(
             f"{failed_tiv} of {source_tiv} TIV could not be mapped to the model.",
             detail=_unmapped_detail(summary),
@@ -856,6 +878,11 @@ def _reconcile_keys(analysis_run, actor) -> dict:
             f"Keys reconcile: {summary.get('mapped_tiv')} mapped, "
             f"{not_at_risk_tiv} not at risk, {failed_tiv} failed."
             + (" Proceeding under an approved run exception." if approved else "")
+            + (
+                " Reported rather than held: this run calculates no loss."
+                if reports_only and failed_tiv
+                else ""
+            )
         ),
         metrics={
             "reconciled": True,
@@ -868,6 +895,7 @@ def _reconcile_keys(analysis_run, actor) -> dict:
         "failed_tiv": str(failed_tiv),
         "not_at_risk_tiv": str(not_at_risk_tiv),
         "approved_exception": str(approval.id) if approved else None,
+        "unmapped_reported_not_gated": bool(reports_only and failed_tiv),
     }
 
 
@@ -1322,13 +1350,18 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
                 "label": label,
                 # Research output stays research whatever a reviewer does: a
                 # prototype's number must not become a decision number by
-                # approval alone.
+                # approval alone. Nor may a number from a run nobody made for
+                # decisions: brief section 5.2 blocks decision-use approval for
+                # the technical and research modes, and that is a property of
+                # what the run was for rather than of how it went.
                 "state": (
                     ResultState.RESEARCH
                     if model_version.is_research_prototype
                     or _assumption_is_unapproved(analysis_run)
+                    or not analysis_run.may_produce_decision_output
                     else ResultState.DRAFT
                 ),
+                "run_mode": analysis_run.mode,
                 "average_annual_loss": metrics.average_annual_loss,
                 "standard_deviation": metrics.standard_deviation,
                 "currency": analysis_run.run_currency
@@ -1712,13 +1745,23 @@ def execute(
     )
 
     pipeline = run.pipeline
-    start = pipeline.index_of(resume_at) if resume_at else -1
 
-    #: The stages that use the engine. A run resumed at the review gate uses it
-    #: no longer, so it is not asked about its version or its package again: a
-    #: package rebuilt since the losses ran would otherwise hold a finished run.
-    first_engine_stage = pipeline.index_of("publish_oed")
-    last_engine_stage = pipeline.index_of("losses")
+    #: Brief section 5.2: a geometry-only run maps the book to the model and
+    #: calculates no portfolio loss, so it performs the stages up to the keys
+    #: reconciliation and stops. The rest are recorded as not performed with
+    #: the reason, because a manifest that simply lacked them would read as a
+    #: run that failed to do them.
+    manifest["mode"] = analysis_run.mode
+    if not analysis_run.calculates_loss:
+        steps = tuple(item for item in steps if item[0] in GEOMETRY_ONLY_STAGES)
+        for stage_key in pipeline.keys():
+            if stage_key not in GEOMETRY_ONLY_STAGES:
+                not_performed[stage_key] = (
+                    "Geometry-only run: it maps exposure to the model and makes no "
+                    "financial claim, so nothing is submitted to the engine."
+                )
+
+    start = pipeline.index_of(resume_at) if resume_at else -1
 
     stage = ENGINE_STAGES[0]
     checked_engine = False
@@ -1731,7 +1774,10 @@ def execute(
             # that raised rather than the last one that finished.
             stage = next_stage
 
-            if not checked_engine and first_engine_stage <= position <= last_engine_stage:
+            # A run resumed at the review gate reaches no engine stage, so it is
+            # not asked about its version or its package again: a package
+            # rebuilt since the losses ran would otherwise hold a finished run.
+            if not checked_engine and next_stage in ENGINE_CALLING_STAGES:
                 # Before anything is submitted: section 18 refuses an untested
                 # engine rather than producing a result nobody can defend, and a
                 # worker serving another version's package would produce one.
@@ -1763,7 +1809,10 @@ def execute(
 
     run.manifest = manifest
     run.save(update_fields=["manifest", "updated_at"])
-    run.transition(RunState.SUCCEEDED, actor=actor, stage="review")
+    # The stage a run finishes at is the last one it performed. A geometry-only
+    # run that claimed to finish at ``review`` would claim results were
+    # reviewed, and it published none.
+    run.transition(RunState.SUCCEEDED, actor=actor, stage=steps[-1][0])
 
     audit.record(
         action=AuditAction.SUBMIT,
