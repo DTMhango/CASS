@@ -1416,6 +1416,234 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/conversion-tolerances/:
+    get:
+      operationId: api_v1_conversion_tolerances_list
+      description: How far a conversion's acceptance measurements may be off.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedConversionTolerancesList'
+          description: ''
+    post:
+      operationId: api_v1_conversion_tolerances_create
+      description: How far a conversion's acceptance measurements may be off.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionTolerances'
+          description: ''
+  /api/v1/conversion-tolerances/{id}/:
+    get:
+      operationId: api_v1_conversion_tolerances_retrieve
+      description: How far a conversion's acceptance measurements may be off.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion tolerances.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionTolerances'
+          description: ''
+    put:
+      operationId: api_v1_conversion_tolerances_update
+      description: How far a conversion's acceptance measurements may be off.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion tolerances.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionTolerances'
+          description: ''
+    patch:
+      operationId: api_v1_conversion_tolerances_partial_update
+      description: How far a conversion's acceptance measurements may be off.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion tolerances.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedConversionTolerancesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedConversionTolerancesRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedConversionTolerancesRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionTolerances'
+          description: ''
+    delete:
+      operationId: api_v1_conversion_tolerances_destroy
+      description: How far a conversion's acceptance measurements may be off.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion tolerances.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/conversion-tolerances/{id}/approve/:
+    post:
+      operationId: api_v1_conversion_tolerances_approve_create
+      description: How far a conversion's acceptance measurements may be off.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this conversion tolerances.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversionTolerancesRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionTolerances'
+          description: ''
   /api/v1/currency-rates/:
     get:
       operationId: api_v1_currency_rates_list
@@ -2739,6 +2967,238 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/hazard-benchmarks/:
+    get:
+      operationId: api_v1_hazard_benchmarks_list
+      description: Published hazard curves a converted set is checked against.
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedHazardBenchmarkList'
+          description: ''
+    post:
+      operationId: api_v1_hazard_benchmarks_create
+      description: Published hazard curves a converted set is checked against.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardBenchmark'
+          description: ''
+  /api/v1/hazard-benchmarks/{id}/:
+    get:
+      operationId: api_v1_hazard_benchmarks_retrieve
+      description: Published hazard curves a converted set is checked against.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard benchmark.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardBenchmark'
+          description: ''
+    put:
+      operationId: api_v1_hazard_benchmarks_update
+      description: Published hazard curves a converted set is checked against.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard benchmark.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardBenchmark'
+          description: ''
+    patch:
+      operationId: api_v1_hazard_benchmarks_partial_update
+      description: Published hazard curves a converted set is checked against.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard benchmark.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedHazardBenchmarkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedHazardBenchmarkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedHazardBenchmarkRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardBenchmark'
+          description: ''
+    delete:
+      operationId: api_v1_hazard_benchmarks_destroy
+      description: Published hazard curves a converted set is checked against.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard benchmark.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/hazard-benchmarks/{id}/approve/:
+    post:
+      operationId: api_v1_hazard_benchmarks_approve_create
+      description: Published hazard curves a converted set is checked against.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard benchmark.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HazardBenchmarkRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardBenchmark'
+          description: ''
   /api/v1/hazard-models/:
     get:
       operationId: api_v1_hazard_models_list
@@ -3256,6 +3716,36 @@ paths:
       operationId: api_v1_hazard_sets_retrieve
       description: Registered hazard sets, which a model version is pointed at to
         produce loss.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardSet'
+          description: ''
+  /api/v1/hazard-sets/{id}/benchmark/:
+    post:
+      operationId: api_v1_hazard_sets_benchmark_create
+      description: |-
+        Compare this hazard against the approved benchmark for its country.
+
+        Section 7's hazard gate. The comparison is against the footprint the
+        engine will be given rather than against the engine's own hazard
+        curves, because a conversion that lost shaking on the way into the bins
+        would otherwise check out against itself.
       parameters:
       - in: path
         name: id
@@ -6010,6 +6500,66 @@ components:
           nullable: true
       required:
       - run
+    ConversionTolerances:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        label:
+          type: string
+          maxLength: 200
+        source:
+          type: string
+          description: The study, standard or judgement these tolerances come from.
+          maxLength: 300
+        values:
+          description: Tolerance by check name, as the converter's QA module names
+            them.
+        publication_state:
+          allOf:
+          - $ref: '#/components/schemas/PublicationStateEnum'
+          readOnly: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        notes:
+          type: string
+        is_approved:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approved_at
+      - created_at
+      - id
+      - is_approved
+      - label
+      - publication_state
+    ConversionTolerancesRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        source:
+          type: string
+          description: The study, standard or judgement these tolerances come from.
+          maxLength: 300
+        values:
+          description: Tolerance by check name, as the converter's QA module names
+            them.
+        notes:
+          type: string
+      required:
+      - label
     CurrencyRate:
       type: object
       properties:
@@ -6473,6 +7023,114 @@ components:
         * `model_release` - Model release
         * `platform_release` - Platform release
         * `run_exception` - Permitted run exception
+    HazardBenchmark:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        country_code:
+          type: string
+          maxLength: 2
+        label:
+          type: string
+          maxLength: 200
+        source:
+          type: string
+          description: The published study these curves come from, with its edition.
+          maxLength: 300
+        reference:
+          type: string
+          description: Where a reviewer can check it.
+          maxLength: 300
+        grid:
+          type: string
+          format: uuid
+          nullable: true
+          description: The grid whose cells the points are stated against.
+        points:
+          description: Each point as areaperil_id, imt, return_period and intensity,
+            in the units the measure is stated in.
+        tolerance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,4})?$
+          nullable: true
+          description: Permitted proportional difference. Null until somebody has
+            decided one, and a comparison without it decides nothing.
+        publication_state:
+          allOf:
+          - $ref: '#/components/schemas/PublicationStateEnum'
+          readOnly: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        notes:
+          type: string
+        is_approved:
+          type: boolean
+          readOnly: true
+        point_count:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approved_at
+      - country_code
+      - created_at
+      - id
+      - is_approved
+      - label
+      - point_count
+      - publication_state
+      - source
+    HazardBenchmarkRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        source:
+          type: string
+          minLength: 1
+          description: The published study these curves come from, with its edition.
+          maxLength: 300
+        reference:
+          type: string
+          description: Where a reviewer can check it.
+          maxLength: 300
+        grid:
+          type: string
+          format: uuid
+          nullable: true
+          description: The grid whose cells the points are stated against.
+        points:
+          description: Each point as areaperil_id, imt, return_period and intensity,
+            in the units the measure is stated in.
+        tolerance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,4})?$
+          nullable: true
+          description: Permitted proportional difference. Null until somebody has
+            decided one, and a comparison without it decides nothing.
+        notes:
+          type: string
+      required:
+      - country_code
+      - label
+      - source
     HazardModel:
       type: object
       description: A registered PSHA package, and what running it would take.
@@ -7315,6 +7973,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ConversionRun'
+    PaginatedConversionTolerancesList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversionTolerances'
     PaginatedCurrencyRateList:
       type: object
       required:
@@ -7407,6 +8088,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExposureVersion'
+    PaginatedHazardBenchmarkList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardBenchmark'
     PaginatedHazardModelList:
       type: object
       required:
@@ -7880,6 +8584,22 @@ components:
         frequency_preserved:
           type: boolean
           nullable: true
+    PatchedConversionTolerancesRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        source:
+          type: string
+          description: The study, standard or judgement these tolerances come from.
+          maxLength: 300
+        values:
+          description: Tolerance by check name, as the converter's QA module names
+            them.
+        notes:
+          type: string
     PatchedCurrencyRateRequest:
       type: object
       properties:
@@ -7934,6 +8654,43 @@ components:
         run_currency:
           type: string
           maxLength: 3
+    PatchedHazardBenchmarkRequest:
+      type: object
+      properties:
+        country_code:
+          type: string
+          minLength: 1
+          maxLength: 2
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        source:
+          type: string
+          minLength: 1
+          description: The published study these curves come from, with its edition.
+          maxLength: 300
+        reference:
+          type: string
+          description: Where a reviewer can check it.
+          maxLength: 300
+        grid:
+          type: string
+          format: uuid
+          nullable: true
+          description: The grid whose cells the points are stated against.
+        points:
+          description: Each point as areaperil_id, imt, return_period and intensity,
+            in the units the measure is stated in.
+        tolerance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,4})?$
+          nullable: true
+          description: Permitted proportional difference. Null until somebody has
+            decided one, and a comparison without it decides nothing.
+        notes:
+          type: string
     PatchedHazardRunRequest:
       type: object
       properties:

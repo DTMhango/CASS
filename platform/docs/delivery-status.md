@@ -10,7 +10,7 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,749 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,780 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   104 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -55,8 +55,8 @@ updated afterwards is a tracker somebody has to reconcile.
 | --- | --- | --- | --- |
 | M1 Foundation | Met | Sign in, projects, OED attach, validation, preview, publication, background runs | — |
 | M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
-| M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells | Benchmark gate; full-country run; realisation weighting; Nepal source model |
-| M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices | QA gate; OpenQuake reference comparison |
+| M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; full-country run; realisation weighting; Nepal source model |
+| M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances; OpenQuake reference comparison |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
 | M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table and the financial structure workspace | Maps, geographic summaries, scenario ranges |
 | M7 Production | Not met | CI builds and scans the CASS images | Backup and restore drill, and the rest of sections 10 and 11 |
@@ -100,14 +100,14 @@ decision number.
 | Stage | Status |
 | --- | --- |
 | `prepare`, `validate_settings`, `submit`, `monitor`, `export` | Done |
-| `benchmark` | Gate stands open: no approved benchmark curves, and no comparison machinery |
+| `benchmark` | Machinery built: a hazard curve is derived from the footprint the engine will be given, compared point by point against a registered benchmark, and reported with ratios. The gate stands open because no benchmark curves are approved |
 
 ### Conversion
 
 | Stage | Status |
 | --- | --- |
 | `manifest`, `events`, `occurrence`, `footprint`, `vulnerability`, `package` | Done, from a registered hazard set. Ground motion is read either from the engine's CSV exports or, for a national run, from its HDF5 datastore a slice at a time under a stated row budget |
-| `qa` | Gate stands open: no approved acceptance tolerances, and no report machinery |
+| `qa` | Machinery built: probability sums, discarded ground motion above the top bin and events with no footprint are measured when the hazard is converted and judged at the gate against whatever tolerances are approved then. The gate stands open because none are approved |
 
 ## Screens (plan section 3)
 
@@ -158,7 +158,7 @@ decision number.
 | 5 | Financial structure workspace | §3, M5 | Partly done: accounts and layers, contracts, inuring order, scope preview and reconciliation are read from the published portfolio and checked. Building a structure on the platform, rather than importing one, is not built |
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Done |
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Done |
-| 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Not started |
+| 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Done as machinery. Both gates still stand open, because no benchmark curves and no tolerances have been approved — which is a decision, not code |
 | 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Not started |
 | 10 | Cohort B geocoding sensitivity | WP3 | Not started |
 | 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Not started |
@@ -190,7 +190,9 @@ machinery around one, the decision still has to be taken.
 - A Nepal seismic source model, a denser Vs30 source, and the licensed GEM
   ~1 km exposure.
 - Approved hazard benchmark curves and converter QA tolerances, with named
-  reviewers.
+  reviewers. The machinery now waits on them: register the curves and the
+  tolerances, have somebody who did not register them approve them, and both
+  gates begin deciding.
 - The brief's section 5.1 questions: coverage-component split, replacement cost
   or indemnity value, deductibles, limits and attachments, shared or scheduled
   multi-location limits, renewals.

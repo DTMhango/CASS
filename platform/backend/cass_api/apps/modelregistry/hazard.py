@@ -35,11 +35,12 @@ from typing import Any
 
 from django.db import transaction
 
-from cass_converter import hazard_build, pilot_bins
+from cass_converter import hazard_build, pilot_bins, qa
 from cass_converter.hazard_build import HazardBuildError
 from cass_converter.hazard_build import HazardSet as ConvertedHazard
 from cass_converter.hazard_job import HazardJob
 
+from . import quality
 from .assets import attach_hazard_asset
 from .models import (
     INTERNAL_USE_LICENCE,
@@ -177,7 +178,7 @@ def register(
             "footprint_row_count": len(converted.footprint),
             "imts": list(converted.imts),
             "samples_above_range": converted.metrics.samples_above_range,
-            "conversion_report": hazard_build.hazard_report(converted),
+            "conversion_report": _report_with_qa(converted),
             "publication_state": PublicationState.DRAFT,
             "notes": _notes(converted, source),
             "updated_by": actor,
@@ -192,9 +193,7 @@ def register(
     attach_hazard_asset(
         hazard_set,
         "conversion_report.json",
-        json.dumps(
-            hazard_build.hazard_report(converted), indent=2, sort_keys=True
-        ).encode("utf-8"),
+        json.dumps(_report_with_qa(converted), indent=2, sort_keys=True).encode("utf-8"),
         actor=actor,
     )
     return hazard_set, converted
@@ -273,3 +272,19 @@ def report(hazard_set: HazardSet) -> dict[str, Any]:
         "clips_the_hazard": hazard_set.clips_the_hazard,
         "publication_blockers": hazard_set.publication_blockers(),
     }
+
+
+def _report_with_qa(converted) -> dict:
+    """The conversion report, with the section 7 acceptance measurements in it.
+
+    Measured here because this is where the conversion happens and the tables
+    are in hand. Whether the numbers are acceptable is decided at the gate,
+    against whatever tolerances are approved then -- which may be none, and
+    then the report says so rather than passing itself.
+    """
+    report = dict(hazard_build.hazard_report(converted))
+    report["qa"] = qa.measure(
+        converted,
+        tolerances=quality.tolerance_values(quality.approved_tolerances()),
+    )
+    return report

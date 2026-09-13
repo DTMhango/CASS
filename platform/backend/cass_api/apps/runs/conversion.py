@@ -26,6 +26,7 @@ from apps.audit import services as audit
 from apps.audit.models import Approval, AuditAction
 from apps.common.storage import bucket, get_store
 from apps.modelregistry import package as packaging
+from apps.modelregistry import quality
 from cass_converter.oasis_package import PackageError
 from cass_converter.policy import ConversionPolicy, EventIdentity, IMTRepresentation
 from cass_core.artifacts import AccessPolicy, RetentionClass
@@ -144,14 +145,39 @@ def execute(conversion_run: ConversionRun, *, actor=None) -> ConversionRun:
 
     conversion_run.frequency_preserved = True
     conversion_run.target_checksum = artifact.checksum
+
+    # Section 7's QA gate. The acceptance numbers were measured when the hazard
+    # was converted; what happens here is the judgement, against whatever
+    # tolerances are approved now. Where none are, the gate stands open with
+    # the numbers in front of a reviewer rather than passing itself.
+    converted_hazard = conversion_run.model_version.hazard_set
+    tolerances = quality.approved_tolerances()
+    decision = quality.decide(
+        (converted_hazard.conversion_report or {}).get("qa") if converted_hazard else None,
+        quality.tolerance_values(tolerances),
+    )
     conversion_run.qa_report = {
-        "not_performed": UNPERFORMED_STAGES["qa"],
+        **decision,
+        "tolerance_set": str(tolerances) if tolerances else "",
         "measures": built["measures"],
         "events": built["events"],
         "footprint_rows": built["footprint"]["rows"],
     }
+    if decision.get("decided"):
+        conversion_run.qa_state = "passed" if decision.get("passed") else "failed"
+        manifest["stages_not_performed"] = {
+            key: value
+            for key, value in (manifest.get("stages_not_performed") or {}).items()
+            if key != "qa"
+        }
     conversion_run.save(
-        update_fields=["frequency_preserved", "target_checksum", "qa_report", "updated_at"]
+        update_fields=[
+            "frequency_preserved",
+            "target_checksum",
+            "qa_report",
+            "qa_state",
+            "updated_at",
+        ]
     )
 
     manifest["package"] = {

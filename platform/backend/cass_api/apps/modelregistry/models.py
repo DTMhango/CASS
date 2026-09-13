@@ -473,6 +473,129 @@ class HazardSet(BaseModel, FreezableModel):
         return problems
 
 
+class HazardBenchmark(BaseModel, FreezableModel):
+    """Published hazard somebody has approved as the thing to be checked against.
+
+    Section 7 makes the hazard benchmark a gate, and a gate needs a reference
+    that is not the thing being tested. These points come from a published
+    study -- a national hazard map, a GEM mosaic curve -- and are recorded with
+    their source so a comparison can be read back to it.
+
+    The tolerance lives here rather than in the comparison for the same reason.
+    How far the converted hazard may sit from a published curve before somebody
+    has to look at it is a scientific judgement about that reference, not a
+    constant; and until somebody makes it the comparison reports ratios and
+    decides nothing.
+    """
+
+    country_code = models.CharField(max_length=2, db_index=True)
+    label = models.CharField(max_length=200)
+    source = models.CharField(
+        max_length=300,
+        help_text="The published study these curves come from, with its edition.",
+    )
+    reference = models.CharField(
+        max_length=300, blank=True, help_text="Where a reviewer can check it."
+    )
+    grid = models.ForeignKey(
+        AreaPerilGrid,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="benchmarks",
+        help_text="The grid whose cells the points are stated against.",
+    )
+    points = models.JSONField(
+        default=list,
+        help_text=(
+            "Each point as areaperil_id, imt, return_period and intensity, in the "
+            "units the measure is stated in."
+        ),
+    )
+    tolerance = models.DecimalField(
+        max_digits=6,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text=(
+            "Permitted proportional difference. Null until somebody has decided "
+            "one, and a comparison without it decides nothing."
+        ),
+    )
+
+    publication_state = models.CharField(
+        max_length=16, choices=PublicationState.choices, default=PublicationState.DRAFT
+    )
+    approved_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="hazard_benchmarks_approved",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["country_code", "-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.country_code} benchmark: {self.label}"
+
+    @property
+    def is_approved(self) -> bool:
+        return self.publication_state in (
+            PublicationState.APPROVED,
+            PublicationState.PUBLISHED,
+        )
+
+    @property
+    def point_count(self) -> int:
+        return len(self.points or [])
+
+
+class ConversionTolerances(BaseModel, FreezableModel):
+    """What a conversion is allowed to measure before somebody has to look.
+
+    Section 7 requires acceptance tests with recorded tolerances. The tests are
+    in the converter; what is approved here is how much each may be off by.
+    A conversion measured against no approved set reports its numbers and
+    leaves the gate open, which is the honest state and the current one.
+    """
+
+    label = models.CharField(max_length=200)
+    source = models.CharField(
+        max_length=300,
+        blank=True,
+        help_text="The study, standard or judgement these tolerances come from.",
+    )
+    values = models.JSONField(
+        default=dict,
+        help_text="Tolerance by check name, as the converter's QA module names them.",
+    )
+
+    publication_state = models.CharField(
+        max_length=16, choices=PublicationState.choices, default=PublicationState.DRAFT
+    )
+    approved_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="conversion_tolerances_approved",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name_plural = "conversion tolerances"
+
+    def __str__(self) -> str:
+        return self.label
+
+    @property
+    def is_approved(self) -> bool:
+        return self.publication_state in (
+            PublicationState.APPROVED,
+            PublicationState.PUBLISHED,
+        )
+
+
 class ModelVersion(BaseModel, FreezableModel):
     """A published calculation capability for one country and peril."""
 

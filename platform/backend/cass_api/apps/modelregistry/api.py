@@ -19,15 +19,17 @@ from rest_framework.response import Response
 
 from apps.audit import services as audit
 from apps.audit.models import AuditAction
-from apps.common.permissions import MayPublishModels
+from apps.common.permissions import MayApproveGates, MayPublishModels
 from apps.modelregistry.assets import ModelAssetError, load_grid
 from apps.runs.models import HazardRun, Run, RunKind
 
 from . import hazard as hazard_registry
-from . import hazard_models
+from . import hazard_models, quality
 from .models import (
     AreaPerilGrid,
     AssumptionSet,
+    ConversionTolerances,
+    HazardBenchmark,
     HazardJobSpec,
     HazardModel,
     HazardSet,
@@ -455,6 +457,177 @@ class HazardSetViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = HazardSetSerializer
     permission_classes = [MayPublishModels]
     filterset_fields = ["country_code", "grid", "publication_state"]
+
+    @action(detail=True, methods=["post"])
+    def benchmark(self, request, pk=None, version=None):
+        """Compare this hazard against the approved benchmark for its country.
+
+        Section 7's hazard gate. The comparison is against the footprint the
+        engine will be given rather than against the engine's own hazard
+        curves, because a conversion that lost shaking on the way into the bins
+        would otherwise check out against itself.
+        """
+        hazard_set = self.get_object()
+        try:
+            report = quality.record_benchmark(hazard_set, actor=request.user)
+        except quality.QualityGateError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        if report.get("compared"):
+            audit.record(
+                action=AuditAction.UPDATE,
+                subject_type="hazard_set",
+                subject_id=hazard_set.id,
+                actor=request.user,
+                subject_label=str(hazard_set),
+                after={"benchmark": report.get("passed")},
+                request=request,
+            )
+        return Response(report)
+
+
+class HazardBenchmarkSerializer(serializers.ModelSerializer):
+    is_approved = serializers.BooleanField(read_only=True)
+    point_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = HazardBenchmark
+        fields = [
+            "id", "country_code", "label", "source", "reference", "grid", "points",
+            "tolerance", "publication_state", "approved_at", "notes", "is_approved",
+            "point_count", "created_at",
+        ]
+        read_only_fields = [
+            "id", "publication_state", "approved_at", "is_approved", "point_count",
+            "created_at",
+        ]
+
+    def validate_points(self, value):
+        """Every point must state a cell, a measure, a period and an intensity."""
+        if not value:
+            raise serializers.ValidationError(
+                "A benchmark with no points compares nothing."
+            )
+        wanted = {"areaperil_id", "imt", "return_period", "intensity"}
+        for position, item in enumerate(value, start=1):
+            if not isinstance(item, dict) or not wanted <= set(item):
+                raise serializers.ValidationError(
+                    f"Point {position} must state {', '.join(sorted(wanted))}."
+                )
+            if float(item["return_period"]) <= 0 or float(item["intensity"]) <= 0:
+                raise serializers.ValidationError(
+                    f"Point {position} states a return period or intensity that is "
+                    "not positive, which no published curve does."
+                )
+        return value
+
+
+class ConversionTolerancesSerializer(serializers.ModelSerializer):
+    is_approved = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = ConversionTolerances
+        fields = [
+            "id", "label", "source", "values", "publication_state", "approved_at",
+            "notes", "is_approved", "created_at",
+        ]
+        read_only_fields = [
+            "id", "publication_state", "approved_at", "is_approved", "created_at",
+        ]
+
+    def validate_values(self, value):
+        """Refuse a tolerance for a check the converter does not measure.
+
+        An approved tolerance nobody checks is worse than none: it reads as
+        covered.
+        """
+        from cass_converter.qa import TOLERANCE_KEYS
+
+        unknown = sorted(set(value or {}) - set(TOLERANCE_KEYS))
+        if unknown:
+            raise serializers.ValidationError(
+                f"{', '.join(unknown)} is not measured by the conversion. Known: "
+                + ", ".join(sorted(TOLERANCE_KEYS))
+                + "."
+            )
+        if not value:
+            raise serializers.ValidationError(
+                "A tolerance set that states nothing decides nothing."
+            )
+        return value
+
+
+class _ApprovableRegistry(viewsets.ModelViewSet):
+    """A governed reference somebody other than its author approves."""
+
+    permission_classes = [MayPublishModels]
+
+    def get_permissions(self):
+        """Registering is a modeller's act; approving is a reviewer's.
+
+        The same split section 10 applies to every other gate. One permission
+        for both would mean either that a reviewer could not approve a
+        reference or that whoever wrote it could.
+        """
+        if self.action == "approve":
+            return [MayApproveGates()]
+        return super().get_permissions()
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, updated_by=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None, version=None):
+        record = self.get_object()
+        if not request.user.may_approve_gates:
+            return Response(
+                {"detail": "Approving a scientific reference requires the reviewer role."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if record.created_by_id == request.user.id:
+            return Response(
+                {
+                    "detail": (
+                        "You registered this, so you may not also approve it. "
+                        "Independent challenge is the point of the approval."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        record.publication_state = PublicationState.APPROVED
+        record.approved_by = request.user
+        record.approved_at = timezone.now()
+        record.updated_by = request.user
+        record.save()
+        record.freeze()
+
+        audit.record(
+            action=AuditAction.APPROVE,
+            subject_type=record._meta.model_name,
+            subject_id=record.id,
+            actor=request.user,
+            subject_label=str(record),
+            after={"publication_state": record.publication_state},
+            request=request,
+        )
+        return Response(self.get_serializer(record).data)
+
+
+class HazardBenchmarkViewSet(_ApprovableRegistry):
+    """Published hazard curves a converted set is checked against."""
+
+    queryset = HazardBenchmark.objects.all()
+    serializer_class = HazardBenchmarkSerializer
+    filterset_fields = ["country_code", "publication_state"]
+
+
+class ConversionTolerancesViewSet(_ApprovableRegistry):
+    """How far a conversion's acceptance measurements may be off."""
+
+    queryset = ConversionTolerances.objects.all()
+    serializer_class = ConversionTolerancesSerializer
+    filterset_fields = ["publication_state"]
 
 
 class HazardJobSpecSerializer(serializers.ModelSerializer):
