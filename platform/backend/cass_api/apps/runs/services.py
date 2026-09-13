@@ -74,6 +74,7 @@ import csv
 import io
 import json
 import pathlib
+import time
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -109,6 +110,7 @@ from cass_oed.currency import ConversionRate, CurrencyError, convert_portfolio
 from cass_oed.perspectives import Perspective, available_perspectives
 from cass_oed.validation import validate as validate_portfolio
 
+from . import admission
 from .models import AnalysisRun
 
 #: Which Oasis portfolio endpoint each CASS artifact role belongs to. The order
@@ -1838,6 +1840,15 @@ def execute(
     run = analysis_run.run
     engine = adapter if adapter is not None else oasis_adapter()
 
+    # Section 11's declared envelope. The profile's limit becomes the engine
+    # polls' timeout, so a calculation that hangs is abandoned rather than
+    # holding a worker for ever, and it is checked between stages so a run that
+    # creeps past it stops at a boundary with a reason rather than inside one.
+    allowed = admission.time_limit(run)
+    if timeout is None:
+        timeout = allowed
+    deadline = time.monotonic() + allowed if allowed else None
+
     #: Where a resumed run picks up. A run blocked at a gate has already done
     #: everything before it, and redoing that would republish the OED and leave
     #: an orphan portfolio on the engine -- and ``advance`` would refuse the
@@ -1941,6 +1952,14 @@ def execute(
             # Carried out of the loop so the failure handler can name the stage
             # that raised rather than the last one that finished.
             stage = next_stage
+
+            if deadline is not None and time.monotonic() > deadline:
+                raise AnalysisExecutionError(
+                    f"This run has used the {run.execution_profile} profile's whole "
+                    f"time limit of {int(allowed)} seconds and stopped before "
+                    f"{next_stage}. Run it on a profile that allows longer, or "
+                    "reduce what it is asked to do."
+                )
 
             # A run resumed at the review gate reaches no engine stage, so it is
             # not asked about its version or its package again: a package

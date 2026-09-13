@@ -2360,3 +2360,55 @@ def test_a_result_with_no_event_table_says_so_rather_than_showing_nothing(
 
     assert missing.status_code == 404
     assert "no moment event loss table" in missing.data["detail"]
+
+
+# -- the resource envelope (section 11) --------------------------------------
+
+def test_submitting_into_a_full_profile_is_refused_with_what_is_running(
+    api, analysis_run, analyst, settings
+):
+    """Admitting past the declared concurrency fails both runs, later and worse."""
+    settings.CASS_EXECUTION_PROFILES = {
+        analysis_run.run.execution_profile: {
+            "cpu": 1,
+            "memory_gb": 2,
+            "timeout_seconds": 600,
+            "max_concurrent": 1,
+        }
+    }
+    Run.objects.create(
+        kind=RunKind.ANALYSIS,
+        project=analysis_run.run.project,
+        execution_profile=analysis_run.run.execution_profile,
+        state=RunState.RUNNING,
+        created_by=analyst,
+    )
+
+    refused = api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    assert refused.status_code == 409
+    assert "already active" in refused.data["detail"]
+    assert refused.data["running"] == 1
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.DRAFT
+
+
+def test_a_run_that_uses_its_whole_time_limit_stops_at_a_stage_boundary(
+    analysis_run, analyst, settings
+):
+    """Section 11: a declared envelope, not an inherited maximum."""
+    settings.CASS_EXECUTION_PROFILES = {
+        analysis_run.run.execution_profile: {
+            "cpu": 1,
+            "memory_gb": 2,
+            # Already spent by the time the first stage is reached.
+            "timeout_seconds": 1e-09,
+            "max_concurrent": 4,
+        }
+    }
+
+    with pytest.raises(AnalysisExecutionError, match="whole time limit"):
+        run_it(analysis_run, oasis_server(), actor=analyst)
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.FAILED
+    assert "time limit" in run.failure_summary

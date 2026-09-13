@@ -10,10 +10,10 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,780 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,786 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
-  104 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  105 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -117,7 +117,7 @@ decision number.
 | Model catalogue | Built, Models tab | — |
 | Exposure workspace | Built, Exposure tab: intake import, OED attach, validation, row correction, publication | Assumption scenarios; reported-versus-inferred display across attributes |
 | Financial structure workspace | Built, Exposure tab: accounts and layers, contracts in inuring order, scope preview, reconciliation, and which contracts the engine will not apply | Building or editing a structure on the platform; guided contract forms |
-| Analysis builder | Built, including the assumption set and the run mode | Output selection |
+| Analysis builder | Built, including the assumption set, the run mode and what each resource profile has room for | Output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
 | Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, caveats, approval, export, comparison | Maps, geographic summaries, scenario ranges |
 | Model build workspace | Built, Hazard and Build tabs | Benchmark and QA evidence views |
@@ -162,7 +162,7 @@ decision number.
 | 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Not started |
 | 10 | Cohort B geocoding sensitivity | WP3 | Not started |
 | 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Not started |
-| 12 | Execution profiles enforced: time limits and admission control | §11 | Not started |
+| 12 | Execution profiles enforced: time limits and admission control | §11 | Done |
 | 13 | Keys and converter HTTP services | §4 | Not started |
 | 14 | Artifact retention expiry | §5 | Not started |
 | 15 | Administration: users and roles, queues, storage, retention, support bundle | §3, §4 | Not started |

@@ -26,7 +26,7 @@ from apps.modelregistry.models import PublicationState
 from apps.projects.models import Project
 from cass_core.runs import RunState, describe
 
-from . import services
+from . import admission, services
 from .models import (
     AnalysisRun,
     ConversionRun,
@@ -721,6 +721,17 @@ class AnalysisRunViewSet(viewsets.ModelViewSet):
                         "immutable input."
                     ),
                 },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Section 11: a declared envelope, enforced. A run admitted beyond its
+        # profile's concurrency is one that fails on memory later, taking the
+        # runs it was admitted beside with it.
+        try:
+            admission.admit(run)
+        except admission.AdmissionRefused as exc:
+            return Response(
+                {"detail": str(exc), "profile": exc.profile, "running": exc.running},
                 status=status.HTTP_409_CONFLICT,
             )
 

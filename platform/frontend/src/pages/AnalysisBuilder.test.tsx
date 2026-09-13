@@ -93,6 +93,18 @@ function routeFor(url: string): unknown {
       execution_profiles: {
         standard: { cpu: 2, memory_gb: 8, timeout_seconds: 7200, max_concurrent: 2 },
       },
+      profile_capacity: [
+        {
+          profile: "standard",
+          cpu: 2,
+          memory_gb: 8,
+          timeout_seconds: 7200,
+          max_concurrent: 2,
+          running: 2,
+          available: 0,
+          is_full: true,
+        },
+      ],
       default_execution_profile: "standard",
       artifact_backend: "filesystem",
       engines: {},
@@ -194,6 +206,18 @@ describe("AnalysisBuilder", () => {
     await waitFor(() => expect(posted.length).toBeGreaterThan(0));
     const configured = posted.find((item) => item.url.includes("/analysis-runs/"));
     expect((configured?.body as { mode: string }).mode).toBe("geometry_only");
+  });
+
+  it("says a resource profile is full before an analyst waits on it", async () => {
+    renderScreen();
+
+    const profiles = await screen.findByLabelText(/Resource profile/);
+
+    await waitFor(() =>
+      expect(within(profiles).getByRole("option").textContent).toContain(
+        "full, 2 running",
+      ),
+    );
   });
 
   it("defaults to the technical mode rather than decision use", async () => {

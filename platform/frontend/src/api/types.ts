@@ -368,6 +368,18 @@ export interface EventLossPage {
   results: EventLoss[];
 }
 
+/** What one execution profile declares, and what is using it now. */
+export interface ProfileCapacity {
+  profile: string;
+  cpu: number;
+  memory_gb: number;
+  timeout_seconds: number;
+  max_concurrent: number;
+  running: number;
+  available: number;
+  is_full: boolean;
+}
+
 export interface PlatformInfo {
   api_version: string;
   oed_schema_version: string;
@@ -376,6 +388,8 @@ export interface PlatformInfo {
     string,
     { cpu: number; memory_gb: number; timeout_seconds: number; max_concurrent: number }
   >;
+  /** Section 11's admission control: what each profile has room for right now. */
+  profile_capacity?: ProfileCapacity[];
   default_execution_profile: string;
   artifact_backend: string;
   engines: Record<string, string>;

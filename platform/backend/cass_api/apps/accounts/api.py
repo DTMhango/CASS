@@ -144,6 +144,7 @@ class PlatformInfoView(APIView):
         )
     )
     def get(self, request, *args, **kwargs):
+        from apps.runs.admission import capacity
         from cass_oed.schema import OED_SCHEMA_VERSION
 
         return Response(
@@ -152,6 +153,10 @@ class PlatformInfoView(APIView):
                 "oed_schema_version": OED_SCHEMA_VERSION,
                 "compatibility_matrix": settings.CASS_COMPATIBILITY_MATRIX,
                 "execution_profiles": settings.CASS_EXECUTION_PROFILES,
+                # What each profile declares is only half of it; section 11
+                # asks for admission control, so what is using it now travels
+                # with it and the builder can say "full" before somebody waits.
+                "profile_capacity": [item.as_dict() for item in capacity()],
                 "default_execution_profile": settings.CASS_DEFAULT_EXECUTION_PROFILE,
                 "artifact_backend": settings.CASS_ARTIFACT_BACKEND,
                 "engines": {

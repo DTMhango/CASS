@@ -324,12 +324,25 @@ export function AnalysisBuilder() {
               value={profile || (platform?.default_execution_profile ?? "")}
               onChange={(event) => setProfile(event.target.value)}
             >
-              {Object.entries(platform?.execution_profiles ?? {}).map(([key, item]) => (
-                <option key={key} value={key}>
-                  {key} — {item.cpu} CPU, {item.memory_gb} GB,{" "}
-                  {Math.round(item.timeout_seconds / 3600)}h limit
-                </option>
-              ))}
+              {Object.entries(platform?.execution_profiles ?? {}).map(([key, item]) => {
+                // Section 11 admits only as many runs at once as a profile
+                // declares, so a full one is said here rather than after a
+                // submit that will be refused.
+                const room = platform?.profile_capacity?.find(
+                  (entry) => entry.profile === key,
+                );
+                return (
+                  <option key={key} value={key}>
+                    {key} — {item.cpu} CPU, {item.memory_gb} GB,{" "}
+                    {Math.round(item.timeout_seconds / 3600)}h limit
+                    {room
+                      ? room.is_full
+                        ? ` — full, ${room.running} running`
+                        : ` — ${room.available} of ${room.max_concurrent} free`
+                      : ""}
+                  </option>
+                );
+              })}
             </Select>
           </Field>
 

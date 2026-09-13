@@ -233,3 +233,84 @@ def test_platform_metadata_does_not_call_an_engine(api, oasis_at):
     stub = oasis_at()
     assert api.get(f"{API}/platform/").status_code == 200
     assert stub.urls == []
+
+
+# -- the declared envelope, enforced (section 11) ----------------------------
+
+def test_a_profile_reports_what_is_running_on_it(api, project, analyst, settings):
+    """Section 11 asks for admission control, which needs a count to control by."""
+    from apps.runs.admission import capacity
+    from apps.runs.models import Run, RunKind
+
+    settings.CASS_EXECUTION_PROFILES = {
+        "small": {"cpu": 1, "memory_gb": 2, "timeout_seconds": 60, "max_concurrent": 2}
+    }
+    Run.objects.create(
+        kind=RunKind.ANALYSIS,
+        project=project,
+        execution_profile="small",
+        state="running",
+        created_by=analyst,
+    )
+
+    found = {item.profile: item for item in capacity()}["small"]
+
+    assert found.running == 1
+    assert found.available == 1
+    assert found.is_full is False
+
+
+def test_a_full_profile_refuses_another_run(project, analyst, settings):
+    from apps.runs.admission import AdmissionRefused, admit
+    from apps.runs.models import Run, RunKind
+
+    settings.CASS_EXECUTION_PROFILES = {
+        "small": {"cpu": 1, "memory_gb": 2, "timeout_seconds": 60, "max_concurrent": 1}
+    }
+    Run.objects.create(
+        kind=RunKind.ANALYSIS,
+        project=project,
+        execution_profile="small",
+        state="running",
+        created_by=analyst,
+    )
+    waiting = Run.objects.create(
+        kind=RunKind.ANALYSIS,
+        project=project,
+        execution_profile="small",
+        state="draft",
+        created_by=analyst,
+    )
+
+    with pytest.raises(AdmissionRefused, match="allows 1 run"):
+        admit(waiting)
+
+
+def test_a_run_does_not_refuse_itself_when_it_is_resumed(project, analyst, settings):
+    """A run held at a gate is already active on its own profile."""
+    from apps.runs.admission import admit
+    from apps.runs.models import Run, RunKind
+
+    settings.CASS_EXECUTION_PROFILES = {
+        "small": {"cpu": 1, "memory_gb": 2, "timeout_seconds": 60, "max_concurrent": 1}
+    }
+    held = Run.objects.create(
+        kind=RunKind.ANALYSIS,
+        project=project,
+        execution_profile="small",
+        state="queued",
+        created_by=analyst,
+    )
+
+    admit(held)  # does not raise
+
+
+def test_the_platform_says_what_each_profile_has_room_for(api):
+    facts = api.get(f"{API}/platform/").data
+
+    assert facts["profile_capacity"]
+    standard = next(
+        item for item in facts["profile_capacity"] if item["profile"] == "standard"
+    )
+    assert standard["max_concurrent"] >= 1
+    assert standard["available"] <= standard["max_concurrent"]
