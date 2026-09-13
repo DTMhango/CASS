@@ -23,10 +23,10 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,901 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,913 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
-  112 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  117 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -75,6 +75,13 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- A grid for a country CASS ships no prototype for was built on the live stack
+  from a specification alone: a modeller posted tiles, a base resolution and a
+  refinement over Metro Manila, and got 27 cells back — 4 of them refined —
+  registered as a draft with its cell file in the store and read back through
+  the keys lookup at 0.25 and 0.5 degrees. The same specification at 0.001
+  degrees was refused as about 6,000,000 cells against a limit of 250,000, and
+  an analyst attempting it was refused. The check removed the grid afterwards.
 - The OpenQuake reference comparison was run on the live stack for the
   Jakarta–Bandung book: 432 assets over 64 locations and 14 GEM taxonomies,
   carrying the book's value to the cent, each at the centroid of the cell CASS
@@ -166,7 +173,7 @@ reviewed research result, not a basis for pricing or reserving.
 | Analysis builder | Built, including the assumption set, the run mode and what each resource profile has room for | Output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
 | Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, caveats, approval, export, comparison | Maps, geographic summaries, scenario ranges |
-| Model build workspace | Built, Hazard and Build tabs | Benchmark and QA evidence views |
+| Model build workspace | Built, Hazard and Build tabs, including building a country's grid from a written specification | Benchmark and QA evidence views |
 | Administration | Built: installation facts, compatibility, profiles, engine health, data standards, users with role and access changes, queues, storage, retention, support bundle, audit search | — |
 
 ## Geocoded portfolio brief
@@ -221,7 +228,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Not started. Item 9 is the measurement, and its first run puts the channel representation 10% below the engine on the pilot book. The decision needs the candidates measured against each other, and classes whose taxonomies span measures stay refused until it is taken ([ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md)) |
 | 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Not started. The hazard behind every Indonesian loss is one sampled path until it is decided ([ADR 12](adr/0012-national-classical-model-run-event-based.md)) |
 | 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |
-| 24 | Build an area-peril grid on the platform, for any country, from a written specification | §6 | Not started. The geometry is in `cass_keys.grids` and it is general; what is missing is the door. Only the two pilot prototypes and a CSV upload reach the registry today, which makes a grid something CASS ships rather than something a modeller builds |
+| 24 | Build an area-peril grid on the platform, for any country, from a written specification | §6 | Done: a specification — tiles, a base resolution, named refinements and the reason for each — is posted to `/grids/build/`, generated through the same builder the prototypes use, and registered as a draft with its cells. A specification that would exceed the installation's cell limit is refused with its own count, before anything is generated. The prototypes now go through the same registration, and the Build tab carries the form |
 | 25 | Build a vulnerability set for any country GEM covers | §6, §8 | Not started. `modelregistry.gem` builds one from a GEM release, but where a country sits in that release, and the design-era judgement behind its mixtures, are written into the two pilots |
 | 26 | Event representation study: build one calculation both ways, compare each against the OpenQuake reference, and decide | §6, §16 | Not started. Occurrence per event is in use and rupture-binned is the alternative; item 9 is how either is measured. It ends in a decision record, not an approval |
 

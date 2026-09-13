@@ -30,7 +30,7 @@ from django.db import transaction
 
 from cass_keys import grids, pilot_grids
 
-from .assets import attach_grid_cells
+from . import grid_build
 from .models import AreaPerilGrid, ModelVersion, Peril, PublicationState, VulnerabilitySet
 
 #: Countries with a prototype grid specification.
@@ -58,7 +58,9 @@ def register_grid(country_code: str, *, actor=None) -> AreaPerilGrid:
         specification = pilot_grids.specification(code)
     except KeyError as exc:
         raise PilotRegistrationError(str(exc)) from None
-    return _register_grid(specification, grids.build(specification), actor=actor)
+    # The same registration a specification written on the platform goes
+    # through, so a prototype arrives as the same kind of record.
+    return grid_build.register(specification, grids.build(specification), actor=actor)
 
 
 @transaction.atomic
@@ -117,56 +119,6 @@ def register_model_version(
     return model
 
 
-def _register_grid(specification, cells, *, actor) -> AreaPerilGrid:
-    finest = min(
-        (item.resolution for item in specification.refinements),
-        default=specification.base_resolution,
-    )
-    grid, _ = AreaPerilGrid.objects.update_or_create(
-        country_code=specification.country_code,
-        version=specification.version,
-        defaults={
-            "label": specification.label,
-            "base_resolution_deg": specification.base_resolution,
-            "refined_resolution_deg": finest,
-            "refinement_rule": _refinement_rule(specification),
-            "excludes_offshore": True,
-            "site_condition_source": "",
-            "site_condition_fallback": (
-                "None. No cell carries a site parameter, so no fallback applies and "
-                "site response is absent rather than defaulted."
-            ),
-            "border_policy": (
-                "Reported, never snapped. A location outside every tile is returned "
-                "as fail_ap with its coordinates."
-            ),
-            "mapping_tolerance_km": specification.mapping_tolerance_km,
-            "publication_state": PublicationState.DRAFT,
-            "notes": _notes(specification.notes, specification.open_questions),
-            "updated_by": actor,
-        },
-    )
-    attach_grid_cells(
-        grid,
-        grids.to_csv(cells),
-        filename=f"{grid.reference}-cells.csv",
-        actor=actor,
-    )
-    return grid
-
-
-def _refinement_rule(specification) -> str:
-    if not specification.refinements:
-        return "No refinement; the whole domain sits at the base resolution."
-    finest = min(item.resolution for item in specification.refinements)
-    named = ", ".join(item.name for item in specification.refinements)
-    return (
-        f"Named exposure centres refined to {finest} degrees: {named}. This follows "
-        "current exposure rather than hazard gradient, which is a starting point and "
-        "not a durable rule."
-    )
-
-
 def _peril_scope() -> dict[str, Any]:
     """Section 9's machine-readable scope statement for the prototype."""
     return {
@@ -210,5 +162,3 @@ def _limitations(grid_specification, vulnerability_limitations: str) -> str:
     )
 
 
-def _notes(notes: str, open_questions: tuple[str, ...]) -> str:
-    return "\n".join([notes, "", "Open questions:", *(f"- {item}" for item in open_questions)])

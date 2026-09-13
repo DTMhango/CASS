@@ -22,6 +22,8 @@ import type {
   Approval,
   AssumptionCatalogue,
   AreaPerilGridSummary,
+  GridBuildResult,
+  GridSpecificationInput,
   AuditEvent,
   CatalogueModel,
   DataStandardVersion,
@@ -558,6 +560,22 @@ export function useSaveRunSpec(modelId: UUID) {
     }) => api.post(`/hazard-models/${modelId}/specs/`, input),
     onSuccess: () =>
       client.invalidateQueries({ queryKey: ["hazard-models", modelId] }),
+  });
+}
+
+/**
+ * Build a country's grid from a specification.
+ *
+ * The cells are generated from what the specification says, so what is sent is
+ * the specification rather than a cell file: the artefact a reviewer argues
+ * with is the thing the platform keeps.
+ */
+export function useBuildGrid() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (specification: GridSpecificationInput) =>
+      api.post<GridBuildResult>("/grids/build/", specification),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["grids"] }),
   });
 }
 

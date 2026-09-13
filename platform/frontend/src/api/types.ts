@@ -647,6 +647,49 @@ export interface AreaPerilGridSummary {
   publication_state: string;
 }
 
+/** One named area of a grid specification, with the reason it is there. */
+export interface GridArea {
+  name: string;
+  reason: string;
+  min_latitude: string;
+  max_latitude: string;
+  min_longitude: string;
+  max_longitude: string;
+}
+
+/** An area modelled more finely than the base resolution. */
+export interface GridRefinement extends GridArea {
+  resolution_deg: string;
+}
+
+/**
+ * A written grid specification, as the build endpoint takes it. Every number is
+ * a string: these are decimals a reviewer reads and compares, and a float would
+ * change them on the way through the browser.
+ */
+export interface GridSpecificationInput {
+  country_code: string;
+  version: string;
+  label: string;
+  base_resolution_deg: string;
+  mapping_tolerance_km: string;
+  tiles: GridArea[];
+  refinements: GridRefinement[];
+  open_questions: string[];
+  notes: string;
+}
+
+export interface GridBuildResult {
+  grid: AreaPerilGridSummary;
+  summary: {
+    cells: number;
+    cells_at_base_resolution: number;
+    cells_by_refinement: Record<string, number>;
+    builder_version: string;
+    specification: Record<string, unknown>;
+  };
+}
+
 
 // -- analysis configuration and execution ------------------------------------
 

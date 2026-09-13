@@ -193,6 +193,15 @@ counted once and then read in batches that fit. Memory follows the budget
 rather than the size of the calculation, which is what makes a national run
 possible without writing a second copy of the ground motion as text.
 
+**A grid is built for whatever country is being worked on.** Section 6 wants a
+fixed, versioned, adaptive grid per country, independent of any portfolio. A
+modeller writes the specification on the Build tab — the tiles that say what is
+modelled, the base resolution, the areas refined and the reason for each — and
+CASS generates the cells from it, refusing a specification that would exceed the
+installation's cell limit with its own count rather than taking an hour to find
+out. The two pilot grids are now just two specifications that happen to be
+compiled in, registered through the same door.
+
 **The conversion is measured against the engine's own answer.** A finished
 analysis run can be compared with an OpenQuake risk calculation on the same
 events: `compare_with_openquake` rebuilds the run's keys and blend weights as

@@ -193,6 +193,12 @@ CASS_EXECUTION_PROFILES = {
 }
 CASS_DEFAULT_EXECUTION_PROFILE = env("CASS_DEFAULT_EXECUTION_PROFILE", "standard")
 
+#: The largest grid this installation will build from a specification. Cell
+#: count is quadratic in resolution: Indonesia at 0.1 degrees is 52,831 cells
+#: and at 0.01 it is five million, which is a hazard calculation nobody asked
+#: for. A specification over this is refused with its own count.
+CASS_MAX_GRID_CELLS = int(env("CASS_MAX_GRID_CELLS", "250000"))
+
 # -- engine adapters --------------------------------------------------------
 
 CASS_OPENQUAKE_URL = env("CASS_OPENQUAKE_URL", "http://openquake:8800")

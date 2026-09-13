@@ -23,8 +23,8 @@ from apps.common.permissions import MayApproveGates, MayPublishModels
 from apps.modelregistry.assets import ModelAssetError, load_grid
 from apps.runs.models import HazardRun, Run, RunKind
 
+from . import grid_build, hazard_models, quality
 from . import hazard as hazard_registry
-from . import hazard_models, quality
 from .models import (
     AreaPerilGrid,
     AssumptionSet,
@@ -148,6 +148,68 @@ class AreaPerilGridViewSet(viewsets.ModelViewSet):
     serializer_class = AreaPerilGridSerializer
     permission_classes = [MayPublishModels]
     filterset_fields = ["country_code", "publication_state"]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="GridSpecificationRequest",
+            fields={
+                "country_code": serializers.CharField(),
+                "version": serializers.CharField(),
+                "label": serializers.CharField(),
+                "base_resolution_deg": serializers.CharField(),
+                "mapping_tolerance_km": serializers.CharField(required=False),
+                "tiles": serializers.ListField(child=serializers.DictField()),
+                "refinements": serializers.ListField(
+                    child=serializers.DictField(), required=False
+                ),
+                "open_questions": serializers.ListField(
+                    child=serializers.CharField(), required=False
+                ),
+                "notes": serializers.CharField(required=False),
+            },
+        ),
+        responses={
+            201: inline_serializer(
+                name="GridBuildResult",
+                fields={
+                    "grid": AreaPerilGridSerializer(),
+                    "summary": serializers.DictField(),
+                },
+            )
+        },
+    )
+    @action(detail=False, methods=["post"], url_path="build")
+    def build(self, request, version=None):
+        """Build a country's grid from a specification, rather than uploading cells.
+
+        Section 6 asks each country for a fixed, versioned, adaptive grid that is
+        independent of any portfolio. The specification is the artefact a
+        reviewer argues with -- tiles, a base resolution, named refinements and
+        the reason for each -- and the geometry follows from it, so the two
+        cannot drift apart.
+        """
+        try:
+            grid, summary = grid_build.build(request.data, actor=request.user)
+        except grid_build.GridBuildError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        audit.record(
+            action=AuditAction.CREATE,
+            subject_type="area_peril_grid",
+            subject_id=grid.id,
+            actor=request.user,
+            subject_label=str(grid),
+            request=request,
+            after={
+                "cells": summary["cells"],
+                "builder_version": summary["builder_version"],
+            },
+            detail=f"Built {grid.reference} from a specification.",
+        )
+        return Response(
+            {"grid": AreaPerilGridSerializer(grid).data, "summary": summary},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class VulnerabilitySetViewSet(viewsets.ModelViewSet):

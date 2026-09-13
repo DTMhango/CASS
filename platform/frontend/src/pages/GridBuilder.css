@@ -1,0 +1,25 @@
+/* The grid builder's form: rows of fields that wrap rather than scroll. */
+
+.grid-builder__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.grid-builder__row > * {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.grid-builder__heading {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--grey-600);
+}
+
+.grid-builder__actions {
+  margin-top: var(--space-4);
+}

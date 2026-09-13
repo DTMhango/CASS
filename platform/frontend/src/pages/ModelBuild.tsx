@@ -43,6 +43,8 @@ import {
 } from "@/components/primitives";
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 
+import { GridBuilder } from "./GridBuilder";
+
 import "./ModelBuild.css";
 
 /** The governance gates of build plan section 10, with their approvers. */
@@ -122,6 +124,7 @@ const OPEN_DECISIONS = [
 export function ModelBuild({ embedded = false }: { embedded?: boolean } = {}) {
   const { data: runs } = useRuns();
   const { data: versions } = useModelVersions();
+  const { data: session } = useSession();
   const buildRuns = runs?.filter((run) => run.kind !== "analysis") ?? [];
 
   return (
@@ -132,6 +135,8 @@ export function ModelBuild({ embedded = false }: { embedded?: boolean } = {}) {
       />}
 
       <OpenGates />
+
+      {session?.user?.capabilities.publish_models ? <GridBuilder /> : null}
 
       <Card
         title="Model versions"
