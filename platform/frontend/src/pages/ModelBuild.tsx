@@ -44,6 +44,7 @@ import {
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 
 import { GridBuilder } from "./GridBuilder";
+import { VulnerabilitySetBuilder } from "./VulnerabilitySetBuilder";
 
 import "./ModelBuild.css";
 
@@ -136,7 +137,12 @@ export function ModelBuild({ embedded = false }: { embedded?: boolean } = {}) {
 
       <OpenGates />
 
-      {session?.user?.capabilities.publish_models ? <GridBuilder /> : null}
+      {session?.user?.capabilities.publish_models ? (
+        <>
+          <GridBuilder />
+          <VulnerabilitySetBuilder />
+        </>
+      ) : null}
 
       <Card
         title="Model versions"

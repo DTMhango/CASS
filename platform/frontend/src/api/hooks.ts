@@ -22,8 +22,11 @@ import type {
   Approval,
   AssumptionCatalogue,
   AreaPerilGridSummary,
+  GemCatalogue,
   GridBuildResult,
   GridSpecificationInput,
+  VulnerabilityBuildResult,
+  VulnerabilitySpecificationInput,
   AuditEvent,
   CatalogueModel,
   DataStandardVersion,
@@ -576,6 +579,32 @@ export function useBuildGrid() {
     mutationFn: (specification: GridSpecificationInput) =>
       api.post<GridBuildResult>("/grids/build/", specification),
     onSuccess: () => client.invalidateQueries({ queryKey: ["grids"] }),
+  });
+}
+
+/** Which countries the GEM release on this installation covers. */
+export function useGemCountries() {
+  return useQuery({
+    queryKey: ["gem-countries"] as const,
+    queryFn: () => api.get<GemCatalogue>("/vulnerability-sets/gem-countries/"),
+    retry: false,
+  });
+}
+
+/**
+ * Build a country's vulnerability set from GEM and a written enrichment.
+ *
+ * The functions and their weights are GEM's; the design eras are the
+ * assumption somebody local has to state, which is why they are sent rather
+ * than compiled in.
+ */
+export function useBuildVulnerabilitySet() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (specification: VulnerabilitySpecificationInput) =>
+      api.post<VulnerabilityBuildResult>("/vulnerability-sets/build/", specification),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: ["vulnerability-sets"] }),
   });
 }
 

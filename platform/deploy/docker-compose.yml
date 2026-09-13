@@ -66,6 +66,10 @@ x-django-env: &django-env
   CASS_OASIS_MODEL_SUPPLIER_ID: ${OASIS_MODEL_SUPPLIER_ID:-KRE}
   CASS_OASIS_MODEL_ID: ${OASIS_MODEL_ID:-EQ}
   CASS_OASIS_MODEL_VERSION_ID: ${OASIS_MODEL_VERSION_ID:-1}
+  # Where this installation keeps its GEM release. Empty means no vulnerability
+  # set can be built here, and the API says so rather than reporting an empty
+  # catalogue. The clones are large and licensed, so the path is the machine's.
+  CASS_GEM_ROOT: ${CASS_GEM_ROOT:-}
   CASS_KEYS_SERVICE_URL: http://keys:8010
   CASS_CONVERTER_URL: http://converter:8020
   CASS_CORS_ORIGINS: ${CASS_CORS_ORIGINS:-http://localhost:5173}

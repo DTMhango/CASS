@@ -193,6 +193,12 @@ CASS_EXECUTION_PROFILES = {
 }
 CASS_DEFAULT_EXECUTION_PROFILE = env("CASS_DEFAULT_EXECUTION_PROFILE", "standard")
 
+#: Where this installation keeps its GEM release. The clones are large,
+#: licensed and outside version control, so where they sit is a property of the
+#: machine; empty means no vulnerability set can be built here, and the API says
+#: so rather than reporting an empty catalogue.
+CASS_GEM_ROOT = env("CASS_GEM_ROOT", "")
+
 #: The largest grid this installation will build from a specification. Cell
 #: count is quadratic in resolution: Indonesia at 0.1 degrees is 52,831 cells
 #: and at 0.01 it is five million, which is a hazard calculation nobody asked

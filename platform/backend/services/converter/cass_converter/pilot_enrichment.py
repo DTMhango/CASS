@@ -230,18 +230,28 @@ def load(
     *,
     categories: Sequence[LossCategory] | None = None,
     use_published_mapping: bool = True,
+    chosen: Enrichment | None = None,
+    region: str | None = None,
+    folder: str | None = None,
 ) -> tuple[dict[LossCategory, VulnerabilityModel], StockPrior, Enrichment]:
-    """Everything one pilot country's build needs, from a GEM release directory.
+    """Everything one country's build needs, from a GEM release directory.
 
     The published taxonomy mapping is applied by default, so each vulnerability
     function receives the exposure value GEM says maps to it. Passing
     ``use_published_mapping=False`` falls back to the macro-class reconstruction
     -- worth keeping, because comparing the two is how the difference the
     mapping makes gets measured rather than asserted.
+
+    ``chosen``, ``region`` and ``folder`` are what make this usable beyond the
+    pilots: the enrichment written for a country, and where that country sits in
+    the release. Without them the two compiled-in pilot specifications apply, so
+    the existing callers are unchanged.
     """
     base = pathlib.Path(root)
-    chosen = enrichment(country_code)
-    region, name = GEM_LAYOUT[chosen.country_code]
+    chosen = chosen or enrichment(country_code)
+    if region is None or folder is None:
+        region, folder = GEM_LAYOUT[chosen.country_code]
+    name = folder
 
     models = read_country(
         base / "global_vulnerability_model" / region / name,

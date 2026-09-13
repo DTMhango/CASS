@@ -5867,6 +5867,61 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/vulnerability-sets/build/:
+    post:
+      operationId: api_v1_vulnerability_sets_build_create
+      description: |-
+        Build a country's vulnerability set from GEM and a written enrichment.
+
+        The enrichment -- which design eras a country had, what each implies and
+        why -- is local expertise rather than a property of the platform, so it
+        is stated here rather than compiled in. The candidate sets and weights
+        remain GEM's.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySpecificationRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySpecificationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VulnerabilitySpecificationRequestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VulnerabilityBuildResult'
+          description: ''
+  /api/v1/vulnerability-sets/gem-countries/:
+    get:
+      operationId: api_v1_vulnerability_sets_gem_countries_retrieve
+      description: |-
+        Which countries the GEM release on this installation covers.
+
+        Read from the release each time rather than from a list inside CASS. A
+        compiled-in list would be wrong the first time GEM published another
+        country, which is exactly when somebody would be looking at it.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GemCatalogue'
+          description: ''
   /health/:
     get:
       operationId: health_retrieve
@@ -7259,6 +7314,19 @@ components:
         * `model_release` - Model release
         * `platform_release` - Platform release
         * `run_exception` - Permitted run exception
+    GemCatalogue:
+      type: object
+      properties:
+        release:
+          type: string
+        countries:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      required:
+      - countries
+      - release
     GridBuildResult:
       type: object
       properties:
@@ -9991,6 +10059,17 @@ components:
           title: Active
           description: Designates whether this user should be treated as active. Unselect
             this instead of deleting accounts.
+    VulnerabilityBuildResult:
+      type: object
+      properties:
+        vulnerability_set:
+          $ref: '#/components/schemas/VulnerabilitySet'
+        report:
+          type: object
+          additionalProperties: {}
+      required:
+      - report
+      - vulnerability_set
     VulnerabilitySet:
       type: object
       properties:
@@ -10117,6 +10196,18 @@ components:
       - country_code
       - source
       - version
+    VulnerabilitySpecificationRequestRequest:
+      type: object
+      properties:
+        gem:
+          type: object
+          additionalProperties: {}
+        enrichment:
+          type: object
+          additionalProperties: {}
+      required:
+      - enrichment
+      - gem
     WeightingBasisEnum:
       enum:
       - replacement_cost

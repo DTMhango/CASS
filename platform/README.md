@@ -202,6 +202,17 @@ installation's cell limit with its own count rather than taking an hour to find
 out. The two pilot grids are now just two specifications that happen to be
 compiled in, registered through the same door.
 
+**A country's vulnerability set is built from GEM under a written enrichment.**
+The functions and the stock weights are GEM's, read from the release the
+installation points at, and the Build tab lists the countries that release
+actually covers. What GEM does not say is which seismic design level a building
+of a given age has — that depends on when a code was adopted and whether it was
+enforced — so the design eras are stated as a table, each row with its reason,
+rather than compiled in for two pilot countries. The set's version follows the
+enrichment, because the enrichment is the assumption behind every function in
+it, and an era table that is out of order or ends before today is refused rather
+than applied.
+
 **The conversion is measured against the engine's own answer.** A finished
 analysis run can be compared with an OpenQuake risk calculation on the same
 events: `compare_with_openquake` rebuilds the run's keys and blend weights as

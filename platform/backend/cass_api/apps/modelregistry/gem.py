@@ -48,6 +48,8 @@ from typing import Any
 from django.db import transaction
 
 from cass_converter import pilot_bins, pilot_enrichment
+from cass_converter.enrichment import Enrichment, EnrichmentError, enrichment_from
+from cass_converter.gem import GemError
 from cass_converter.model_build import (
     BASELINE,
     CountryBuild,
@@ -95,9 +97,19 @@ GEM_LICENCE = "CC BY-NC-SA 4.0"
 #: the whole enrichment step exists to get from one to the other.
 GEM_TAXONOMY = "GEM Building Taxonomy v4.0"
 
-#: Version of a vulnerability set built by this module. Moves with the pilot
+#: Version of a vulnerability set built under a pilot enrichment. Moves with the
 #: enrichment, since changing an era or an OED mapping changes every function.
 VULNERABILITY_VERSION = f"{pilot_enrichment.PILOT_VERSION}-gem"
+
+
+def vulnerability_version(enrichment: Enrichment) -> str:
+    """The version a set built under this enrichment carries.
+
+    The enrichment is the assumption behind every function, so it is what the
+    version follows: two sets built from one GEM release under different design
+    eras are different models and must not share a version.
+    """
+    return f"{enrichment.version}-gem"
 
 
 class GemRegistrationError(Exception):
@@ -141,6 +153,9 @@ def build(
     root: str | pathlib.Path,
     policy: ConversionPolicy | None = None,
     coverage_types: tuple[int, ...] = (1, 2, 3, 4),
+    enrichment: Enrichment | None = None,
+    region: str = "",
+    folder: str = "",
 ) -> CountryBuild:
     """Build one country's vulnerability set from a GEM release directory.
 
@@ -149,6 +164,10 @@ def build(
     parameter rather than a setting because the GEM clones are large, licensed
     and deliberately outside version control; where they sit is a property of
     the machine doing the build, not of the platform.
+
+    ``enrichment``, ``region`` and ``folder`` are what a country outside the two
+    pilots needs: the design eras somebody wrote for it, and where GEM publishes
+    it in the release. Omitted, the compiled-in pilot specification applies.
     """
     base = pathlib.Path(root)
     if not base.is_dir():
@@ -159,14 +178,23 @@ def build(
 
     chosen = policy or default_policy()
     try:
-        models, prior, enrichment = pilot_enrichment.load(base, country_code)
-    except (KeyError, OSError) as exc:
+        models, prior, resolved = pilot_enrichment.load(
+            base,
+            country_code,
+            chosen=enrichment,
+            region=region or None,
+            folder=folder or None,
+        )
+    except (KeyError, OSError, GemError, EnrichmentError) as exc:
+        # A country the release does not hold, or an enrichment the release
+        # cannot answer, is a refusal rather than a failure: the specification
+        # named something that is not there.
         raise GemRegistrationError(
             f"The GEM model for {country_code} could not be read from {base}: {exc}"
         ) from exc
 
     return build_country(
-        enrichment=enrichment,
+        enrichment=resolved,
         models=models,
         prior=prior,
         intensity_bins=pilot_bins.intensity_bins(chosen.imts),
@@ -207,6 +235,9 @@ def build_all(
     variants: dict[str, dict[str, Any]],
     policy: ConversionPolicy | None = None,
     coverage_types: tuple[int, ...] = (1, 2, 3, 4),
+    enrichment: Enrichment | None = None,
+    region: str = "",
+    folder: str = "",
 ) -> dict[str, CountryBuild]:
     """Build one country's vulnerability set once per assumption set (ADR 14)."""
     base = pathlib.Path(root)
@@ -218,14 +249,23 @@ def build_all(
 
     chosen = policy or default_policy()
     try:
-        models, prior, enrichment = pilot_enrichment.load(base, country_code)
-    except (KeyError, OSError) as exc:
+        models, prior, resolved = pilot_enrichment.load(
+            base,
+            country_code,
+            chosen=enrichment,
+            region=region or None,
+            folder=folder or None,
+        )
+    except (KeyError, OSError, GemError, EnrichmentError) as exc:
+        # A country the release does not hold, or an enrichment the release
+        # cannot answer, is a refusal rather than a failure: the specification
+        # named something that is not there.
         raise GemRegistrationError(
             f"The GEM model for {country_code} could not be read from {base}: {exc}"
         ) from exc
 
     return build_variants(
-        enrichment=enrichment,
+        enrichment=resolved,
         variants=variants,
         models=models,
         prior=prior,
@@ -261,6 +301,9 @@ def register_vulnerability(
     root: str | pathlib.Path,
     licence: LicenceStatement | None = None,
     policy: ConversionPolicy | None = None,
+    enrichment: Enrichment | None = None,
+    region: str = "",
+    folder: str = "",
     actor=None,
 ) -> tuple[VulnerabilitySet, CountryBuild]:
     """Build and register one country's GEM vulnerability set with its assets.
@@ -270,17 +313,29 @@ def register_vulnerability(
     sets whose identifiers mean different things.
     """
     variants = assumption_rules(country_code)
-    builds = build_all(country_code, root=root, variants=variants, policy=policy)
+    builds = build_all(
+        country_code,
+        root=root,
+        variants=variants,
+        policy=policy,
+        enrichment=enrichment,
+        region=region,
+        folder=folder,
+    )
     built = builds[BASELINE]
     statement = licence or LicenceStatement()
     code = built.country_code.upper()
+    # The set's version follows the enrichment it was built under, so a country
+    # somebody wrote an enrichment for is versioned by that rather than by the
+    # pilot's number.
+    version = vulnerability_version(built.enrichment)
 
     channels = built.functions
     multi_channel = len(built.multi_imt_classes)
 
     vulnerability_set, _ = VulnerabilitySet.objects.update_or_create(
         country_code=code,
-        version=VULNERABILITY_VERSION,
+        version=version,
         defaults={
             "source": GEM_SOURCE,
             "source_commit": built.sources.get("vulnerability_structural", "")[:64],
@@ -307,13 +362,13 @@ def register_vulnerability(
     attach_vulnerability_mapping(
         vulnerability_set,
         mapping_csv(built),
-        filename=f"{code.lower()}-vuln-{VULNERABILITY_VERSION}-mapping.csv",
+        filename=f"{code.lower()}-vuln-{version}-mapping.csv",
         actor=actor,
     )
     attach_vulnerability_functions(
         vulnerability_set,
         vulnerability_csv(built),
-        filename=f"{code.lower()}-vuln-{VULNERABILITY_VERSION}.csv",
+        filename=f"{code.lower()}-vuln-{version}.csv",
         actor=actor,
     )
     for key, variant in builds.items():
@@ -321,7 +376,7 @@ def register_vulnerability(
             vulnerability_set,
             key,
             vulnerability_csv(variant),
-            filename=f"{code.lower()}-vuln-{VULNERABILITY_VERSION}-{key}.csv",
+            filename=f"{code.lower()}-vuln-{version}-{key}.csv",
             actor=actor,
         )
     attach_damage_bins(
@@ -339,10 +394,61 @@ def register_vulnerability(
     attach_vulnerability_dictionary(
         vulnerability_set,
         json.dumps(provenance, indent=2, sort_keys=True).encode("utf-8"),
-        filename=f"{code.lower()}-vuln-{VULNERABILITY_VERSION}-dictionary.json",
+        filename=f"{code.lower()}-vuln-{version}-dictionary.json",
         actor=actor,
     )
     return vulnerability_set, built
+
+
+@transaction.atomic
+def register_from_specification(
+    document: Any,
+    *,
+    root: str | pathlib.Path,
+    licence: LicenceStatement | None = None,
+    policy: ConversionPolicy | None = None,
+    actor=None,
+) -> tuple[VulnerabilitySet, CountryBuild]:
+    """Build a country's vulnerability set from a written enrichment.
+
+    The two pilot countries have their design eras compiled in, which was right
+    while there were two and wrong for a third: what a country's eras are is
+    local expertise rather than a property of the platform. This takes them as a
+    document -- with the reason for each era, because that is what a reviewer
+    argues with -- alongside where GEM publishes the country in the release.
+    """
+    if not isinstance(document, dict):
+        raise GemRegistrationError("A vulnerability specification must be an object.")
+    try:
+        written = enrichment_from(document.get("enrichment") or {})
+    except EnrichmentError as exc:
+        raise GemRegistrationError(str(exc)) from None
+
+    release = document.get("gem") or {}
+    region = str(release.get("region") or "").strip()
+    folder = str(release.get("country") or "").strip()
+    if not region or not folder:
+        raise GemRegistrationError(
+            "The specification must say where GEM publishes this country: the region "
+            "and country folder in the release, which the catalogue lists."
+        )
+    if not written.iso3:
+        raise GemRegistrationError(
+            "The enrichment must state the country's ISO alpha-3 code. GEM's taxonomy "
+            "mapping file is keyed by it, and there is no rule that derives it -- only "
+            "a table, and a wrong one would read another country's mapping."
+        )
+
+    return register_vulnerability(
+        written.country_code,
+        root=root,
+        licence=licence,
+        policy=policy,
+        enrichment=written,
+        region=region,
+        folder=folder,
+        actor=actor,
+    )
 
 
 @transaction.atomic
@@ -387,7 +493,7 @@ def report(built: CountryBuild) -> dict[str, Any]:
     return {
         "country_code": built.country_code,
         "gem_release": GEM_RELEASE,
-        "vulnerability_version": VULNERABILITY_VERSION,
+        "vulnerability_version": vulnerability_version(built.enrichment),
         "classes": len(built.classes),
         "functions": len(built.functions),
         "sources": dict(built.sources),

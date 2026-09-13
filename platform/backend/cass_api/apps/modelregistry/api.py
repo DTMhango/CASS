@@ -9,6 +9,7 @@ may be used for decisions and what is blocking publication.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
@@ -22,7 +23,9 @@ from apps.audit.models import AuditAction
 from apps.common.permissions import MayApproveGates, MayPublishModels
 from apps.modelregistry.assets import ModelAssetError, load_grid
 from apps.runs.models import HazardRun, Run, RunKind
+from cass_converter import gem as gem_release
 
+from . import gem as gem_registry
 from . import grid_build, hazard_models, quality
 from . import hazard as hazard_registry
 from .models import (
@@ -217,6 +220,111 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
     serializer_class = VulnerabilitySetSerializer
     permission_classes = [MayPublishModels]
     filterset_fields = ["country_code", "publication_state", "licence_cleared"]
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name="GemCatalogue",
+                fields={
+                    "release": serializers.CharField(),
+                    "countries": serializers.ListField(child=serializers.DictField()),
+                },
+            )
+        }
+    )
+    @action(detail=False, methods=["get"], url_path="gem-countries")
+    def gem_countries(self, request, version=None):
+        """Which countries the GEM release on this installation covers.
+
+        Read from the release each time rather than from a list inside CASS. A
+        compiled-in list would be wrong the first time GEM published another
+        country, which is exactly when somebody would be looking at it.
+        """
+        if not settings.CASS_GEM_ROOT:
+            return Response(
+                {
+                    "detail": (
+                        "No GEM release is configured on this installation, so there "
+                        "is nothing to build a vulnerability set from. Set "
+                        "CASS_GEM_ROOT to the release root."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            countries = gem_release.catalogue(settings.CASS_GEM_ROOT)
+        except gem_release.GemError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(
+            {"release": str(settings.CASS_GEM_ROOT), "countries": list(countries)}
+        )
+
+    @extend_schema(
+        request=inline_serializer(
+            name="VulnerabilitySpecificationRequest",
+            fields={
+                "gem": serializers.DictField(),
+                "enrichment": serializers.DictField(),
+            },
+        ),
+        responses={
+            201: inline_serializer(
+                name="VulnerabilityBuildResult",
+                fields={
+                    "vulnerability_set": VulnerabilitySetSerializer(),
+                    "report": serializers.DictField(),
+                },
+            )
+        },
+    )
+    @action(detail=False, methods=["post"], url_path="build")
+    def build(self, request, version=None):
+        """Build a country's vulnerability set from GEM and a written enrichment.
+
+        The enrichment -- which design eras a country had, what each implies and
+        why -- is local expertise rather than a property of the platform, so it
+        is stated here rather than compiled in. The candidate sets and weights
+        remain GEM's.
+        """
+        if not settings.CASS_GEM_ROOT:
+            return Response(
+                {
+                    "detail": (
+                        "No GEM release is configured on this installation. Set "
+                        "CASS_GEM_ROOT to the release root before building."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            vulnerability_set, built = gem_registry.register_from_specification(
+                request.data, root=settings.CASS_GEM_ROOT, actor=request.user
+            )
+        except gem_registry.GemRegistrationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        report = gem_registry.report(built)
+        audit.record(
+            action=AuditAction.CREATE,
+            subject_type="vulnerability_set",
+            subject_id=vulnerability_set.id,
+            actor=request.user,
+            subject_label=str(vulnerability_set),
+            request=request,
+            after={
+                "functions": report["functions"],
+                "classes": report["classes"],
+                "enrichment": built.enrichment.reference,
+            },
+            detail=f"Built {vulnerability_set} from {gem_registry.GEM_SOURCE}.",
+        )
+        return Response(
+            {
+                "vulnerability_set": VulnerabilitySetSerializer(vulnerability_set).data,
+                "report": report,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class AssumptionSetViewSet(viewsets.ModelViewSet):

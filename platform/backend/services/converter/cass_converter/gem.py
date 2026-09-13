@@ -362,6 +362,40 @@ def read_country(
     return models
 
 
+def catalogue(root: str | pathlib.Path) -> tuple[dict[str, Any], ...]:
+    """Every country a GEM release publishes vulnerability functions for.
+
+    Read from the release rather than from a table inside CASS. Which countries
+    GEM covers is a property of the release somebody downloaded, and a list
+    compiled into the platform would be wrong the first time GEM published
+    another -- which is exactly when somebody would be looking for it.
+    """
+    base = pathlib.Path(root) / "global_vulnerability_model"
+    if not base.is_dir():
+        raise GemError(
+            f"{base} is not a directory. It should be the global_vulnerability_model "
+            "of a GEM release."
+        )
+
+    found: list[dict[str, Any]] = []
+    for region in sorted(item for item in base.iterdir() if item.is_dir()):
+        for country in sorted(item for item in region.iterdir() if item.is_dir()):
+            categories = [
+                str(category)
+                for category in LossCategory
+                if (country / f"vulnerability_{category}.xml").is_file()
+            ]
+            if categories:
+                found.append(
+                    {
+                        "region": region.name,
+                        "country": country.name,
+                        "loss_categories": categories,
+                    }
+                )
+    return tuple(found)
+
+
 # -- reading one function ----------------------------------------------------------
 
 def _read_function(

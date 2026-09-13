@@ -1038,6 +1038,137 @@ class Enrichment:
         }
 
 
+def enrichment_from(document: Mapping[str, Any]) -> Enrichment:
+    """Read a written enrichment, so a country need not be compiled in.
+
+    The pilot countries' enrichments are Python constants, which was right while
+    there were two and wrong as soon as somebody works on a third: what a
+    country's design eras are is local expertise, not a property of the
+    platform. This reads the same thing from a document, so it can be written
+    by whoever has that expertise and argued with afterwards.
+
+    The eras are checked for order and coverage rather than trusted. They are
+    read first-match, so an unordered table silently applies the wrong levels to
+    a year, and a table with no open-ended era leaves recent construction with
+    no design level at all -- both of which produce a mixture that looks fine.
+    """
+    if not isinstance(document, Mapping):
+        raise EnrichmentError("An enrichment must be an object.")
+
+    eras = []
+    raw_eras = document.get("design_eras") or ()
+    if not isinstance(raw_eras, Sequence) or isinstance(raw_eras, str):
+        raise EnrichmentError("design_eras must be a list.")
+    for position, item in enumerate(raw_eras, start=1):
+        if not isinstance(item, Mapping):
+            raise EnrichmentError(f"Design era {position} must be an object.")
+        levels = tuple(str(level).strip() for level in item.get("design_levels") or ())
+        if not levels:
+            raise EnrichmentError(
+                f"Design era {position} names no design level, so a building from "
+                "that period would reach no candidate."
+            )
+        unknown = sorted(set(levels) - set(DESIGN_LEVELS))
+        if unknown:
+            raise EnrichmentError(
+                f"Design era {position} names {', '.join(unknown)}, which GEM does "
+                f"not use. Known: {', '.join(DESIGN_LEVELS)}."
+            )
+        reason = str(item.get("reason") or "").strip()
+        if not reason:
+            raise EnrichmentError(
+                f"Design era {position} gives no reason. The eras are the assumption "
+                "a reviewer argues with, and one without provenance cannot be argued "
+                "with at all."
+            )
+        eras.append(
+            DesignEra(to_year=_optional_year(item.get("to_year"), position), design_levels=levels, reason=reason)
+        )
+
+    _check_era_order(eras)
+
+    try:
+        weighting = Weighting(str(document.get("weighting") or Weighting.VALUE))
+    except ValueError:
+        raise EnrichmentError(
+            f"{document.get('weighting')!r} is not a weighting basis. Known: "
+            + ", ".join(str(item) for item in Weighting)
+            + "."
+        ) from None
+
+    return Enrichment(
+        name=_required(document, "name"),
+        version=_required(document, "version"),
+        country_code=_required(document, "country_code").upper(),
+        iso3=str(document.get("iso3") or "").upper(),
+        design_eras=tuple(eras),
+        weighting=weighting,
+        minimum_storeys=_optional_int(document.get("minimum_storeys")),
+        weight_overrides=dict(document.get("weight_overrides") or {}),
+        design_weight_factors=dict(document.get("design_weight_factors") or {}),
+        open_questions=tuple(str(item) for item in (document.get("open_questions") or ())),
+        notes=str(document.get("notes") or ""),
+    )
+
+
+def _check_era_order(eras: Sequence[DesignEra]) -> None:
+    if not eras:
+        raise EnrichmentError(
+            "An enrichment with no design eras leaves every building with no design "
+            "level, and the mixture would be the whole national stock."
+        )
+    bounded = [era for era in eras if era.to_year is not None]
+    years = [era.to_year for era in bounded]
+    if years != sorted(years):
+        raise EnrichmentError(
+            "The design eras are out of order. They are read first-match, so an "
+            "unordered table applies the wrong levels to a year without saying so."
+        )
+    open_ended = [position for position, era in enumerate(eras) if era.to_year is None]
+    if len(open_ended) > 1:
+        raise EnrichmentError(
+            "More than one design era is open-ended, so only the first could ever "
+            "apply."
+        )
+    if not open_ended:
+        raise EnrichmentError(
+            "No design era is open-ended, so anything built after "
+            f"{years[-1]} reaches no design level. End the table with an era whose "
+            "to_year is null."
+        )
+    if open_ended[0] != len(eras) - 1:
+        raise EnrichmentError(
+            "The open-ended design era is not last, so no era after it could apply."
+        )
+
+
+def _required(document: Mapping[str, Any], name: str) -> str:
+    value = document.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise EnrichmentError(f"An enrichment must state its {name}.")
+    return value.strip()
+
+
+def _optional_year(value: Any, position: int) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise EnrichmentError(
+            f"Design era {position} has a to_year that is not a year: {value!r}."
+        ) from None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise EnrichmentError(f"{value!r} is not a whole number of storeys.") from None
+
+
 #: The share a macro class gets when the exposure summary reports none for that
 #: occupancy. Small enough not to matter against a real share and large enough
 #: that the building type does not disappear.

@@ -679,6 +679,54 @@ export interface GridSpecificationInput {
   notes: string;
 }
 
+/** One country a GEM release publishes vulnerability functions for. */
+export interface GemCountry {
+  region: string;
+  country: string;
+  loss_categories: string[];
+}
+
+export interface GemCatalogue {
+  release: string;
+  countries: GemCountry[];
+}
+
+/** A period of construction and the seismic design levels it implies. */
+export interface DesignEraInput {
+  to_year: string;
+  design_levels: string;
+  reason: string;
+}
+
+/**
+ * A written enrichment and where GEM publishes the country, as the build
+ * endpoint takes them. The design eras are the assumption a reviewer argues
+ * with, so each carries its reason.
+ */
+export interface VulnerabilitySpecificationInput {
+  gem: { region: string; country: string };
+  enrichment: {
+    name: string;
+    version: string;
+    country_code: string;
+    iso3: string;
+    weighting: string;
+    design_eras: { to_year: number | null; design_levels: string[]; reason: string }[];
+    open_questions: string[];
+    notes: string;
+  };
+}
+
+export interface VulnerabilityBuildResult {
+  vulnerability_set: { id: UUID; country_code: string; version: string };
+  report: {
+    classes: number;
+    functions: number;
+    vulnerability_version: string;
+    multi_imt: { classes_needing_multi_imt: number };
+  };
+}
+
 export interface GridBuildResult {
   grid: AreaPerilGridSummary;
   summary: {
