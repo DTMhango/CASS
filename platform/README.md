@@ -273,7 +273,7 @@ from what waits on a decision or an outside input. In short:
   carries its exceedance curve and the events behind it; what it does not carry
   is loss below the portfolio level, which is an engine settings change.
 - **Production readiness.** Backup and restore, observability, single sign-on
-  and MFA, upload scanning, retention expiry and signed releases.
+  and MFA, upload scanning and signed releases.
 
 ## Outstanding decisions that gate the model
 

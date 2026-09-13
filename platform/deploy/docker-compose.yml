@@ -219,6 +219,27 @@ services:
       retries: 5
       start_period: 30s
 
+  # The scheduler. Retention expiry and abandoning stale runs are decisions the
+  # platform takes on a clock rather than when somebody presses something, and
+  # a policy nothing enforces is not a policy. One replica only: two beats
+  # would issue every scheduled task twice.
+  beat:
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.api
+    command:
+      - celery
+      - -A
+      - cass
+      - beat
+      - --loglevel=INFO
+    environment:
+      <<: [*django-env, *artifact-env]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     build:
       context: ..

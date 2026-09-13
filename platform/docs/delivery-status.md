@@ -10,7 +10,7 @@ updated afterwards is a tracker somebody has to reconcile.
 
 ## Evidence at this revision
 
-- 1,786 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,798 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   105 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -164,7 +164,7 @@ decision number.
 | 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Not started |
 | 12 | Execution profiles enforced: time limits and admission control | §11 | Done |
 | 13 | Keys and converter HTTP services | §4 | Not started |
-| 14 | Artifact retention expiry | §5 | Not started |
+| 14 | Artifact retention expiry | §5 | Done: a scheduled sweep expires due payloads and keeps their records, and refuses anything a running run is reading, anything behind an approved result, and published exposure |
 | 15 | Administration: users and roles, queues, storage, retention, support bundle | §3, §4 | Not started |
 | 16 | Observability: metrics, correlation IDs through background tasks | §4 | Not started |
 | 17 | Multi-factor authentication and single sign-on configuration | §10 | Not started |

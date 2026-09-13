@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from celery.schedules import crontab
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
@@ -150,6 +152,22 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_SEND_SENT_EVENT = True
 CELERY_TIMEZONE = "UTC"
+
+#: Work the platform does on a clock rather than on request. Section 5 makes
+#: the retention class decide how long an object lives, and section 12 requires
+#: a run that died with its worker to reach an intelligible state; both are
+#: policies that need something to run them, and a policy nothing enforces is
+#: not a policy. Times are deliberately quiet-hours and offset from each other.
+CELERY_BEAT_SCHEDULE = {
+    "expire-due-artifacts": {
+        "task": "cass.artifacts.expire_due",
+        "schedule": crontab(hour="2", minute="30"),
+    },
+    "abandon-stale-runs": {
+        "task": "cass.runs.abandon_stale",
+        "schedule": crontab(minute="15"),
+    },
+}
 
 #: Execution profiles from section 11. Concurrency and memory are declared
 #: rather than inherited from maximum parallelism, so one large job cannot

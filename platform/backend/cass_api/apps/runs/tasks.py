@@ -167,3 +167,18 @@ def execute_conversion(conversion_run_id: str) -> dict:
         }
     conversion_run.run.refresh_from_db()
     return {"conversion_run": str(conversion_run_id), "state": conversion_run.run.state}
+
+
+@shared_task(name="cass.runs.abandon_stale")
+def abandon_stale(older_than_minutes: int = 60) -> dict:
+    """Close runs whose worker did not survive.
+
+    Calls the management command rather than reimplementing it: what counts as
+    stale, and what an abandoned run is left looking like, are decided in one
+    place. A scheduled copy of that logic would drift from the one an operator
+    runs by hand.
+    """
+    from django.core.management import call_command
+
+    call_command("abandon_stale_runs", older_than=older_than_minutes)
+    return {"older_than_minutes": older_than_minutes}
