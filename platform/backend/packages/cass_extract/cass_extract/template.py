@@ -32,6 +32,11 @@ VERSION_CELL_LABEL = "CASS intake profile"
 
 _REQUIRED_FILL = PatternFill("solid", fgColor="FFF3D6")
 _HEADER_FILL = PatternFill("solid", fgColor="EDEDED")
+_EXAMPLE_FILL = PatternFill("solid", fgColor="F4F6FB")
+
+#: Written in the first cell of the worked example, so a person can see what a
+#: filled-in row looks like and the reader can tell it from real data.
+EXAMPLE_MARKER = "EXAMPLE ROW - delete before uploading"
 
 
 def workbook(
@@ -75,7 +80,33 @@ def _sheet(book: Workbook, sheet: Sheet, rows: Iterable[Mapping[str, Any]]) -> N
             12, min(28, len(item.name) + 6)
         )
 
-    for offset, row in enumerate(rows, start=2):
+    # A worked row, in the sheet rather than only in the guidance. It is the
+    # first thing a person looks at, and a template that describes its columns
+    # without showing one filled in is the template that comes back wrong. It
+    # says in its first cell that it must go, and the reader drops it anyway, so
+    # neither a careful nor a hurried user can turn it into exposure.
+    rows = list(rows)
+    first_data_row = 2
+    if not rows:
+        # Only on a blank template. An export of a portfolio CASS already holds
+        # is data, and a worked example sitting on top of it would be a row
+        # somebody has to notice is not theirs.
+        for position, item in enumerate(columns, start=1):
+            cell = worksheet.cell(row=2, column=position, value=item.example)
+            cell.font = Font(italic=True, color="6B7280")
+            cell.fill = _EXAMPLE_FILL
+        # The marker goes beside the row rather than in its first cell, so
+        # every column still shows its own example -- including the Policy ID,
+        # which is the one most likely to come back in the wrong shape.
+        note = worksheet.cell(row=2, column=len(columns) + 1, value=EXAMPLE_MARKER)
+        note.font = Font(italic=True, bold=True, color="6B7280")
+        note.fill = _EXAMPLE_FILL
+        worksheet.column_dimensions[get_column_letter(len(columns) + 1)].width = (
+            len(EXAMPLE_MARKER) + 2
+        )
+        first_data_row = 3
+
+    for offset, row in enumerate(rows, start=first_data_row):
         for position, item in enumerate(columns, start=1):
             worksheet.cell(row=offset, column=position, value=row.get(item.name, ""))
 
@@ -107,8 +138,20 @@ def _guide(book: Workbook, *, project_reference: str, generated: dt.date | None)
     write()
     write(
         "One row per risk on the Risks sheet, one row per policy or layer on the "
-        "Policies sheet. The account reference appears on both and is what joins "
-        "them, so it has to match exactly."
+        "Policies sheet. The Policy ID appears on both and is what joins them, so "
+        "it has to match exactly."
+    )
+    write()
+    write(
+        "Both sheets open with a worked example row: shaded, with a note beside "
+        "it saying so. Type over it or delete it -- CASS ignores it either way."
+    )
+    write()
+    write(
+        "The Policy ID is the one from the premium system: underwriting year, "
+        "inception month and business reference, joined by underscores, as in "
+        "2026_06_PFAC8716. The business reference on its own does not say which "
+        "year's placement a risk belongs to."
     )
     write()
     write(
@@ -128,14 +171,14 @@ def _guide(book: Workbook, *, project_reference: str, generated: dt.date | None)
     for sheet in Sheet:
         write(str(sheet), bold=True)
         write(
-            "Column", "Required", "OED field", "What it is", "If left blank",
+            "Column", "Required", "Example", "What it is", "If left blank",
             "What CASS does then", bold=True,
         )
         for item in profile.columns_for(sheet):
             write(
                 item.name,
                 "Yes" if item.required else "No",
-                item.oed_field or "(CASS)",
+                item.example,
                 item.help_text,
                 _blank_label(item),
                 item.blank_effect or item.purpose,
@@ -144,12 +187,7 @@ def _guide(book: Workbook, *, project_reference: str, generated: dt.date | None)
 
     write("Filled in by CASS, so the template does not ask for them", bold=True)
     for name, reason in profile.DERIVED_FIELDS.items():
-        write(name, "", name, reason)
-    write()
-
-    write("OED fields this template does not cover", bold=True)
-    for kind, names in profile.as_dict()["oed_fields_not_requested"].items():
-        write(kind, "", ", ".join(names) or "(none)")
+        write(name, "", "", reason)
 
 
 def _blank_label(item: Column) -> str:

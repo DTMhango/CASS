@@ -1,4 +1,7 @@
 .signin {
+  /* The containing block for the hidden spans in the form's required fields,
+     for the same reason the shell is one. */
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;

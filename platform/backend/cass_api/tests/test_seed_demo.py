@@ -53,15 +53,22 @@ def test_seeded_model_names_what_blocks_full_publication(seeded):
 
     # The two the plan is most insistent about.
     assert "licence" in blockers
-    assert "PGA" in blockers
+    assert "hazard set" in blockers
 
 
 def test_seeded_model_declares_only_the_sa_family(seeded):
-    """Section 16: SA-first, with PGA deferred from the prototype."""
+    """Section 16: SA-first, with PGA deferred from the prototype.
+
+    The deferral is in what the seed declares, not in what the converter can
+    do. The converter writes a footprint for every measure the hazard set
+    carries, so a version reaches PGA functions as soon as a hazard set
+    carrying PGA is attached -- and until one is, the missing measure is
+    reported against that hazard set rather than against the converter.
+    """
     model = ModelVersion.objects.get(version="0.1.0-sa")
     assert set(model.imts) == {"SA(0.3)", "SA(0.6)", "SA(1.0)"}
     assert "PGA" in model.vulnerability_set.imts_used
-    assert model.vulnerability_set.unsupported_imts == ["PGA"]
+    assert model.vulnerability_set.unsupported_imts == []
 
 
 def test_seeded_model_carries_a_peril_scope_statement(seeded):

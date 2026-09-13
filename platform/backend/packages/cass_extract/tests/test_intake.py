@@ -25,7 +25,7 @@ from cass_oed.schema import ACCOUNT_FIELDS, LOCATION_FIELDS, DataType, FileKind
 
 def risk(**overrides):
     row = {
-        "Account reference": "A1",
+        "Policy ID": "A1",
         "Risk reference": "1",
         "Country": "ID",
         "Latitude": "-6.2088",
@@ -40,7 +40,7 @@ def risk(**overrides):
 
 def policy(**overrides):
     row = {
-        "Account reference": "A1",
+        "Policy ID": "A1",
         "Policy reference": "P1",
         "Currency": "USD",
         "Perils covered": "QEQ",
@@ -167,7 +167,9 @@ def test_the_template_carries_the_three_sheets():
 def test_the_headers_are_the_profile_in_order():
     book = load_workbook(io.BytesIO(template.workbook()))
     for sheet in Sheet:
-        header = [cell.value for cell in book[str(sheet)][1]]
+        # Trailing empties: the worked example writes a note beside itself, and
+        # that widens the sheet without adding a column.
+        header = [cell.value for cell in book[str(sheet)][1] if cell.value is not None]
         assert header == [item.name for item in profile.columns_for(sheet)]
 
 
@@ -186,6 +188,58 @@ def test_the_guidance_says_what_each_blank_does():
     assert profile.PROFILE_VERSION in text
 
 
+def test_the_blank_template_opens_with_a_worked_row():
+    """A person reads the example before the explanation.
+
+    Shaded, and marked in a note beside it rather than in a cell a column
+    needs, so every column still shows its own example. The reader drops it
+    whether or not they delete it.
+    """
+    book = load_workbook(io.BytesIO(template.workbook()))
+    sheet = book[profile.RISK_SHEET]
+    row = [str(cell.value) for cell in sheet[2]]
+
+    # Every column shows its own example, and the row says beside itself that
+    # it is an example.
+    assert "2026_06_PFAC8716" in row
+    assert "QEQ" in row
+    assert any(value.startswith("EXAMPLE ROW") for value in row)
+
+
+def test_the_example_row_never_becomes_exposure():
+    """Left in place by a hurried user, it must not be read as a risk."""
+    book = load_workbook(io.BytesIO(template.workbook()))
+    buffer = io.BytesIO()
+    book.save(buffer)
+
+    result = intake.read_workbook(io.BytesIO(buffer.getvalue()))
+
+    assert result.risks.rows == []
+    assert result.policies.rows == []
+
+
+def test_every_column_shows_an_example_in_the_guidance():
+    book = load_workbook(io.BytesIO(template.workbook()))
+    guidance = " | ".join(
+        str(cell.value)
+        for row in book[profile.GUIDE_SHEET].iter_rows()
+        for cell in row
+        if cell.value
+    )
+
+    for column in profile.COLUMNS:
+        assert column.example in guidance, column.name
+
+
+def test_the_policy_id_is_described_as_the_premium_system_writes_it():
+    """"Account number" was ambiguous; the premium system's policy id is not."""
+    column = profile.column("Policy ID")
+
+    assert column.oed_field == "AccNumber"
+    assert column.example == "2026_06_PFAC8716"
+    assert "underwriting year" in column.help_text
+
+
 def test_the_guidance_names_the_fields_cass_fills_in_itself():
     book = load_workbook(io.BytesIO(template.workbook()))
     text = "\n".join(
@@ -195,7 +249,7 @@ def test_the_guidance_names_the_fields_cass_fills_in_itself():
         if cell.value
     )
     assert "PortNumber" in text
-    assert "OED fields this template does not cover" in text
+    assert "the template does not ask for them" in text
 
 
 def test_the_same_generator_produces_a_populated_file():
@@ -209,7 +263,7 @@ def test_the_same_generator_produces_a_populated_file():
             strict=True,
         )
     )
-    assert row["Account reference"] == "A1"
+    assert row["Policy ID"] == "A1"
     assert row["Building value"] == "1000000.00"
 
 
@@ -388,14 +442,14 @@ def test_a_portfolio_with_no_policy_sheet_still_reads():
 # -- the join is checked, not inferred ----------------------------------------------------------
 
 def test_a_policy_covering_no_risk_is_reported():
-    result = read([risk()], [policy(), policy(**{"Account reference": "A9"})])
+    result = read([risk()], [policy(), policy(**{"Policy ID": "A9"})])
     finding = next(item for item in result.findings if item.code == "policy_without_risks")
     assert "A9" in finding.message
 
 
 def test_a_risk_with_no_policy_is_reported_where_others_have_one():
     result = read(
-        [risk(), risk(**{"Account reference": "A2", "Risk reference": "1"})],
+        [risk(), risk(**{"Policy ID": "A2", "Risk reference": "1"})],
         [policy()],
     )
     finding = next(item for item in result.findings if item.code == "risk_without_policy")
@@ -412,8 +466,8 @@ def test_the_same_risk_reference_twice_in_one_account_is_refused():
 def test_the_same_risk_reference_in_two_accounts_is_fine():
     """A location number is unique within an account, not across a portfolio."""
     result = read(
-        [risk(), risk(**{"Account reference": "A2"})],
-        [policy(), policy(**{"Account reference": "A2"})],
+        [risk(), risk(**{"Policy ID": "A2"})],
+        [policy(), policy(**{"Policy ID": "A2"})],
     )
     assert [item for item in result.findings if item.code == "duplicate_risk"] == []
 

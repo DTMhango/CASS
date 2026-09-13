@@ -155,6 +155,12 @@ class Column:
                 f"Column {self.name!r} has no OED field to take its type from, so it "
                 "must state one."
             )
+        if not self.example:
+            raise ProfileError(
+                f"Column {self.name!r} shows no example. A person filling in a "
+                "column reads the example before the explanation, and a column "
+                "with none is the one that comes back wrong."
+            )
 
     @property
     def spec(self) -> FieldSpec | None:
@@ -252,23 +258,27 @@ def _policy(
 
 RISK_COLUMNS: tuple[Column, ...] = (
     _risk(
-        "Account reference",
+        "Policy ID",
         "AccNumber",
         required=True,
         help_text=(
-            "The insured or account this risk belongs to. This is the key that "
-            "joins a risk to its policies, so it must match the Policies sheet "
-            "exactly."
+            "The policy this risk sits under, as the premium system writes it: "
+            "underwriting year, inception month and business reference, joined by "
+            "underscores -- 2026_06_PFAC8716. The business reference on its own is "
+            "not enough, because the same business renews into a new year and a "
+            "new policy. It is the key that joins a risk to its policies, so it "
+            "must match the Policies sheet exactly."
         ),
-        example="PFAC10802",
+        example="2026_06_PFAC8716",
     ),
     _risk(
         "Risk reference",
         "LocNumber",
         required=True,
         help_text=(
-            "Identifies this property within its account. Unique within the "
-            "account, not across the portfolio, and it is what results are "
+            "Identifies this property within its policy -- the location number the "
+            "risk carries in the premium system, numbered from 1. Unique within "
+            "the policy, not across the portfolio, and it is what results are "
             "reported against."
         ),
         example="1",
@@ -318,18 +328,21 @@ RISK_COLUMNS: tuple[Column, ...] = (
             "review, and a modeller who cannot see it cannot do it."
         ),
         blank_effect="Coordinates cannot be checked against an address during review.",
+        example="Jl. Jababeka Raya Blok F, Cikarang",
     ),
     _risk(
         "Postal code",
         "PostalCode",
         help_text="Supports geocoding review.",
         blank_effect="No effect on the model.",
+        example="17530",
     ),
     _risk(
         "Administrative area",
         "AreaCode",
         help_text="Province or equivalent. Conditions enrichment priors.",
         blank_effect="Enrichment priors fall back to the country level.",
+        example="32",
     ),
     _risk(
         "Geocode precision",
@@ -453,12 +466,14 @@ RISK_COLUMNS: tuple[Column, ...] = (
         "YearBuilt",
         help_text="Reported construction year. Never inferred from a code level.",
         blank_effect="No vintage is assumed and none is written.",
+        example="2011",
     ),
     _risk(
         "Storeys",
         "NumberOfStoreys",
         help_text="Supports a derived height class.",
         blank_effect="No height class is derived.",
+        example="2",
     ),
     _risk(
         "Perils covered",
@@ -496,6 +511,7 @@ RISK_COLUMNS: tuple[Column, ...] = (
         help_text="Value of other structures and machinery.",
         when_blank=WhenBlank.ALLOCATED,
         blank_effect="As for building value.",
+        example="120000.00",
     ),
     _risk(
         "Contents value",
@@ -503,6 +519,7 @@ RISK_COLUMNS: tuple[Column, ...] = (
         help_text="Contents and stock replacement value.",
         when_blank=WhenBlank.ALLOCATED,
         blank_effect="As for building value.",
+        example="450000.00",
     ),
     _risk(
         "Business interruption value",
@@ -510,6 +527,7 @@ RISK_COLUMNS: tuple[Column, ...] = (
         help_text="Modelled only where an approved business-interruption model exists.",
         when_blank=WhenBlank.ALLOCATED,
         blank_effect="As for building value.",
+        example="300000.00",
     ),
     _risk(
         "Risk deductible",
@@ -517,6 +535,7 @@ RISK_COLUMNS: tuple[Column, ...] = (
         help_text="Combined deductible applying at this risk.",
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No deductible is applied at the risk. Ground-up loss is unaffected.",
+        example="25000.00",
     ),
     _risk(
         "Risk limit",
@@ -524,20 +543,22 @@ RISK_COLUMNS: tuple[Column, ...] = (
         help_text="Combined limit applying at this risk.",
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No limit is applied at the risk. Ground-up loss is unaffected.",
+        example="1200000.00",
     ),
 )
 
 
 POLICY_COLUMNS: tuple[Column, ...] = (
     _policy(
-        "Account reference",
+        "Policy ID",
         "AccNumber",
         required=True,
         help_text=(
-            "The account this policy covers. Must match the Risks sheet exactly; "
-            "this is the join CASS no longer has to guess."
+            "The policy these terms apply to, written exactly as on the Risks "
+            "sheet: underwriting year, inception month and business reference. "
+            "This is the join CASS no longer has to guess."
         ),
-        example="PFAC10802",
+        example="2026_06_PFAC8716",
     ),
     _policy(
         "Policy reference",
@@ -586,12 +607,14 @@ POLICY_COLUMNS: tuple[Column, ...] = (
         "PolInceptionDate",
         help_text="Start of the period of cover.",
         blank_effect="No period is written; contract dates cannot be applied.",
+        example="2026-06-11",
     ),
     _policy(
         "Expiry date",
         "PolExpiryDate",
         help_text="End of the period of cover.",
         blank_effect="No period is written; contract dates cannot be applied.",
+        example="2027-06-11",
     ),
     _policy(
         "Layer",
@@ -620,6 +643,7 @@ POLICY_COLUMNS: tuple[Column, ...] = (
         help_text="Limit of this layer.",
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="Insured loss cannot be calculated for this policy.",
+        example="5000000.00",
     ),
     _policy(
         "Layer attachment",
@@ -627,6 +651,7 @@ POLICY_COLUMNS: tuple[Column, ...] = (
         help_text="Attachment point of this layer.",
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="Insured loss cannot be calculated for this policy.",
+        example="1000000.00",
     ),
     _policy(
         "Policy deductible",
@@ -634,6 +659,7 @@ POLICY_COLUMNS: tuple[Column, ...] = (
         help_text="Combined deductible applying at the policy.",
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No policy deductible is applied.",
+        example="250000.00",
     ),
     _policy(
         "Policy limit",
@@ -641,6 +667,7 @@ POLICY_COLUMNS: tuple[Column, ...] = (
         help_text="Combined limit applying at the policy.",
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No policy limit is applied.",
+        example="10000000.00",
     ),
 )
 
@@ -654,6 +681,16 @@ DERIVED_FIELDS: Mapping[str, str] = {
     "PortNumber": "The CASS project reference the import belongs to.",
     "OEDVersion": f"The OED release CASS is pinned to ({OED_SCHEMA_VERSION}).",
     "BuildingID": "Written as one building per risk row unless a source states otherwise.",
+    # OED requires a basis and a peril beside every financial amount, and the
+    # engine refuses a file without them. Neither is a question for the person
+    # filling in the template: CASS calculates flat monetary terms for the
+    # peril it models, so it writes both rather than asking.
+    "LocPeril": "QEQ: the peril CASS models, which the risk's terms are written against.",
+    "LocDedType6All": "0, a flat monetary amount -- the only deductible basis CASS calculates.",
+    "LocLimitType6All": "0, a flat monetary amount -- the only limit basis CASS calculates.",
+    "PolPeril": "QEQ: the peril CASS models, which the policy's terms are written against.",
+    "PolDedType6All": "0, a flat monetary amount -- the only deductible basis CASS calculates.",
+    "PolLimitType6All": "0, a flat monetary amount -- the only limit basis CASS calculates.",
 }
 
 

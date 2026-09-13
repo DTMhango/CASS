@@ -302,7 +302,7 @@ def risk_row(
 ) -> dict[str, Any]:
     """One row of the Risks sheet, in template column names."""
     row = {
-        "Account reference": account,
+        "Policy ID": account,
         "Risk reference": reference,
         "Country": country,
         "Latitude": str(latitude),
@@ -323,7 +323,7 @@ def risk_row(
 def policy_row(account: str, reference: str, total: str, **extra: Any) -> dict[str, Any]:
     """One row of the Policies sheet, in template column names."""
     row = {
-        "Account reference": account,
+        "Policy ID": account,
         "Policy reference": reference,
         "Currency": "USD",
         "Perils covered": "QEQ",

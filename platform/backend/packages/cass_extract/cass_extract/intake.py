@@ -113,9 +113,9 @@ class IntakeRead:
 
     def accounts(self) -> set[str]:
         return {
-            str(row.get("Account reference") or "").strip()
+            str(row.get("Policy ID") or "").strip()
             for row in self.risks.rows
-            if row.get("Account reference")
+            if row.get("Policy ID")
         }
 
     def deferred(self) -> list[SourceRow]:
@@ -193,6 +193,19 @@ def _empty(sheet: Sheet) -> SheetRead:
     )
 
 
+def _is_example(cells: Sequence[Any]) -> bool:
+    """Whether this row is the template's own worked example.
+
+    Read from the whole row rather than the mapped columns: the marker sits
+    beside the example, in a cell no column claims, so that every column of the
+    example can show its own value.
+    """
+    return any(
+        cell is not None and str(cell).strip().upper().startswith("EXAMPLE ROW")
+        for cell in cells
+    )
+
+
 def _read_sheet(worksheet, sheet: Sheet) -> SheetRead:
     iterator = worksheet.iter_rows(values_only=True)
     try:
@@ -244,6 +257,13 @@ def _read_values(
 
         if blank:
             # A trailing empty row is how a spreadsheet ends, not a problem.
+            continue
+
+        if _is_example(cells):
+            # The template ships a worked row so a person can see what a filled
+            # in one looks like. It says in its first cell that it should go,
+            # and it is dropped here whether or not they deleted it: a hurried
+            # user must not be able to turn the example into exposure.
             continue
 
         for item in expected:
@@ -376,7 +396,7 @@ def _duplicate_risks(sheet: SheetRead) -> Iterator[Finding]:
     seen: dict[tuple[str, str], int] = {}
     for row in sheet.rows:
         key = (
-            str(row.get("Account reference") or "").strip(),
+            str(row.get("Policy ID") or "").strip(),
             str(row.get("Risk reference") or "").strip(),
         )
         if not all(key):
@@ -402,7 +422,7 @@ def _duplicate_policies(sheet: SheetRead) -> Iterator[Finding]:
     for row in sheet.rows:
         layer = row.get("Layer")
         key = (
-            str(row.get("Account reference") or "").strip(),
+            str(row.get("Policy ID") or "").strip(),
             str(row.get("Policy reference") or "").strip(),
             "" if layer is None else str(layer),
         )
@@ -439,7 +459,7 @@ def _orphans(read: IntakeRead) -> Iterator[Finding]:
     risk_accounts = read.accounts()
     policy_accounts: dict[str, int] = {}
     for row in read.policies.rows:
-        account = str(row.get("Account reference") or "").strip()
+        account = str(row.get("Policy ID") or "").strip()
         if account:
             policy_accounts.setdefault(account, row.row_number)
 
@@ -452,7 +472,7 @@ def _orphans(read: IntakeRead) -> Iterator[Finding]:
         yield Finding(
             sheet=read.policies.sheet,
             row_number=uncovered[0][1],
-            field="Account reference",
+            field="Policy ID",
             code="policy_without_risks",
             message=(
                 f"{len(uncovered)} {_accounts(len(uncovered))} policy terms but "
@@ -468,17 +488,17 @@ def _orphans(read: IntakeRead) -> Iterator[Finding]:
         return
     unpriced = sorted(
         {
-            str(row.get("Account reference") or "").strip(): row.row_number
+            str(row.get("Policy ID") or "").strip(): row.row_number
             for row in read.risks.rows
-            if str(row.get("Account reference") or "").strip()
-            and str(row.get("Account reference") or "").strip() not in policy_accounts
+            if str(row.get("Policy ID") or "").strip()
+            and str(row.get("Policy ID") or "").strip() not in policy_accounts
         }.items()
     )
     if unpriced:
         yield Finding(
             sheet=read.risks.sheet,
             row_number=unpriced[0][1],
-            field="Account reference",
+            field="Policy ID",
             code="risk_without_policy",
             message=(
                 f"{len(unpriced)} {_accounts(len(unpriced))} risks but no policy "
@@ -523,7 +543,7 @@ def _allocation_needs(read: IntakeRead) -> Iterator[Finding]:
     """Risks that defer to an allocation their policy cannot supply."""
     totals: dict[str, Decimal] = {}
     for row in read.policies.rows:
-        account = str(row.get("Account reference") or "").strip()
+        account = str(row.get("Policy ID") or "").strip()
         total = row.get("Total insured value")
         if account and total is not None:
             totals[account] = totals.get(account, Decimal("0.00")) + total
@@ -531,7 +551,7 @@ def _allocation_needs(read: IntakeRead) -> Iterator[Finding]:
     for row in read.risks.rows:
         if not defers_to_allocation(row):
             continue
-        account = str(row.get("Account reference") or "").strip()
+        account = str(row.get("Policy ID") or "").strip()
         if account and account in totals:
             continue
         yield Finding(
@@ -579,7 +599,7 @@ def coverage_evidence(read: IntakeRead) -> Mapping[str, int]:
 #: happens to be called. A loading API that populates CASS directly produces
 #: these same records without going near a workbook.
 RISK_FIELDS: Mapping[str, str] = {
-    "Account reference": "business_id",
+    "Policy ID": "business_id",
     "Risk reference": "location_number",
     "Risk name": "label",
     "Primary site": "primary_location",
@@ -608,7 +628,7 @@ RISK_FIELDS: Mapping[str, str] = {
 }
 
 POLICY_FIELDS: Mapping[str, str] = {
-    "Account reference": "business_id",
+    "Policy ID": "business_id",
     "Policy reference": "policy_id",
     "Currency": "currency",
     "Perils covered": "perils_covered",

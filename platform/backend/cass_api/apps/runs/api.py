@@ -8,7 +8,8 @@ cancellation path. Those are the two things this module serves.
 
 from __future__ import annotations
 
-from django.db import models
+from django.conf import settings
+from django.db import models, transaction
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -18,9 +19,11 @@ from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from apps.common.permissions import IsProjectMember
 from apps.common.queries import visible_projects
+from apps.modelregistry.models import PublicationState
+from apps.projects.models import Project
 from cass_core.runs import RunState, describe
 
-from .models import AnalysisRun, ConversionRun, HazardRun, Run, RunStageEvent
+from .models import AnalysisRun, ConversionRun, HazardRun, Run, RunKind, RunStageEvent
 
 
 class RunStageEventSerializer(serializers.ModelSerializer):
@@ -86,8 +89,31 @@ class ConversionRunSerializer(serializers.ModelSerializer):
 
 
 class AnalysisRunSerializer(serializers.ModelSerializer):
+    """An analysis, and the run that carries it.
+
+    The two are created together rather than separately. A ``Run`` with no
+    detail record is a row nothing can execute and nothing can explain, so
+    there is no endpoint that makes one on its own: a caller names what the
+    analysis should use, and the lifecycle record comes with it.
+
+    The three write-only fields below are the run half of that -- which
+    project owns it, what to call it, and the resource envelope of section 11.
+    """
+
     run_detail = RunSerializer(source="run", read_only=True)
     may_proceed_past_keys = serializers.BooleanField(read_only=True)
+
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.none(),
+        write_only=True,
+        help_text="The project that will own the run, its artifacts and its results.",
+    )
+    label = serializers.CharField(
+        max_length=200, required=False, allow_blank=True, write_only=True
+    )
+    execution_profile = serializers.CharField(
+        max_length=32, required=False, allow_blank=True, write_only=True
+    )
 
     class Meta:
         model = AnalysisRun
@@ -97,11 +123,144 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
             "oasis_analysis_id", "oasis_portfolio_id", "keys_summary",
             "keys_reconciled", "may_proceed_past_keys", "exception_approval",
             "created_at",
+            # Write-only, consumed by ``create`` to build the run.
+            "project", "label", "execution_profile",
         ]
         read_only_fields = [
-            "id", "run_detail", "oasis_analysis_id", "oasis_portfolio_id",
+            "id", "run", "run_detail", "oasis_analysis_id", "oasis_portfolio_id",
             "keys_summary", "keys_reconciled", "may_proceed_past_keys", "created_at",
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        if request is not None and "project" in self.fields:
+            self.fields["project"].queryset = visible_projects(request.user)
+
+    def validate_execution_profile(self, value: str) -> str:
+        """Refuse a profile this installation does not declare.
+
+        Section 11 requires a declared envelope rather than an inherited
+        maximum, so an unknown name is a refusal rather than a silent fallback
+        to whatever the default happens to be.
+        """
+        if value and value not in settings.CASS_EXECUTION_PROFILES:
+            raise serializers.ValidationError(
+                f"{value} is not an execution profile on this installation. "
+                f"Declared: {', '.join(sorted(settings.CASS_EXECUTION_PROFILES))}."
+            )
+        return value
+
+    def validate(self, attrs):
+        """Check the preconditions of section 8 before a run exists at all.
+
+        Every one of these is something the analysis builder already shows as
+        an outstanding precondition. Repeating them here is deliberate: a
+        screen is a courtesy and the API is the rule, so a caller that skips
+        the screen still cannot queue work against unpublished input.
+        """
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+
+        project = attrs["project"]
+        exposure = attrs["exposure_version"]
+        model_version = attrs["model_version"]
+
+        if actor is not None and not project.may_write(actor):
+            raise serializers.ValidationError(
+                {"project": "You may not submit runs in this project."}
+            )
+
+        if exposure.project_id != project.id:
+            raise serializers.ValidationError(
+                {
+                    "exposure_version": (
+                        f"{exposure.name} belongs to another project. A run reads "
+                        "exposure from the project that owns it."
+                    )
+                }
+            )
+
+        if not exposure.is_usable_by_runs:
+            raise serializers.ValidationError(
+                {
+                    "exposure_version": (
+                        f"{exposure.name} v{exposure.version} is not published. "
+                        "Publish it first, so the run points at immutable input."
+                    )
+                }
+            )
+
+        if model_version.publication_state not in (
+            PublicationState.PUBLISHED,
+            PublicationState.APPROVED,
+        ):
+            raise serializers.ValidationError(
+                {
+                    "model_version": (
+                        f"{model_version.reference} is "
+                        f"{model_version.get_publication_state_display().lower()} "
+                        "rather than published, so it may not be run."
+                    )
+                }
+            )
+
+        requested = attrs.get("perspectives") or []
+        if not requested:
+            raise serializers.ValidationError(
+                {"perspectives": "Name at least one perspective for the run to produce."}
+            )
+
+        # Section 8 forbids implying a perspective the source data does not
+        # support, so an unsupported request is refused with the reason the
+        # exposure recorded rather than run to a silently zero answer.
+        availability = {
+            str(item.get("perspective")): item
+            for item in (exposure.supported_perspectives or [])
+        }
+        for perspective in requested:
+            entry = availability.get(str(perspective))
+            if entry is None:
+                raise serializers.ValidationError(
+                    {"perspectives": f"{perspective} is not a perspective CASS produces."}
+                )
+            if not entry.get("available"):
+                raise serializers.ValidationError(
+                    {
+                        "perspectives": (
+                            f"{entry.get('label', perspective)} is not supported by "
+                            f"this portfolio. {entry.get('reason', '')}".strip()
+                        )
+                    }
+                )
+
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        project = validated_data.pop("project")
+        label = validated_data.pop("label", "") or ""
+        profile = (
+            validated_data.pop("execution_profile", "")
+            or settings.CASS_DEFAULT_EXECUTION_PROFILE
+        )
+        actor = self.context["request"].user
+        exposure = validated_data["exposure_version"]
+
+        run = Run.objects.create(
+            kind=RunKind.ANALYSIS,
+            project=project,
+            label=label or f"{exposure.name} v{exposure.version}",
+            execution_profile=profile,
+            created_by=actor,
+            updated_by=actor,
+        )
+        # The currency the source reconciles in, unless the caller named one.
+        if not validated_data.get("run_currency"):
+            validated_data["run_currency"] = exposure.run_currency
+        return AnalysisRun.objects.create(
+            run=run, created_by=actor, updated_by=actor, **validated_data
+        )
 
 
 class RunViewSet(viewsets.ReadOnlyModelViewSet):
@@ -142,6 +301,11 @@ class RunViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(
             [
                 {
+                    # The id is what makes the artifact retrievable: the
+                    # download endpoint is addressed by it, and a payload
+                    # carrying only a URI left the monitor able to list
+                    # evidence nobody could open.
+                    "id": str(link.artifact_id),
                     "role": link.role,
                     "direction": link.direction,
                     "uri": link.artifact.uri,
@@ -223,6 +387,26 @@ class RunViewSet(viewsets.ReadOnlyModelViewSet):
             created_by=request.user,
             updated_by=request.user,
         )
+        # A run is a lifecycle record; what makes it executable is the
+        # kind-specific detail hanging off it. Copying the lifecycle alone
+        # produced a row that could be seen and never run, so the analysis
+        # configuration is carried across to the replacement. The engine
+        # identifiers and the keys reconciliation are deliberately not: they
+        # describe the attempt that failed, and the retry has to earn its own.
+        analysis = getattr(run, "analysis", None)
+        if analysis is not None:
+            AnalysisRun.objects.create(
+                run=replacement,
+                exposure_version=analysis.exposure_version,
+                enrichment_run=analysis.enrichment_run,
+                model_version=analysis.model_version,
+                perspectives=analysis.perspectives,
+                analysis_settings=analysis.analysis_settings,
+                run_currency=analysis.run_currency,
+                created_by=request.user,
+                updated_by=request.user,
+            )
+
         audit.record(
             action=AuditAction.RETRY,
             subject_type="run",
@@ -255,12 +439,37 @@ class AnalysisRunViewSet(viewsets.ModelViewSet):
     queryset = AnalysisRun.objects.none()
     serializer_class = AnalysisRunSerializer
     permission_classes = [IsProjectMember]
-    filterset_fields = ["exposure_version", "model_version"]
+    # ``run`` is filterable so the monitor can find the analysis behind a run
+    # it is already showing, rather than being given a second id to carry.
+    filterset_fields = ["run", "exposure_version", "model_version"]
 
     def get_queryset(self):
         return AnalysisRun.objects.filter(
             run__project__in=visible_projects(self.request.user)
         ).select_related("run", "exposure_version", "model_version")
+
+    def perform_create(self, serializer):
+        """Create the analysis, and record who configured it.
+
+        Creation is separate from submission on purpose: section 3 asks the
+        builder to show a validation summary before work is queued, and an
+        analyst who configures a run is not always the person who releases it.
+        """
+        analysis = serializer.save()
+        audit.record(
+            action=AuditAction.CREATE,
+            subject_type="analysis_run",
+            subject_id=analysis.run_id,
+            actor=self.request.user,
+            project=analysis.run.project,
+            subject_label=str(analysis.run),
+            after={
+                "exposure_version": str(analysis.exposure_version_id),
+                "model_version": str(analysis.model_version_id),
+                "perspectives": analysis.perspectives,
+            },
+            request=self.request,
+        )
 
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None, version=None):

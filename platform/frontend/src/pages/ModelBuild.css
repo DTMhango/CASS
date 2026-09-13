@@ -35,3 +35,96 @@
   font-size: var(--text-sm);
   color: var(--grey-600);
 }
+
+/* Model versions and the gates open on this installation. */
+.build__empty {
+  padding: var(--space-4);
+}
+
+.build__blockers {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--grey-700);
+  font-size: var(--text-sm);
+}
+
+.build__error {
+  margin: var(--space-2) 0 0;
+  color: var(--status-error);
+  font-size: var(--text-sm);
+}
+
+.gate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gate {
+  padding: var(--space-3);
+  border: 1px solid var(--grey-200);
+  border-radius: var(--radius-lg);
+}
+
+.gate__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.gate__name {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.gate__rationale {
+  margin: var(--space-2) 0 0;
+}
+
+.gate__decide {
+  margin-top: var(--space-3);
+}
+
+.gate__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.gate__independence {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+}
+
+/* Attaching hazard and building the Oasis package. */
+.build__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 13rem;
+}
+
+/* These labels are sentences rather than verbs -- "Request converter approval"
+   -- and this column is narrow. A button whose height is fixed spills its
+   second line over the button below it, so here they grow instead. */
+.build__actions .btn {
+  height: auto;
+  min-height: 32px;
+  padding-block: var(--space-2);
+  text-align: center;
+}
+
+.build__attach {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.build__package-note {
+  font-size: var(--text-sm);
+}

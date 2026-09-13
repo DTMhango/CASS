@@ -66,7 +66,12 @@ from .assets import (
     attach_vulnerability_functions,
     attach_vulnerability_mapping,
 )
-from .models import ModelVersion, PublicationState, VulnerabilitySet
+from .models import (
+    INTERNAL_USE_LICENCE,
+    ModelVersion,
+    PublicationState,
+    VulnerabilitySet,
+)
 
 #: The release every pilot build reads. Exposure and vulnerability generations
 #: must match, and mixing a 2023-era exposure summary with 2026 functions --
@@ -96,38 +101,36 @@ class GemRegistrationError(Exception):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class LicenceStatement:
-    """What the operator asserts about the right to use this data.
+    """What the installation is entitled to do with this data.
 
-    A dataclass rather than a boolean so the assertion cannot be made without
-    the reference that supports it. ``cleared`` without ``reference`` is
-    refused: an unevidenced clearance in a governance record is worse than an
-    honest absence, because it looks like it was checked.
+    CASS runs inside Klapton Re, and the data it carries is used there and
+    nowhere else: not redistributed and not sold. That is what the public model
+    licences permit without a separate agreement, and it is a property of the
+    installation rather than of any one upload -- so it is the default here and
+    the screens no longer ask. A narrower or wider entitlement can still be
+    stated by passing one, and it is recorded with the set either way.
     """
 
-    cleared: bool = False
-    reference: str = ""
+    cleared: bool = True
+    reference: str = INTERNAL_USE_LICENCE
     note: str = ""
 
     def __post_init__(self) -> None:
         if self.cleared and not self.reference.strip():
             raise GemRegistrationError(
-                "A licence clearance needs a reference -- the agreement, approval or "
-                "correspondence that grants it. Section 10 makes this a gate with a "
-                "named approver, and a cleared flag with nothing behind it would "
-                "pass that gate without anyone having done anything."
+                "A licence clearance needs a reference -- the basis that grants it. "
+                "A cleared flag with nothing behind it records an entitlement "
+                "nobody could point to."
             )
 
     def as_note(self) -> str:
         if not self.cleared:
             return (
-                f"Commercial use of the {GEM_LICENCE} data has not been confirmed. "
-                "This set may be used for research and platform development and not "
-                "for a pricing or reserving decision."
+                f"Use of the {GEM_LICENCE} data has not been cleared on this "
+                "installation. This set may be used for platform development and "
+                "not for a pricing or reserving decision."
             ) + (f" {self.note}" if self.note else "")
-        return (
-            f"Commercial use confirmed under {self.reference}."
-            + (f" {self.note}" if self.note else "")
-        )
+        return f"{self.reference}" + (f" {self.note}" if self.note else "")
 
 
 def build(

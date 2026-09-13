@@ -12,6 +12,7 @@ from apps.audit.models import AuditAction
 from apps.common.permissions import IsProjectMember
 from apps.common.queries import visible_projects
 
+from . import comparison as comparison_service
 from .models import ResultComparison, ResultSet, ResultState
 
 
@@ -42,14 +43,23 @@ class ResultSetSerializer(serializers.ModelSerializer):
 
 class ResultComparisonSerializer(serializers.ModelSerializer):
     is_like_for_like = serializers.BooleanField(read_only=True)
+    baseline_detail = ResultSetSerializer(source="baseline", read_only=True)
+    candidate_detail = ResultSetSerializer(source="candidate", read_only=True)
 
     class Meta:
         model = ResultComparison
         fields = [
-            "id", "project", "label", "baseline", "candidate", "differences",
+            "id", "project", "label", "baseline", "baseline_detail",
+            "candidate", "candidate_detail", "differences",
             "commentary", "is_like_for_like", "created_at",
         ]
-        read_only_fields = ["id", "is_like_for_like", "created_at"]
+        # ``differences`` is computed from the two results rather than supplied.
+        # ADR 5 keeps money arithmetic on the server: a difference a caller
+        # posted would be a number nobody could reproduce, stored as a fact.
+        read_only_fields = [
+            "id", "baseline_detail", "candidate_detail", "differences",
+            "is_like_for_like", "created_at",
+        ]
 
     def validate(self, attrs):
         baseline = attrs.get("baseline")
@@ -66,6 +76,15 @@ class ResultComparisonSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     f"The results are in {baseline.currency} and {candidate.currency}. "
                     "Normalise to one currency before comparing."
+                )
+            if baseline.pk == candidate.pk:
+                raise serializers.ValidationError(
+                    "A result compared against itself has no difference to report."
+                )
+            if baseline.project_id != candidate.project_id:
+                raise serializers.ValidationError(
+                    "The two results belong to different projects. A comparison "
+                    "belongs to one of them, and which one would be arbitrary."
                 )
         return attrs
 
@@ -166,4 +185,32 @@ class ResultComparisonViewSet(viewsets.ModelViewSet):
         ).select_related("baseline", "candidate")
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user, updated_by=self.request.user)
+        """Compute the comparison, then save it.
+
+        Once, at creation, and stored. Recomputing on every read would let a
+        saved comparison change quietly when a result was corrected, and the
+        point of saving one is to be able to say what was compared and when.
+        """
+        serializer.save(
+            created_by=self.request.user,
+            updated_by=self.request.user,
+            differences=comparison_service.differences(
+                serializer.validated_data["baseline"],
+                serializer.validated_data["candidate"],
+            ),
+        )
+
+    def perform_update(self, serializer):
+        """Keep the stored answer consistent with what it answers about.
+
+        Editing the commentary must not silently leave a difference computed
+        from two other results standing beside a new pair, so the arithmetic is
+        redone against whichever results the record now names.
+        """
+        instance = serializer.instance
+        baseline = serializer.validated_data.get("baseline", instance.baseline)
+        candidate = serializer.validated_data.get("candidate", instance.candidate)
+        serializer.save(
+            updated_by=self.request.user,
+            differences=comparison_service.differences(baseline, candidate),
+        )

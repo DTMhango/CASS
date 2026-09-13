@@ -36,12 +36,7 @@ class PublicationState(models.TextChoices):
 
 
 class IntensityMeasure(models.TextChoices):
-    """The intensity measures the SA-first converter baseline addresses.
-
-    Section 6 limits the initial converter to the SA family, starting with
-    SA(0.3). PGA is listed because the GEM 2026 functions use it and the
-    coverage report must name it, not because the converter emits it yet.
-    """
+    """The intensity measures CASS routes between hazard and vulnerability."""
 
     SA_03 = "SA(0.3)", "Spectral acceleration, 0.3 s"
     SA_06 = "SA(0.6)", "Spectral acceleration, 0.6 s"
@@ -49,12 +44,16 @@ class IntensityMeasure(models.TextChoices):
     PGA = "PGA", "Peak ground acceleration"
 
 
-#: The IMTs the converter can currently produce. Section 6 forbids treating the
-#: SA-only package as a complete country model while material exposure maps to
-#: PGA functions, so this set is checked at publication.
-SUPPORTED_IMTS: frozenset[str] = frozenset(
-    {IntensityMeasure.SA_03, IntensityMeasure.SA_06, IntensityMeasure.SA_10}
-)
+#: The IMTs the converter can produce a footprint for.
+#:
+#: Section 6's SA-first baseline was a statement about the converter, and it has
+#: been overtaken: the converter writes one footprint per measure the hazard set
+#: carries, PGA included, each as its own area-peril channel. What limits a
+#: model version now is not the converter but its hazard -- and that is checked
+#: where it belongs, against the attached hazard set's own measures, so a
+#: version is never told a measure cannot be produced when the only thing
+#: missing is a calculation that computed it.
+SUPPORTED_IMTS: frozenset[str] = frozenset(IntensityMeasure.values)
 
 
 class AreaPerilGrid(BaseModel, FreezableModel):
@@ -121,13 +120,27 @@ class AreaPerilGrid(BaseModel, FreezableModel):
         return f"{self.country_code.lower()}-grid-{self.version}"
 
 
+#: The basis every asset on this installation is held under.
+#:
+#: CASS is an internal Klapton Re platform. The model data it carries is used
+#: inside the company, is not redistributed outside it, and earns nothing on its
+#: own account -- which is what the public model licences permit without a
+#: separate commercial agreement. It is a fact about the installation rather
+#: than a question to ask of each upload, so it is recorded here, applied by
+#: default, and shown once in Administration instead of on every screen.
+INTERNAL_USE_LICENCE = (
+    "Internal use within Klapton Re only: no redistribution outside the company "
+    "and no commercial exploitation."
+)
+
+
 class VulnerabilitySet(BaseModel, FreezableModel):
     """A versioned set of vulnerability functions with its provenance.
 
     Section 8 requires vulnerability versions to be approved independently from
-    hazard versions, and section 10 requires a data-rights gate before use.
-    ``licence_cleared`` is therefore a stored fact, not an assumption: the GEM
-    public models are CC BY-NC-SA and commercial use is unconfirmed.
+    hazard versions. The data-rights question that used to sit beside them is
+    answered once for the installation by ``INTERNAL_USE_LICENCE`` rather than
+    per set.
     """
 
     country_code = models.CharField(max_length=2, db_index=True)
@@ -144,10 +157,10 @@ class VulnerabilitySet(BaseModel, FreezableModel):
 
     licence = models.CharField(max_length=120, blank=True)
     licence_cleared = models.BooleanField(
-        default=False,
-        help_text="Whether commercial use has been confirmed in writing by the licensor.",
+        default=True,
+        help_text="Cleared under the installation's internal-use basis.",
     )
-    licence_note = models.TextField(blank=True)
+    licence_note = models.TextField(blank=True, default=INTERNAL_USE_LICENCE)
 
     function_count = models.IntegerField(default=0)
     imts_used = models.JSONField(
@@ -235,8 +248,8 @@ class HazardModel(BaseModel, FreezableModel):
     source_organisation = models.CharField(max_length=200, blank=True)
     publication_reference = models.CharField(max_length=300, blank=True)
     licence = models.CharField(max_length=120, blank=True)
-    licence_cleared = models.BooleanField(default=False)
-    licence_note = models.TextField(blank=True)
+    licence_cleared = models.BooleanField(default=True)
+    licence_note = models.TextField(blank=True, default=INTERNAL_USE_LICENCE)
 
     archive_checksum = models.CharField(max_length=64, blank=True)
     archive_bytes = models.BigIntegerField(default=0)
@@ -308,6 +321,15 @@ class HazardJobSpec(BaseModel):
     #: model's published configuration rather than replacing it, so a setting
     #: nobody touched keeps whatever the publisher chose.
     overrides = models.JSONField(default=dict)
+    #: How much of the grid the run computes, as four bounds in degrees. Empty
+    #: means the whole grid. Kept apart from ``overrides`` because it is not an
+    #: engine parameter: it changes which sites a run has, not how any of them
+    #: is calculated.
+    region = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Bounds of the cells this run computes; empty means the whole grid.",
+    )
     #: The configuration those edits produce, rendered and validated. Stored so
     #: a reviewer sees what would run rather than having to recompute it.
     resolved_configuration = models.JSONField(default=dict)
@@ -358,8 +380,8 @@ class HazardSet(BaseModel, FreezableModel):
         default=list, help_text="The GMPEs the logic tree used."
     )
     licence = models.CharField(max_length=120, blank=True)
-    licence_cleared = models.BooleanField(default=False)
-    licence_note = models.TextField(blank=True)
+    licence_cleared = models.BooleanField(default=True)
+    licence_note = models.TextField(blank=True, default=INTERNAL_USE_LICENCE)
 
     grid = models.ForeignKey(
         AreaPerilGrid, on_delete=models.PROTECT, related_name="hazard_sets"

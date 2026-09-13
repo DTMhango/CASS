@@ -26,8 +26,10 @@ from celery import shared_task
 from apps.modelregistry.assets import ModelAssetError
 from cass_adapters.base import AdapterError
 
+from . import conversion as conversion_service
+from . import hazard as hazard_service
 from . import services
-from .models import AnalysisRun
+from .models import AnalysisRun, ConversionRun, HazardRun
 
 logger = logging.getLogger(__name__)
 
@@ -90,3 +92,78 @@ def cancel_analysis(analysis_run_id: str, actor_id: str | None = None) -> dict:
 
     analysis_run.run.refresh_from_db()
     return {"analysis_run": str(analysis_run_id), "state": analysis_run.run.state}
+
+
+@shared_task(name="cass.runs.execute_hazard")
+def execute_hazard(hazard_run_id: str) -> dict:
+    """Run one OpenQuake hazard calculation, from job files to a datastore.
+
+    A national calculation runs for hours, which is the whole reason this is a
+    task: section 3 requires that work continue whether or not a browser stays
+    open, and a modeller follows it on the run monitor rather than holding a
+    request.
+    """
+    hazard_run = HazardRun.objects.select_related("run").get(id=hazard_run_id)
+    try:
+        hazard_service.execute(hazard_run, actor=hazard_run.created_by)
+    except (AdapterError, hazard_service.HazardExecutionError) as exc:
+        # Already recorded against the run by the service. The monitor is where
+        # a person reads this, not the broker.
+        logger.warning("hazard run %s failed: %s", hazard_run_id, exc)
+        hazard_run.run.refresh_from_db()
+        return {
+            "hazard_run": str(hazard_run_id),
+            "state": hazard_run.run.state,
+            "stage": hazard_run.run.failure_stage,
+            "summary": hazard_run.run.failure_summary,
+        }
+
+    hazard_run.run.refresh_from_db()
+    return {
+        "hazard_run": str(hazard_run_id),
+        "state": hazard_run.run.state,
+        "calculation": hazard_run.openquake_calculation_id,
+    }
+
+
+@shared_task(name="cass.runs.cancel_hazard")
+def cancel_hazard(hazard_run_id: str, actor_id: str | None = None) -> dict:
+    """Stop a calculation on OpenQuake as well as in CASS."""
+    from apps.accounts.models import User
+
+    hazard_run = HazardRun.objects.select_related("run").get(id=hazard_run_id)
+    actor = User.objects.filter(id=actor_id).first() if actor_id else None
+    try:
+        hazard_service.cancel(hazard_run, actor=actor)
+    except AdapterError as exc:
+        logger.warning("cancellation of %s did not reach OpenQuake: %s", hazard_run_id, exc)
+        hazard_run.run.refresh_from_db()
+        return {
+            "hazard_run": str(hazard_run_id),
+            "state": hazard_run.run.state,
+            "summary": hazard_run.run.failure_summary,
+        }
+
+    hazard_run.run.refresh_from_db()
+    return {"hazard_run": str(hazard_run_id), "state": hazard_run.run.state}
+
+
+@shared_task(name="cass.runs.execute_conversion")
+def execute_conversion(conversion_run_id: str) -> dict:
+    """Build and deploy an Oasis model package for a model version."""
+    conversion_run = ConversionRun.objects.select_related(
+        "run", "model_version", "model_version__hazard_set"
+    ).get(id=conversion_run_id)
+    try:
+        conversion_service.execute(conversion_run, actor=conversion_run.created_by)
+    except Exception as exc:  # recorded against the run by the service
+        logger.warning("conversion run %s failed: %s", conversion_run_id, exc)
+        conversion_run.run.refresh_from_db()
+        return {
+            "conversion_run": str(conversion_run_id),
+            "state": conversion_run.run.state,
+            "stage": conversion_run.run.failure_stage,
+            "summary": conversion_run.run.failure_summary,
+        }
+    conversion_run.run.refresh_from_db()
+    return {"conversion_run": str(conversion_run_id), "state": conversion_run.run.state}

@@ -92,6 +92,33 @@ def _money(name: str, label: str, help_text: str = "", *, tiv: bool = False) -> 
     )
 
 
+#: The only deductible or limit basis CASS calculates: a flat monetary amount.
+#: OED also defines 1 (percentage of TIV) and 2 (percentage of loss), and a
+#: portfolio using either is refused rather than approximated as flat.
+FLAT_TERM_BASIS = "0"
+
+
+def _term_type(name: str, label: str) -> FieldSpec:
+    """A deductible or limit basis column.
+
+    OED requires one wherever the matching amount carries a value, so CASS has
+    to read it: refusing the column outright made every portfolio with a
+    deductible unrunnable -- rejected here if it named the basis, and rejected
+    inside the engine if it did not.
+    """
+    return FieldSpec(
+        name=name,
+        dtype=DataType.INTEGER,
+        business_label=label,
+        allowed=(FLAT_TERM_BASIS,),
+        business_help=(
+            "0 for a flat monetary amount, which is what CASS calculates. "
+            "Percentage bases are refused rather than approximated."
+        ),
+        is_financial_term=True,
+    )
+
+
 def _rate(name: str, label: str, help_text: str = "") -> FieldSpec:
     return FieldSpec(
         name=name,
@@ -127,7 +154,9 @@ LOCATION_FIELDS: tuple[FieldSpec, ...] = (
               business_help="Used for geocoding review, never for calculation."),
     FieldSpec("PostalCode", DataType.TEXT, "Postal code"),
     FieldSpec("AreaCode", DataType.TEXT, "Administrative area",
-              business_help="Adm1 or equivalent; conditions enrichment priors."),
+              business_help="The OED area code for the country, not its name -- Indonesia "
+                            "uses the BPS province numbers, so DKI Jakarta is 31. Conditions "
+                            "enrichment priors, and the engine refuses a pair it does not know."),
     FieldSpec("OccupancyCode", DataType.TEXT, "Occupancy", required=True,
               business_help="OED occupancy code. Classified before construction taxonomy."),
     FieldSpec("ConstructionCode", DataType.TEXT, "Construction",
@@ -147,6 +176,11 @@ LOCATION_FIELDS: tuple[FieldSpec, ...] = (
               business_help="Normalised to the run currency before Oasis generation."),
     _money("LocDed6All", "Location deductible", "Combined deductible applied at the location."),
     _money("LocLimit6All", "Location limit", "Combined limit applied at the location."),
+    FieldSpec("LocPeril", DataType.PERIL, "Peril the location terms apply to",
+              business_help="Which peril the deductible and limit are written against. "
+                            "Required by OED wherever a location term carries a value."),
+    _term_type("LocDedType6All", "Location deductible basis"),
+    _term_type("LocLimitType6All", "Location limit basis"),
     FieldSpec("LocGroup", DataType.TEXT, "Location group",
               business_help="Used by reinsurance scope filters."),
     FieldSpec("OEDVersion", DataType.TEXT, "OED version",
@@ -169,11 +203,21 @@ ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
     _money("LayerAttachment", "Layer attachment"),
     _money("PolDed6All", "Policy deductible"),
     _money("PolLimit6All", "Policy limit"),
+    FieldSpec("PolPeril", DataType.PERIL, "Peril the policy terms apply to",
+              business_help="Which peril the policy deductible and limit are written "
+                            "against. Required by OED wherever a policy term carries a value."),
+    _term_type("PolDedType6All", "Policy deductible basis"),
+    _term_type("PolLimitType6All", "Policy limit basis"),
     FieldSpec("OEDVersion", DataType.TEXT, "OED version"),
 )
 
 REINS_INFO_FIELDS: tuple[FieldSpec, ...] = (
-    FieldSpec("ReinsNumber", DataType.TEXT, "Contract reference", required=True),
+    # Integer, not text. OED numbers reinsurance contracts and ODS Tools reads
+    # the column as one: a portfolio whose contracts were named "RE001" passed
+    # validation here and then failed inside the engine while it parsed the
+    # file, which is exactly the discovery this validator exists to prevent.
+    FieldSpec("ReinsNumber", DataType.INTEGER, "Contract reference", required=True,
+              business_help="OED numbers contracts. A name belongs in the contract name."),
     FieldSpec("ReinsLayerNumber", DataType.INTEGER, "Contract layer", minimum=1),
     FieldSpec("ReinsName", DataType.TEXT, "Contract name"),
     FieldSpec("ReinsPeril", DataType.PERIL, "Contract perils", required=True),
@@ -199,7 +243,8 @@ REINS_INFO_FIELDS: tuple[FieldSpec, ...] = (
 )
 
 REINS_SCOPE_FIELDS: tuple[FieldSpec, ...] = (
-    FieldSpec("ReinsNumber", DataType.TEXT, "Contract reference", required=True),
+    FieldSpec("ReinsNumber", DataType.INTEGER, "Contract reference", required=True,
+              business_help="Matches a contract in the Reinsurance Info file."),
     FieldSpec("PortNumber", DataType.TEXT, "Portfolio reference"),
     FieldSpec("AccNumber", DataType.TEXT, "Account reference"),
     FieldSpec("PolNumber", DataType.TEXT, "Policy reference"),

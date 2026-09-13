@@ -132,7 +132,7 @@
   color: var(--grey-600);
 }
 
-.file-list__checksum {
+.file-list__name {
   margin-top: var(--space-1);
   font-size: var(--text-xs);
   color: var(--grey-500);

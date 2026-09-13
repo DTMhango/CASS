@@ -247,6 +247,35 @@ def test_site_keys_that_are_not_area_perils_are_refused_without_a_mapping(
         hazard_build.build_hazard(export, country_code="ID", intensity_bins=bins)
 
 
+def test_a_calculation_on_one_branch_publishes_no_realizations_and_is_still_read(
+    export, bins
+):
+    """OpenQuake writes that export only where there is a logic tree to describe.
+
+    A single-branch calculation has none, and refusing it would refuse the only
+    kind this converter accepts. The events name the realisation they belong to,
+    which is the same fact counted one row lower down.
+    """
+    (export / "realizations_1.csv").unlink()
+
+    hazard = hazard_build.build_hazard(export, country_code="ID", intensity_bins=bins)
+
+    assert hazard.metadata.realization_count == 1
+    assert hazard.is_valid
+
+
+def test_events_from_several_branches_are_refused_even_with_no_realizations_export(
+    export, bins
+):
+    (export / "realizations_1.csv").unlink()
+    (export / "events_1.csv").write_text(
+        EVENTS.replace("1,7,0,774,9", "1,7,1,774,9"), encoding="utf-8"
+    )
+
+    with pytest.raises(openquake.OpenQuakeError, match="weighting rule"):
+        hazard_build.build_hazard(export, country_code="ID", intensity_bins=bins)
+
+
 def test_two_calculations_in_one_directory_are_refused(export, bins):
     (export / "events_2.csv").write_text(EVENTS, encoding="utf-8")
     with pytest.raises(hazard_build.HazardBuildError, match="own directory"):

@@ -113,14 +113,16 @@ def test_the_source_model_is_recorded_because_nothing_else_records_it(registered
     assert hazard_set.ground_motion_models == ["BooreEtAl2014"]
 
 
-def test_a_hazard_set_arrives_as_a_draft_that_cannot_be_used_for_a_decision(
-    registered,
-):
+def test_a_hazard_set_arrives_as_a_draft_under_the_internal_use_basis(registered):
+    """A draft until it is published, and usable here from the moment it lands.
+
+    What may be done with the data is settled once for the installation rather
+    than asserted per calculation.
+    """
     hazard_set, _ = registered
     assert hazard_set.publication_state == PublicationState.DRAFT
-    assert hazard_set.licence_cleared is False
-    assert "has not been cleared" in hazard_set.licence_note
-    assert hazard_set.publication_blockers()
+    assert hazard_set.licence_cleared is True
+    assert "Internal use within Klapton Re" in hazard_set.licence_note
 
 
 def test_registering_twice_replaces_rather_than_duplicates(
@@ -164,9 +166,10 @@ def test_a_hazard_set_must_name_its_source_model():
         hazard.SourceStatement(model="  ")
 
 
-def test_a_licence_clearance_needs_the_thing_that_grants_it():
+def test_a_clearance_still_needs_the_basis_that_grants_it():
+    """The default names one. Clearing with nothing behind it is still refused."""
     with pytest.raises(hazard.HazardRegistrationError, match="needs a reference"):
-        hazard.SourceStatement(model="x", cleared=True)
+        hazard.SourceStatement(model="x", cleared=True, reference="")
 
 
 def test_a_calculation_with_no_registered_grid_is_refused(export, source, db):

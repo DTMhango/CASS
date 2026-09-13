@@ -154,6 +154,15 @@ services:
       dockerfile: deploy/images/Dockerfile.api
     environment:
       <<: [*django-env, *artifact-env]
+    volumes:
+      # The GEM clones and the national hazard packages are licensed and
+      # outside version control, so they are mounted read-only rather than
+      # baked into an image. The management commands take paths under /models.
+      - ${CASS_MODELS_PATH:-../../models}:/models:ro
+      # Where an assembled Oasis model package is written. The Oasis worker
+      # mounts the same volume read-only as its model root, so building a
+      # package and serving it are two views of one directory.
+      - oasis-model:/oasis-model
     depends_on:
       postgres:
         condition: service_healthy
@@ -188,6 +197,15 @@ services:
       - --max-tasks-per-child=20
     environment:
       <<: [*django-env, *artifact-env]
+    volumes:
+      # The GEM clones and the national hazard packages are licensed and
+      # outside version control, so they are mounted read-only rather than
+      # baked into an image. The management commands take paths under /models.
+      - ${CASS_MODELS_PATH:-../../models}:/models:ro
+      # Where an assembled Oasis model package is written. The Oasis worker
+      # mounts the same volume read-only as its model root, so building a
+      # package and serving it are two views of one directory.
+      - oasis-model:/oasis-model
     depends_on:
       api:
         condition: service_healthy
@@ -253,7 +271,11 @@ services:
     # resolves to 3.23.4; the engine version is recorded on every hazard set,
     # so a conversion always names the build that produced it.
     image: openquake/engine:3.23
-    command: ["oq", "webui", "start", "0.0.0.0:8800", "-s"]
+    # One string, not a list. The image's entrypoint is ``/bin/bash -c``, which
+    # takes only its first argument as the script: the list form ran ``oq``
+    # with no subcommand, printed its usage and exited 0 -- a container that
+    # "started" and was never listening.
+    command: ["oq webui start 0.0.0.0:8800 -s"]
     volumes:
       - openquake-data:/home/openquake/oqdata
     expose:
@@ -282,7 +304,12 @@ services:
     profiles: ["engines"]
 
   oasis-worker:
-    image: coreoasis/model_worker:2.5.7
+    # The official worker with one upstream defect patched at build time; the
+    # Dockerfile says which and why.
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.oasis-worker
+    image: cass/model_worker:2.5.7-patched
     environment:
       <<: *oasis-celery-env
       # The queue the worker consumes is named from this triple, and the API
@@ -300,6 +327,13 @@ services:
       # does not run: set it and analyses queue forever with no sub-tasks.
       # The worker refuses to start if this is unset entirely.
       OASIS_RUN_MODE: ${OASIS_RUN_MODE:-v1}
+      # The image's own conf.ini ships LOG_LEVEL = DEBUG, and that level reaches
+      # the loss kernel. oasislmf 2.5.7's financial module raises IndexError
+      # while formatting one of its debug messages (pytools/fm/stream_sparse.py
+      # event_log_msg), which kills an insured or reinsurance run that was
+      # calculating correctly. Ground-up never reaches that code, so the failure
+      # looks like the financial terms rather than the log level.
+      OASIS_LOG_LEVEL: ${OASIS_LOG_LEVEL:-INFO}
     depends_on:
       oasis-api:
         condition: service_started
@@ -309,7 +343,10 @@ services:
       # reads meta-data/model_settings.json beneath it, so the mount is the
       # model root -- model_data/, keys_data/, meta-data/ and oasislmf.json --
       # not the model_data directory alone.
-      - ${CASS_MODEL_DATA_PATH:-./model_data}:/home/worker/model:ro
+      # The package CASS builds and deploys, by default. Point
+      # CASS_MODEL_DATA_PATH at a model root on disk -- PiWind, for the live
+      # integration suite -- to serve that instead.
+      - ${CASS_MODEL_DATA_PATH:-oasis-model}:/home/worker/model:ro
     profiles: ["engines"]
 
   # The API server's celery worker, and the service this stack was missing.
@@ -348,3 +385,4 @@ volumes:
   minio-data:
   openquake-data:
   oasis-data:
+  oasis-model:

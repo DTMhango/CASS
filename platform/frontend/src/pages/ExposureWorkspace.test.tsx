@@ -39,7 +39,6 @@ const EXPOSURE: ExposureVersion = {
   name: "Pilot portfolio",
   version: 1,
   state: "validated",
-  cedant: "Test Cedant",
   valuation_date: "2026-06-30",
   source_description: "",
   run_currency: "IDR",
@@ -129,7 +128,37 @@ const FINDINGS = {
   ],
 };
 
+const ROWS = {
+  kind: "location",
+  columns: [
+    {
+      name: "LocNumber", label: "Location reference", help: "", required: true,
+      type: "text", allowed: null, minimum: null, maximum: null,
+      is_tiv: false, is_financial_term: false,
+    },
+    {
+      name: "OccupancyCode", label: "Occupancy", help: "", required: true,
+      type: "text", allowed: null, minimum: null, maximum: null,
+      is_tiv: false, is_financial_term: false,
+    },
+    {
+      name: "Latitude", label: "Latitude", help: "", required: true,
+      type: "latitude", allowed: null, minimum: -90, maximum: 90,
+      is_tiv: false, is_financial_term: false,
+    },
+  ],
+  rows: [
+    { row_number: 1, values: { LocNumber: "LOC-1", OccupancyCode: "1100", Latitude: "-6.2088" } },
+    { row_number: 2, values: { LocNumber: "LOC-2", OccupancyCode: "1200", Latitude: "-6.9175" } },
+  ],
+  count: 2,
+  total: 2,
+  editable: true,
+  attached: ["location"],
+};
+
 function routeFor(url: string): unknown {
+  if (url.includes("/rows/")) return ROWS;
   if (url.includes("/projects/")) return { count: 1, next: null, previous: null, results: [PROJECT] };
   if (url.includes("/findings/")) return FINDINGS;
   if (url.includes(`/exposure-versions/${EXPOSURE.id}/`)) return EXPOSURE;
@@ -237,15 +266,67 @@ describe("ExposureWorkspace", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the checksum recorded for each attached file", async () => {
+  it("shows the rows of the portfolio, not just the files", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
     await user.click(await screen.findByText("Pilot portfolio"));
 
-    await waitFor(() =>
-      expect(screen.getByText(/locations\.csv · sha256:abc123def456/)).toBeInTheDocument(),
-    );
+    expect(await screen.findByText("LOC-1")).toBeInTheDocument();
+    expect(screen.getByText("LOC-2")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /Occupancy/ })).toBeInTheDocument();
+  });
+
+  it("builds each field from the column's own limits, so a bad value cannot be typed", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Pilot portfolio"));
+    await user.click((await screen.findAllByRole("button", { name: "Correct" }))[0]!);
+
+    const latitude = await screen.findByLabelText("Latitude");
+    expect(latitude).toHaveAttribute("type", "number");
+    expect(latitude).toHaveAttribute("min", "-90");
+    expect(latitude).toHaveAttribute("max", "90");
+  });
+
+  it("puts a refusal against the field that caused it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/rows/edit/")) {
+        return new Response(
+          JSON.stringify({
+            detail: "The correction was not stored.",
+            fields: { Latitude: "Latitude cannot be below -90." },
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify(routeFor(url)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Pilot portfolio"));
+    await user.click((await screen.findAllByRole("button", { name: "Correct" }))[0]!);
+    await user.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Latitude cannot be below -90.")).toBeInTheDocument();
+  });
+
+  it("names each attached file and keeps its checksum off the screen", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Pilot portfolio"));
+
+    await waitFor(() => expect(screen.getByText("locations.csv")).toBeInTheDocument());
+    // The checksum is how CASS keeps the file fixed, not something the person
+    // attaching it came to read.
+    expect(screen.queryByText(/sha256:/)).not.toBeInTheDocument();
   });
 
   it("calls only the CASS API", async () => {

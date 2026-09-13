@@ -71,6 +71,28 @@ class MayApproveGates(permissions.BasePermission):
         )
 
 
+class MayRequestGates(permissions.BasePermission):
+    """Requesting a gate is a modeller's act; deciding it is a reviewer's.
+
+    Before this the whole approvals endpoint required the reviewer role, which
+    meant the person whose work a gate governs could not ask for it -- and the
+    independence rule, that nobody decides a gate they requested, had nobody to
+    apply to.
+    """
+
+    message = "Requesting a gate requires the modeller, reviewer or administrator role."
+
+    def has_permission(self, request, view) -> bool:
+        if request.method in SAFE:
+            return True
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if getattr(view, "action", None) == "decide":
+            return bool(user.may_approve_gates)
+        return bool(user.may_publish_models or user.may_approve_gates)
+
+
 class IsPlatformAdmin(permissions.BasePermission):
     message = "This action is restricted to platform administrators."
 

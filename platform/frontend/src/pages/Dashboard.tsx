@@ -6,23 +6,31 @@
  * things that need a person are the reason to open this screen at all.
  */
 
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { ApiError } from "@/api/client";
 import {
+  useApprovals,
+  useCreateProject,
   useExposureVersions,
   useModelCatalogue,
+  usePortfolioImports,
   useProjects,
   useRuns,
   useSession,
 } from "@/api/hooks";
 import { RunStateBadge, StatusBadge } from "@/components/StatusBadge";
 import {
+  Button,
   Card,
   EmptyState,
+  Field,
   MetricTile,
   Notice,
   PageHeader,
   Spinner,
+  TextInput,
 } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
 import { formatCount, formatDateTime } from "@/lib/format";
@@ -35,6 +43,8 @@ export function Dashboard() {
   const { data: runs } = useRuns();
   const { data: exposures } = useExposureVersions();
   const { data: models } = useModelCatalogue();
+  const { data: imports } = usePortfolioImports();
+  const { data: approvals } = useApprovals();
   const context = useWorkingContext();
 
   const activeRuns = runs?.filter((run) => run.is_active) ?? [];
@@ -44,6 +54,12 @@ export function Dashboard() {
   const exposuresNeedingWork =
     exposures?.filter((item) => item.validation_report?.validation?.blocking) ?? [];
   const researchModels = models?.filter((item) => item.is_research_prototype) ?? [];
+
+  // An import that has been read but not accepted is waiting on a person, and
+  // it is the cheapest thing on this page to clear: nothing downstream of it
+  // can start.
+  const unreviewedImports = imports?.filter((item) => item.state !== "accepted") ?? [];
+  const openGates = approvals?.filter((item) => item.is_open) ?? [];
 
   const firstName = session?.user?.first_name;
 
@@ -59,8 +75,19 @@ export function Dashboard() {
         <MetricTile label="Runs in progress" value={formatCount(activeRuns.length)} />
         <MetricTile
           label="Awaiting approval"
-          value={formatCount(blockedRuns.length)}
-          footnote={blockedRuns.length ? "A reviewer must clear a gate." : undefined}
+          value={formatCount(blockedRuns.length + openGates.length)}
+          footnote={
+            blockedRuns.length + openGates.length
+              ? "A reviewer must clear a gate."
+              : undefined
+          }
+        />
+        <MetricTile
+          label="Imports to review"
+          value={formatCount(unreviewedImports.length)}
+          footnote={
+            unreviewedImports.length ? "Nothing downstream can start first." : undefined
+          }
         />
         <MetricTile
           label="Portfolios to resolve"
@@ -84,6 +111,25 @@ export function Dashboard() {
         </Notice>
       ) : null}
 
+      {unreviewedImports.length > 0 ? (
+        <Notice
+          tone="info"
+          title={`${unreviewedImports.length} import(s) waiting on a review`}
+        >
+          <ul className="dashboard__inline-list">
+            {unreviewedImports.slice(0, 3).map((item) => (
+              <li key={item.id}>
+                <Link to="/exposure?tab=import-review">
+                  {item.source_filename || "Imported spreadsheet"}
+                </Link>
+                {" — "}
+                {formatCount(item.risk_row_count)} risk row(s) read, none promoted
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      ) : null}
+
       {researchModels.length > 0 ? (
         <Notice
           tone="warning"
@@ -99,6 +145,7 @@ export function Dashboard() {
           title="Projects"
           description="Select one to scope the exposure, run and result screens."
           padded={false}
+          actions={<NewProject />}
         >
           {projectsLoading ? (
             <Spinner label="Loading projects" />
@@ -137,10 +184,12 @@ export function Dashboard() {
               </tbody>
             </table>
           ) : (
-            <EmptyState
-              title="No projects yet"
-              description="A project is the workspace that owns exposure, runs and results."
-            />
+            <div className="dashboard__empty">
+              <EmptyState
+                title="No projects yet"
+                description="A project is the workspace that owns exposure, runs and results. Create one to begin: nothing else on the platform can be scoped without it."
+              />
+            </div>
           )}
         </Card>
 
@@ -199,5 +248,114 @@ export function Dashboard() {
         </Card>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Create a project.
+ *
+ * Every screen on the platform scopes by project, and until this existed a
+ * fresh installation was a dead end: the dashboard explained what a project
+ * was for and offered no way to make one, so the first portfolio could only be
+ * loaded by somebody with database access.
+ *
+ * The reference is the short identifier that names the project's artifacts in
+ * the store, which is why it is asked for rather than derived. A generated one
+ * would be a second name for the same thing, and the store keeps whichever was
+ * used at creation for the life of the project.
+ */
+function NewProject() {
+  const create = useCreateProject();
+  const context = useWorkingContext();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [reference, setReference] = useState("");
+  const [purpose, setPurpose] = useState("");
+
+  const error = create.error as ApiError | null;
+  const ready = Boolean(name.trim() && reference.trim());
+
+  if (!open) {
+    return (
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+        New project
+      </Button>
+    );
+  }
+
+  async function submit() {
+    if (!ready) return;
+    try {
+      const project = await create.mutateAsync({
+        name: name.trim(),
+        reference: reference.trim(),
+        purpose: purpose.trim(),
+      });
+      // Selected immediately: somebody who just made a project is about to
+      // work in it, and making them pick it from a list of one is friction.
+      context.setProject(project);
+      setOpen(false);
+      setName("");
+      setReference("");
+      setPurpose("");
+    } catch {
+      // Rendered as a refusal below rather than thrown at the console.
+    }
+  }
+
+  return (
+    <div className="dashboard__new-project">
+      {error ? (
+        <Notice tone="error" title="The project was not created">
+          {error.message}
+        </Notice>
+      ) : null}
+
+      <Field label="Name" htmlFor="project-name">
+        <TextInput
+          id="project-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Indonesia facultative 2026"
+        />
+      </Field>
+
+      <Field
+        label="Reference"
+        htmlFor="project-reference"
+        hint="Short and stable: it names this project's artifacts in the store for the life of the project."
+      >
+        <TextInput
+          id="project-reference"
+          value={reference}
+          onChange={(event) => setReference(event.target.value)}
+          placeholder="idn-fac-2026"
+        />
+      </Field>
+
+      <Field label="Purpose" htmlFor="project-purpose">
+        <TextInput
+          id="project-purpose"
+          value={purpose}
+          onChange={(event) => setPurpose(event.target.value)}
+          placeholder="Pilot earthquake portfolio analysis"
+        />
+      </Field>
+
+      <div className="dashboard__new-project-actions">
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!ready}
+          busy={create.isPending}
+          onClick={submit}
+        >
+          Create
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -13,7 +13,7 @@ here.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -37,15 +37,22 @@ from .schema import (
 #: approximated, so presence of a non-empty value here is an error.
 UNSUPPORTED_TERM_COLUMNS: frozenset[str] = frozenset(
     {
-        "LocDedType6All",
-        "LocLimitType6All",
-        "PolDedType6All",
         "StepTriggerType",
         "PolStepTrigger",
         "CondTag",
         "CondNumber",
     }
 )
+
+#: Each financial amount and the basis column OED requires beside it. An amount
+#: with no basis is refused inside the engine's own file reader, several stages
+#: after a person could have been told about it, so it is checked here.
+TERM_BASIS: Mapping[str, tuple[str, str]] = {
+    "LocDed6All": ("LocDedType6All", "LocPeril"),
+    "LocLimit6All": ("LocLimitType6All", "LocPeril"),
+    "PolDed6All": ("PolDedType6All", "PolPeril"),
+    "PolLimit6All": ("PolLimitType6All", "PolPeril"),
+}
 
 
 @dataclasses.dataclass(slots=True)
@@ -225,6 +232,28 @@ def _check_rows(result: ReadResult, out: FindingSet) -> None:
                         )
                     )
 
+        for amount, (basis, peril) in TERM_BASIS.items():
+            if amount not in specs or _is_blank_amount(row.text(amount)):
+                continue
+            for companion, why in (
+                (basis, "says whether it is a flat amount or a percentage"),
+                (peril, "says which peril it is written against"),
+            ):
+                if companion in specs and row.text(companion) == "":
+                    out.add(
+                        fnd.make(
+                            "missing_term_basis",
+                            f"{specs[amount].business_label} carries a value but "
+                            f"{companion}, which {why}, is empty. OED requires the two "
+                            "together and the engine refuses the file without it.",
+                            file_kind=str(result.kind),
+                            row_number=row.row_number,
+                            field=companion,
+                            value=row.text(amount),
+                            record_key=key,
+                        )
+                    )
+
         for name in UNSUPPORTED_TERM_COLUMNS:
             if row.text(name) != "":
                 out.add(
@@ -238,6 +267,22 @@ def _check_rows(result: ReadResult, out: FindingSet) -> None:
                         record_key=key,
                     )
                 )
+
+
+
+def _is_blank_amount(text: str) -> bool:
+    """Whether a money column holds nothing OED would call a term.
+
+    An empty cell and a zero are both "no term here". A zero deductible needs
+    no basis and no peril, and demanding them would report every untermed row.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return True
+    try:
+        return Decimal(stripped) == 0
+    except ArithmeticError:
+        return False
 
 
 def _check_keys(result: ReadResult, out: FindingSet) -> None:

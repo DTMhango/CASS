@@ -52,7 +52,6 @@ class ExposureVersion(BaseModel, FreezableModel):
     source_description = models.TextField(
         blank=True, help_text="Where the portfolio came from and the extract date."
     )
-    cedant = models.CharField(max_length=200, blank=True)
     valuation_date = models.DateField(null=True, blank=True)
 
     #: Currency handling. Section 15 names multiple currencies reaching the

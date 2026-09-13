@@ -84,9 +84,11 @@ class Command(BaseCommand):
             )
 
         try:
+            # Cleared by default, under the installation's internal-use basis;
+            # the flags remain for stating a narrower entitlement explicitly.
             licence = gem.LicenceStatement(
-                cleared=options["licence_cleared"],
-                reference=options["licence_reference"],
+                cleared=options["licence_cleared"] or not options["licence_reference"],
+                reference=options["licence_reference"] or gem.INTERNAL_USE_LICENCE,
             )
         except gem.GemRegistrationError as exc:
             raise CommandError(str(exc)) from None

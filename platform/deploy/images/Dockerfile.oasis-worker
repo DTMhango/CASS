@@ -1,0 +1,18 @@
+# The Oasis model worker, with one upstream defect patched.
+#
+# Everything the worker does is the official 2.5.7 image's. The single change
+# is to oasislmf's financial module, where a debug message indexes the wrong
+# array and kills fmpy mid-stream: see patches/oasislmf_2_5_7_fm_event_log.py
+# for what it does and why it cannot be avoided by configuration. Without it
+# no insured or reinsurance analysis of a real-sized portfolio can finish.
+#
+# The patch asserts the source it replaces, so raising OASIS_WORKER_IMAGE to a
+# release that has moved on fails this build rather than quietly carrying a
+# patch for a defect that is no longer there.
+ARG OASIS_WORKER_IMAGE=coreoasis/model_worker:2.5.7
+FROM ${OASIS_WORKER_IMAGE}
+
+# Applied as the image's own user: oasislmf is installed into that user's
+# site-packages, and root cannot see it on the import path.
+COPY deploy/images/patches/oasislmf_2_5_7_fm_event_log.py /tmp/cass-patch.py
+RUN python3 /tmp/cass-patch.py

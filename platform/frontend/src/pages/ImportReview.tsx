@@ -25,15 +25,29 @@
  */
 
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import {
+  useAcceptImport,
+  useAllocationScenarios,
+  useAssumptionCatalogue,
   useImportResults,
+  useModelCatalogue,
   usePortfolioImports,
+  usePromoteImport,
   useRecordDecision,
   useReviewQueue,
 } from "@/api/hooks";
-import type { ImportResults, QueuedLocation, UUID } from "@/api/types";
+import type {
+  AllocationScenario,
+  BusinessMateriality,
+  ImportResults,
+  PortfolioImport,
+  QueuedLocation,
+  UUID,
+} from "@/api/types";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
@@ -76,7 +90,7 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-export function ImportReview() {
+export function ImportReview({ embedded = false }: { embedded?: boolean } = {}) {
   const { projectId } = useWorkingContext();
   const imports = usePortfolioImports(projectId);
   const [selected, setSelected] = useState<UUID | undefined>();
@@ -90,10 +104,10 @@ export function ImportReview() {
   if (!imports.data?.length) {
     return (
       <>
-        <PageHeader
+        {embedded ? null : <PageHeader
           title="Import review"
           description="Eligibility, missing model inputs and the review backlog"
-        />
+        />}
         <EmptyState
           title="No portfolio has been imported yet"
           description="Import a workbook in the exposure workspace, and this screen will show what came in and what it is missing."
@@ -116,7 +130,7 @@ export function ImportReview() {
             >
               {imports.data.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.source_filename || item.source_checksum.slice(0, 12)}
+                  {item.source_filename || "Imported spreadsheet"}
                 </option>
               ))}
             </Select>
@@ -132,6 +146,7 @@ export function ImportReview() {
           <MissingInputs results={results.data} />
           <Included results={results.data} />
           <Allocation results={results.data} />
+          {batchId ? <AllocationScenarios batchId={batchId} /> : null}
           <UseModes results={results.data} />
           {batchId ? (
             <ReviewQueuePanel
@@ -142,9 +157,444 @@ export function ImportReview() {
               loading={queue.isLoading}
             />
           ) : null}
+          {batchId ? (
+            <PromotionPanel
+              batchId={batchId}
+              batch={imports.data.find((item) => item.id === batchId)}
+              results={results.data}
+              outstanding={queue.data?.outstanding ?? 0}
+            />
+          ) : null}
         </>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Does the allocation assumption matter?
+ *
+ * Not "how does the value divide" -- the allocation engine answers that
+ * exactly, and it reconciles. The question here is whether the division
+ * changes anything, and it only can where a business\'s sites fall in
+ * different area-peril cells. Two warehouses in one cell can be split any way
+ * at all and the model cannot tell the difference.
+ *
+ * So the comparison needs a grid, which is why it needs a model version, and
+ * why nothing is shown until one is chosen. Guessing a default would produce a
+ * materiality figure against a grid nobody picked, which is worse than no
+ * figure: somebody would quote it.
+ *
+ * Nothing is promoted from here. An analyst tries scenarios freely and then
+ * promotes the one they choose, which is the separate audited act below.
+ */
+function AllocationScenarios({ batchId }: { batchId: UUID }) {
+  const models = useModelCatalogue();
+  const [modelId, setModelId] = useState("");
+  const scenarios = useAllocationScenarios(batchId, modelId || undefined);
+
+  const error = scenarios.error as ApiError | null;
+  const data = scenarios.data;
+  const materiality = data?.materiality;
+
+  return (
+    <Card
+      title="Does the allocation assumption matter?"
+      description="Where a business reports a total but no site values, the split is an assumption. This says how much of the book that assumption is economically live for."
+    >
+      <Field
+        label="Compare against"
+        htmlFor="scenario-model"
+        hint="A model version, because the comparison needs its area-peril grid."
+      >
+        <Select
+          id="scenario-model"
+          value={modelId}
+          onChange={(event) => setModelId(event.target.value)}
+        >
+          <option value="">Select a model version</option>
+          {models.data?.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.reference}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {!modelId ? (
+        <p className="muted">
+          Nothing is computed until a model version is chosen. A materiality figure
+          against a grid nobody picked is worse than none, because somebody would
+          quote it.
+        </p>
+      ) : null}
+
+      {scenarios.isLoading ? <Spinner label="Allocating under each scenario" /> : null}
+
+      {error ? (
+        <Notice tone="error" title="The comparison could not be produced">
+          {error.message}
+        </Notice>
+      ) : null}
+
+      {data && materiality ? (
+        <>
+          {/* The property that makes this a sensitivity rather than a set of
+              different portfolios. If it ever failed, every number below would
+              be answering a different question. */}
+          {data.total_holds_across_scenarios ? null : (
+            <Notice tone="error" title="The scenarios do not carry the same money">
+              One of these scenarios changed the total insured value, so they are
+              not variants of one portfolio and the movement below cannot be read
+              as a sensitivity.
+            </Notice>
+          )}
+
+          <div className="scenarios__metrics">
+            <MetricTile
+              label="Value where the assumption is live"
+              value={formatMoney(materiality.material_tiv)}
+              footnote={`${percent(materiality.material_share)} of the selection`}
+            />
+            <MetricTile
+              label="Businesses affected"
+              value={formatCount(materiality.businesses_where_allocation_is_material)}
+              footnote={`of ${formatCount(materiality.businesses)} multi-location`}
+            />
+            <MetricTile label="Grid" value={data.grid} />
+          </div>
+
+          {materiality.businesses_where_allocation_is_material === 0 ? (
+            <Notice tone="ok" title="The allocation assumption changes nothing here">
+              Every multi-location business either reports its own site values or
+              has all its sites in one area-peril cell. Choosing a different
+              allocation cannot change the loss.
+            </Notice>
+          ) : null}
+
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Scenario</th>
+                <th scope="col" className="numeric">
+                  Mapped value
+                </th>
+                <th scope="col" className="numeric">
+                  Cells
+                </th>
+                <th scope="col">Reconciles</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.scenarios.map((scenario) => (
+                <ScenarioRow key={scenario.method} scenario={scenario} />
+              ))}
+            </tbody>
+          </table>
+
+          <p className="muted scenarios__interpretation">{data.interpretation}</p>
+
+          {materiality.detail.length > 0 ? (
+            <Disclosure
+              summary={`Business by business (${materiality.detail.length})`}
+            >
+              <ul className="scenarios__businesses">
+                {materiality.detail.map((business) => (
+                  <MaterialityRow key={business.business_id} business={business} />
+                ))}
+              </ul>
+            </Disclosure>
+          ) : null}
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
+function ScenarioRow({ scenario }: { scenario: AllocationScenario }) {
+  return (
+    <tr>
+      <th scope="row">
+        {scenario.method.replace(/_/g, " ")}
+        {scenario.baseline ? (
+          <StatusBadge
+            tone="ok"
+            size="sm"
+            detail="The maximum-ignorance allocation. It introduces no ranking the source does not support."
+          >
+            baseline
+          </StatusBadge>
+        ) : null}
+      </th>
+      <td className="numeric">{formatMoney(scenario.mapped_tiv)}</td>
+      <td className="numeric">{formatCount(scenario.area_peril_count)}</td>
+      <td>
+        <StatusBadge tone={scenario.reconciles ? "ok" : "error"} size="sm">
+          {scenario.reconciles ? "yes" : "no"}
+        </StatusBadge>
+      </td>
+    </tr>
+  );
+}
+
+function MaterialityRow({ business }: { business: BusinessMateriality }) {
+  return (
+    <li className="scenarios__business">
+      <StatusBadge tone={business.material ? "warning" : "idle"} size="sm">
+        {business.material ? "live" : "settled"}
+      </StatusBadge>
+      <span className="mono">{business.business_id}</span>
+      <span className="numeric">{formatMoney(business.total_tiv)}</span>
+      <span className="muted">{business.reason}</span>
+    </li>
+  );
+}
+
+/**
+ * Accept the read, then turn a cohort into an exposure version.
+ *
+ * Two acts, and they are not the same one. Accepting says a person has looked
+ * at the join report and the cohorts -- that what CASS made of the workbook is
+ * what the workbook says. Promoting says which part of it to model and under
+ * which assumptions, and produces an immutable version that an analysis can
+ * run against.
+ *
+ * The assumptions are offered from the platform\'s own catalogue rather than
+ * listed here, so a scenario the converter gains appears without a frontend
+ * release. Every one of them is recorded on the version that results: the
+ * point of promoting under a stated assumption is that a later reader can see
+ * it and promote the same import differently.
+ *
+ * The outstanding review count is shown rather than enforced. A reviewer may
+ * promote with decisions outstanding -- cohort B exists precisely so that
+ * incomplete records can be excluded rather than block the book -- but they
+ * should know they are doing it.
+ */
+function PromotionPanel({
+  batchId,
+  batch,
+  results,
+  outstanding,
+}: {
+  batchId: UUID;
+  batch?: PortfolioImport;
+  results: ImportResults;
+  outstanding: number;
+}) {
+  const catalogue = useAssumptionCatalogue();
+  const accept = useAcceptImport();
+  const promote = usePromoteImport(batchId);
+
+  const [name, setName] = useState("");
+  const [cohort, setCohort] = useState("A");
+  const [allocation, setAllocation] = useState("");
+  const [split, setSplit] = useState("");
+  const [occupancy, setOccupancy] = useState("");
+  const [country, setCountry] = useState("");
+
+  // A select shows its first option whether or not state holds it, so the
+  // effective value is derived rather than read: otherwise the screen offers a
+  // baseline allocation and refuses to act on it.
+  const allocationValue =
+    allocation ||
+    catalogue.data?.allocation_methods?.find((item) => item.baseline)?.value ||
+    catalogue.data?.allocation_methods?.[0]?.value ||
+    "";
+
+  const accepted = (batch?.state ?? results.batch.state) === "accepted";
+  const error = (accept.error ?? promote.error) as ApiError | null;
+  const countries = [
+    ...new Set((results.included ?? []).map((item) => item.country_code).filter(Boolean)),
+  ];
+  const cohortCount = results.review.by_cohort?.[cohort] ?? 0;
+
+  return (
+    <Card
+      title="Promote to a portfolio"
+      description="What this import becomes, and under which stated assumptions."
+    >
+      {error ? (
+        <Notice tone="error" title="Refused">
+          {error.message}
+        </Notice>
+      ) : null}
+
+      {outstanding > 0 ? (
+        <Notice tone="warning" title={`${formatCount(outstanding)} location(s) still await a decision`}>
+          You may promote without clearing the queue. Anything still unresolved stays
+          outside cohort A, so it is excluded from the version rather than modelled on
+          a guess.
+        </Notice>
+      ) : null}
+
+      {!accepted ? (
+        <>
+          <p>
+            Record that the join report and the cohort assignment have been reviewed.
+            This is the acknowledgement that what CASS made of the workbook is what the
+            workbook says.
+          </p>
+          <Button
+            variant="primary"
+            busy={accept.isPending}
+            onClick={() => accept.mutate(batchId)}
+          >
+            Accept this import
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="promotion__form">
+            <Field
+              label="Portfolio name"
+              htmlFor="promote-name"
+              hint="What the exposure version will be called."
+            >
+              <TextInput
+                id="promote-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={results.batch.filename.replace(/\.[^.]+$/, "")}
+              />
+            </Field>
+
+            <Field
+              label="Cohort"
+              htmlFor="promote-cohort"
+              hint={`${formatCount(cohortCount)} location(s) in this cohort.`}
+            >
+              <Select
+                id="promote-cohort"
+                value={cohort}
+                onChange={(event) => setCohort(event.target.value)}
+              >
+                {catalogue.data?.cohorts?.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field
+              label="Country"
+              htmlFor="promote-country"
+              hint="A model version covers one country, so a business with sites in two is excluded from both rather than split."
+            >
+              <Select
+                id="promote-country"
+                value={country}
+                onChange={(event) => setCountry(event.target.value)}
+              >
+                <option value="">Every country in the import</option>
+                {countries.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field
+              label="Allocation"
+              htmlFor="promote-allocation"
+              hint="How a multi-location policy divides where the schedule states a total but no breakdown."
+            >
+              <Select
+                id="promote-allocation"
+                value={allocationValue}
+                onChange={(event) => setAllocation(event.target.value)}
+              >
+                {catalogue.data?.allocation_methods?.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                    {item.baseline ? " — baseline" : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field
+              label="Coverage split"
+              htmlFor="promote-split"
+              hint="Used only where a risk states a total with no component breakdown."
+            >
+              <Select
+                id="promote-split"
+                value={split}
+                onChange={(event) => setSplit(event.target.value)}
+              >
+                <option value="">
+                  {catalogue.data?.default_coverage_split ?? "Platform default"}
+                </option>
+                {catalogue.data?.coverage_splits?.map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.name}
+                    {item.approved ? " — approved prior" : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field
+              label="Occupancy"
+              htmlFor="promote-occupancy"
+              hint="Used only where a risk names none. A reported occupancy is never overwritten."
+            >
+              <Select
+                id="promote-occupancy"
+                value={occupancy}
+                onChange={(event) => setOccupancy(event.target.value)}
+              >
+                <option value="">
+                  {catalogue.data?.default_occupancy ?? "Platform default"}
+                </option>
+                {catalogue.data?.occupancy_assumptions?.map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.name}
+                    {item.approved ? " — approved prior" : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+
+          <Button
+            variant="primary"
+            disabled={!name.trim() || !allocationValue}
+            busy={promote.isPending}
+            onClick={() =>
+              promote.mutate({
+                name: name.trim(),
+                cohort,
+                allocation_method: allocationValue,
+                coverage_split: split || undefined,
+                occupancy: occupancy || undefined,
+                country: country || undefined,
+              })
+            }
+            title={
+              name.trim() && allocationValue
+                ? "Produce an immutable exposure version from this selection."
+                : "Name the version and choose an allocation first."
+            }
+          >
+            Promote to an exposure version
+          </Button>
+
+          {promote.isSuccess ? (
+            <Notice tone="ok" title="Promoted">
+              {promote.data.name} v{promote.data.version} was created with{" "}
+              {formatCount(promote.data.location_count)} location(s).{" "}
+              <Link to="/exposure">
+                Review it in the exposure workspace and publish it
+              </Link>{" "}
+              before an analysis uses it.
+            </Notice>
+          ) : null}
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -169,8 +619,6 @@ function Provenance({ results }: { results: ImportResults }) {
           <dd>{batch.filename || "—"}</dd>
         </div>
         <div>
-          <dt>Source checksum</dt>
-          <dd className="mono">{batch.source_checksum.slice(0, 24)}…</dd>
         </div>
         <div>
           <dt>Parser</dt>

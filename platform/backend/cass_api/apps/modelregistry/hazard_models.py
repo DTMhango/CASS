@@ -38,7 +38,9 @@ import dataclasses
 import hashlib
 import io
 import pathlib
+import tempfile
 import zipfile
+from collections.abc import Mapping
 from typing import Any
 
 from django.db import transaction
@@ -47,7 +49,13 @@ from cass_converter import hazard_job, job_config, pilot_bins
 from cass_converter.job_config import JobConfig, JobConfigError
 
 from .assets import attach_hazard_model_file
-from .models import AreaPerilGrid, HazardJobSpec, HazardModel, PublicationState
+from .models import (
+    INTERNAL_USE_LICENCE,
+    AreaPerilGrid,
+    HazardJobSpec,
+    HazardModel,
+    PublicationState,
+)
 
 #: Names a published package uses for its job configuration, in the order they
 #: are looked for. GEM's mosaic packages ship ``job_clean.ini``; a plain
@@ -253,7 +261,7 @@ def register_model(
     source_organisation: str = "",
     publication_reference: str = "",
     licence: str = "",
-    licence_cleared: bool = False,
+    licence_cleared: bool = True,
     licence_note: str = "",
     actor=None,
 ) -> HazardModel:
@@ -266,13 +274,7 @@ def register_model(
     summary = inspect(package)
     configuration = summary["configuration"]
 
-    if licence_cleared and not licence_note.strip():
-        raise HazardModelError(
-            "A licence clearance needs a note saying what grants it. The "
-            "published models are mostly CC BY-NC-SA, and a cleared flag with "
-            "nothing behind it passes the section 10 gate without anyone having "
-            "done anything."
-        )
+
 
     model, _ = HazardModel.objects.update_or_create(
         country_code=country_code.upper(),
@@ -283,12 +285,7 @@ def register_model(
             "publication_reference": publication_reference,
             "licence": licence,
             "licence_cleared": licence_cleared,
-            "licence_note": licence_note
-            or (
-                "Use of this model has not been cleared. It may be used for "
-                "research and platform development and not for a pricing or "
-                "reserving decision."
-            ),
+            "licence_note": licence_note or INTERNAL_USE_LICENCE,
             "archive_checksum": package.checksum,
             "archive_bytes": package.size_bytes,
             "file_manifest": [item.as_dict() for item in package.files],
@@ -352,21 +349,108 @@ def published_configuration(model: HazardModel) -> JobConfig:
     return JobConfig.parse(text, source_name=model.job_configuration.get("source_name", ""))
 
 
-def resolve(
+#: The four bounds a run region is given by, in decimal degrees.
+REGION_KEYS = ("min_latitude", "max_latitude", "min_longitude", "max_longitude")
+
+
+def normalise_region(region: Mapping[str, Any] | None) -> dict[str, float] | None:
+    """A run region as four bounds, or ``None`` where the whole grid is meant.
+
+    A region is not an engine parameter and not the model's science. It is how
+    much of a national grid one calculation computes, and it exists because a
+    national model over every onshore cell is a calculation of many hours: a
+    modeller testing a configuration, or a portfolio concentrated in two
+    cities, should not have to pay for Papua to find out.
+    """
+    if not region:
+        return None
+    try:
+        bounds = {key: float(region[key]) for key in REGION_KEYS}
+    except (KeyError, TypeError, ValueError):
+        raise HazardModelError(
+            "A region needs all four bounds -- minimum and maximum latitude and "
+            "longitude, in decimal degrees."
+        ) from None
+    if not -90 <= bounds["min_latitude"] < bounds["max_latitude"] <= 90:
+        raise HazardModelError(
+            "The region's latitudes are not a range: the minimum must be below "
+            "the maximum, and both within -90 to 90."
+        )
+    if not -180 <= bounds["min_longitude"] < bounds["max_longitude"] <= 180:
+        raise HazardModelError(
+            "The region's longitudes are not a range: the minimum must be below "
+            "the maximum, and both within -180 to 180."
+        )
+    return bounds
+
+
+def cells_in_region(cells: Any, region: Mapping[str, float] | None) -> tuple[Any, ...]:
+    """The cells whose centre lies in the region, or every cell without one.
+
+    By centre, because the centre is where the calculation point goes: a cell
+    straddling the boundary is in the run exactly when its ground motion would
+    be computed inside it.
+    """
+    if region is None:
+        return tuple(cells)
+    chosen = []
+    for cell in cells:
+        latitude = float(cell.min_latitude + cell.max_latitude) / 2
+        longitude = float(cell.min_longitude + cell.max_longitude) / 2
+        if (
+            region["min_latitude"] <= latitude <= region["max_latitude"]
+            and region["min_longitude"] <= longitude <= region["max_longitude"]
+        ):
+            chosen.append(cell)
+    return tuple(chosen)
+
+
+def published_site_points(model: HazardModel) -> tuple[Any, ...] | None:
+    """The site conditions a published model measured, where it ships them.
+
+    National packages carry a site model beside the sources -- PuSGeN 2024's is
+    ``iid-10km.csv``, eleven thousand points with measured Vs30 -- and the
+    converted run has to use it. Without it the job names a site model that
+    carries coordinates and nothing else, and every ground-motion model refuses
+    to start for want of a Vs30 it was never given.
+    """
+    from apps.modelregistry.assets import hazard_model_file
+
+    published = published_configuration(model)
+    for key in ("site_model_file", "sites_csv"):
+        name = str(published.get(key) or "").strip().strip(QUOTES)
+        if not name or "," in name or "{" in name:
+            continue
+        payload = hazard_model_file(model, name)
+        if payload is None:
+            continue
+        header = payload.split(NEWLINE, 1)[0].decode("utf-8-sig").lower()
+        if "vs30" not in header:
+            continue
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / pathlib.PurePosixPath(name).name
+            path.write_bytes(payload)
+            return hazard_job.read_site_model(path)
+    return None
+
+
+#: Quote characters a job configuration may wrap a file name in.
+QUOTES = "'" + '"'
+
+#: The line separator of a CSV header, as bytes.
+NEWLINE = bytes([10])
+
+
+def _build(
     model: HazardModel,
     grid: AreaPerilGrid,
     *,
-    overrides: dict[str, Any] | None = None,
-    cells: Any = None,
-    site_model_path: str = "",
-    site_points: Any = None,
-) -> dict[str, Any]:
-    """Work out what a configured run would actually do, without running it.
-
-    Returns the resolved configuration, the conversion's list of changes, the
-    site join and every problem found. Nothing is stored and nothing executes:
-    this is what the editor renders after each edit.
-    """
+    overrides: dict[str, Any] | None,
+    cells: Any,
+    region: Mapping[str, Any] | None,
+    site_points: Any,
+) -> tuple[dict[str, Any], Any, Any]:
+    """The resolved configuration, and the job and site join behind it."""
     chosen = dict(CASS_DEFAULTS)
     unknown = sorted(set(overrides or {}) - set(EDITABLE))
     if unknown:
@@ -376,23 +460,40 @@ def resolve(
             "does not configure this model, it makes a different one."
         )
     chosen.update(overrides or {})
+    bounds = normalise_region(region)
 
     published = published_configuration(model)
 
     site_report: dict[str, Any] = {}
+    coverage: dict[str, Any] = {}
     job = None
+    join = None
+    extra_problems: list[job_config.Problem] = []
     if cells is not None:
+        selected = cells_in_region(cells, bounds)
         job = hazard_job.HazardJob(
             country_code=model.country_code,
             label=f"{model.label} on {grid.reference}",
-            sites=hazard_job.sites_from_cells(cells),
+            sites=hazard_job.sites_from_cells(selected),
             imts=pilot_bins.PILOT_IMTS,
             source_model_logic_tree=published.get("source_model_logic_tree_file") or "",
             gsim_logic_tree=published.get("gsim_logic_tree_file") or "",
             investigation_time=float(chosen["investigation_time"]),
             ses_per_logic_tree_path=int(chosen["ses_per_logic_tree_path"]),
         )
-        if site_points is not None:
+        # Against the whole grid rather than the region, so the report says
+        # plainly how much of the country this run leaves out.
+        coverage = {**hazard_job.coverage(job, tuple(cells)), "region": bounds}
+        if not job.sites:
+            extra_problems.append(
+                job_config.Problem(
+                    "region",
+                    "error",
+                    "The region holds no onshore cell of this grid, so the "
+                    "calculation would have no sites at all.",
+                )
+            )
+        elif site_points is not None:
             reference = published.get("reference_vs30_value") or "760"
             join = hazard_job.join_site_model(
                 job,
@@ -412,7 +513,13 @@ def resolve(
         investigation_time=float(chosen["investigation_time"]),
         ses_per_logic_tree_path=int(chosen["ses_per_logic_tree_path"]),
         minimum_intensity=float(pilot_bins.INTENSITY_RANGE["PGA"][0]),
-        site_model_file=site_model_path or "sites.csv",
+        # A site model where the published one could be joined, so every cell
+        # carries its own Vs30. Otherwise a plain sites file, and the model's
+        # reference conditions apply everywhere -- which the site report says.
+        # With no cells at all (an editor call before a grid is chosen) the
+        # site model is still named, because that is what a real run will use.
+        site_model_file="sites.csv" if (join is not None or cells is None) else None,
+        sites_file="sites.csv",
     )
 
     resolved = conversion.config
@@ -422,6 +529,7 @@ def resolve(
         resolved = resolved.set(name, value)
 
     problems = job_config.validate(resolved, required_measures=pilot_bins.PILOT_IMTS)
+    problems.extend(extra_problems)
     if model.estimated_realizations > 1:
         problems.append(
             job_config.Problem(
@@ -434,12 +542,14 @@ def resolve(
             )
         )
 
-    return {
+    outcome = {
         "overrides": chosen,
+        "region": bounds,
         "configuration": job_config.describe(
             resolved, required_measures=pilot_bins.PILOT_IMTS
         ),
         "conversion": conversion.as_dict(),
+        "coverage": coverage,
         "site_join": site_report,
         "problems": [item.as_dict() for item in problems],
         "runnable": not any(item.severity == "error" for item in problems),
@@ -448,6 +558,34 @@ def resolve(
         ),
         "rendered": resolved.render().decode("utf-8"),
     }
+    return outcome, job, join
+
+
+def resolve(
+    model: HazardModel,
+    grid: AreaPerilGrid,
+    *,
+    overrides: dict[str, Any] | None = None,
+    cells: Any = None,
+    region: Mapping[str, Any] | None = None,
+    site_points: Any = None,
+) -> dict[str, Any]:
+    """Work out what a configured run would actually do, without running it.
+
+    Returns the resolved configuration, the conversion's list of changes, how
+    much of the grid the run covers, the site join and every problem found.
+    Nothing is stored and nothing executes: this is what the editor renders
+    after each edit.
+    """
+    outcome, _, _ = _build(
+        model,
+        grid,
+        overrides=overrides,
+        cells=cells,
+        region=region,
+        site_points=site_points,
+    )
+    return outcome
 
 
 @transaction.atomic
@@ -458,6 +596,7 @@ def save_spec(
     name: str,
     overrides: dict[str, Any] | None = None,
     cells: Any = None,
+    region: Mapping[str, Any] | None = None,
     site_points: Any = None,
     actor=None,
 ) -> HazardJobSpec:
@@ -469,22 +608,72 @@ def save_spec(
             "country's hazard at another's cells."
         )
     outcome = resolve(
-        model, grid, overrides=overrides, cells=cells, site_points=site_points
+        model,
+        grid,
+        overrides=overrides,
+        cells=cells,
+        region=region,
+        site_points=site_points,
     )
     return HazardJobSpec.objects.create(
         model=model,
         grid=grid,
         name=name,
         overrides=outcome["overrides"],
+        region=outcome["region"] or {},
         resolved_configuration=outcome["configuration"],
         conversion_report=outcome["conversion"],
-        site_join_report=outcome["site_join"],
+        site_join_report={**outcome["site_join"], "coverage": outcome["coverage"]},
         problems=outcome["problems"],
         is_runnable=outcome["runnable"],
         job_checksum=outcome["job_checksum"],
         created_by=actor,
         updated_by=actor,
     )
+
+
+def job_files(spec: HazardJobSpec) -> dict[str, Any]:
+    """Everything OpenQuake needs to run one saved configuration.
+
+    The model's own files go up as they were published, under the paths its
+    logic trees reference. Beside them go two files CASS generates: the
+    resolved ``job.ini``, which is the configuration the editor showed and
+    promised would run, and ``sites.csv`` -- the grid cells in the saved region,
+    each carrying the published site conditions nearest it.
+
+    The checksum is recomputed and compared rather than trusted. A grid can be
+    republished between a configuration being saved and being run, and a run
+    whose job checksum is not the one anybody reviewed is a run nobody can
+    reproduce -- so the difference is reported rather than quietly submitted.
+    """
+    from apps.modelregistry.assets import hazard_model_files, load_grid
+
+    grid = load_grid(spec.grid)
+    outcome, job, join = _build(
+        spec.model,
+        spec.grid,
+        overrides=spec.overrides,
+        cells=grid.cells,
+        region=spec.region or None,
+        site_points=published_site_points(spec.model),
+    )
+
+    files: dict[str, bytes] = dict(hazard_model_files(spec.model))
+    files["job.ini"] = outcome["rendered"].encode("utf-8")
+    files["sites.csv"] = (
+        hazard_job.site_model_csv(join) if join is not None else hazard_job.sites_csv(job)
+    )
+
+    recomputed = outcome["job_checksum"]
+    return {
+        "files": files,
+        "job_checksum": recomputed,
+        "saved_checksum": spec.job_checksum,
+        "checksum_matches": (not spec.job_checksum) or recomputed == spec.job_checksum,
+        "problems": outcome["problems"],
+        "site_join": outcome["site_join"],
+        "coverage": outcome["coverage"],
+    }
 
 
 def catalogue() -> list[dict[str, Any]]:

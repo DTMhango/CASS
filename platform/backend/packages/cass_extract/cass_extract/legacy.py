@@ -173,7 +173,7 @@ def convert(read: ExtractRead) -> Migration:
 
 def _risk_row(business: str, site: SourceRow, value: str) -> dict[str, Any]:
     return {
-        "Account reference": business,
+        "Policy ID": business,
         "Risk reference": str(_number(site.get("location_number"))),
         "Country": country_code(_text(site.get("country"))),
         "Latitude": _plain(site.get("latitude")),
@@ -191,7 +191,7 @@ def _risk_row(business: str, site: SourceRow, value: str) -> dict[str, Any]:
 
 def _policy_row(row: SourceRow) -> dict[str, Any]:
     return {
-        "Account reference": _text(row.get("business_id")),
+        "Policy ID": _text(row.get("business_id")),
         "Policy reference": _text(row.get("policy_id")),
         "Currency": CURRENCY,
         "Perils covered": COVERED_PERIL,

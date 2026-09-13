@@ -52,8 +52,14 @@ COPY tests/fixtures ./tests/fixtures
 
 # Run as a non-root user. Section 10 requires least privilege, and a container
 # that writes portfolio data has no reason to be root.
+#
+# /oasis-model is created here, owned by cass, so a fresh named volume mounted
+# there copies up that ownership. Without it Docker creates the mount point as
+# root and the worker cannot write the model package it was asked to build.
 RUN useradd --create-home --uid 10001 cass \
-    && chown -R cass:cass /app
+    && chown -R cass:cass /app \
+    && mkdir -p /oasis-model \
+    && chown cass:cass /oasis-model
 USER cass
 
 WORKDIR /app/cass_api

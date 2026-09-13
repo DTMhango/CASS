@@ -61,13 +61,13 @@ def migrated():
 
 def test_a_one_site_business_carries_its_whole_value_at_that_site(converted):
     """Arithmetic, not an assumption, so it is written."""
-    row = next(item for item in converted.risks if item["Account reference"] == "B-SINGLE")
+    row = next(item for item in converted.risks if item["Policy ID"] == "B-SINGLE")
     assert row["Total insured value"] == "1000000.00"
 
 
 def test_a_multi_site_business_is_written_blank(converted):
     """Freezing an equal split into the file would make an assumption read as data."""
-    rows = [item for item in converted.risks if item["Account reference"] == "B-MULTI"]
+    rows = [item for item in converted.risks if item["Policy ID"] == "B-MULTI"]
     assert len(rows) == 3
     assert {item["Total insured value"] for item in rows} == {""}
 
@@ -75,7 +75,7 @@ def test_a_multi_site_business_is_written_blank(converted):
 def test_a_policy_with_no_scheduled_site_produces_no_risk_row(converted):
     """B-NOLOC is most of the real book: value with nowhere to sit."""
     assert not [
-        item for item in converted.risks if item["Account reference"] == "B-NOLOC"
+        item for item in converted.risks if item["Policy ID"] == "B-NOLOC"
     ]
     assert Decimal(converted.as_dict()["value_on_accounts_with_no_risks"]) == Decimal(
         "800000.00"
@@ -83,14 +83,14 @@ def test_a_policy_with_no_scheduled_site_produces_no_risk_row(converted):
 
 
 def test_the_policy_total_carries_what_the_risks_do_not(converted):
-    policies = [item for item in converted.policies if item["Account reference"] == "B-MULTI"]
+    policies = [item for item in converted.policies if item["Policy ID"] == "B-MULTI"]
     assert policies
     assert sum(Decimal(item["Total insured value"]) for item in policies) > 0
 
 
 def test_several_policies_on_one_site_are_summed_at_it(converted):
     """B-TWOPOL holds two policies over a single location."""
-    row = next(item for item in converted.risks if item["Account reference"] == "B-TWOPOL")
+    row = next(item for item in converted.risks if item["Policy ID"] == "B-TWOPOL")
     assert Decimal(row["Total insured value"]) == Decimal("1250000.00")
 
 
@@ -162,7 +162,7 @@ def test_the_migrated_file_carries_the_eligibility_fields(migrated):
 
 def test_the_migrated_multi_site_rows_defer_to_the_allocation(migrated):
     read, _ = migrated
-    deferred = {row.get("Account reference") for row in read.deferred()}
+    deferred = {row.get("Policy ID") for row in read.deferred()}
     assert deferred == {"B-MULTI", "B-PARTIAL"}
 
 
@@ -184,7 +184,7 @@ def test_the_primary_site_flag_survives_the_migration(converted):
     migration leaves blank -- so a conversion that dropped it would break the
     one scenario those rows exist to be tested under, and break it quietly.
     """
-    rows = [item for item in converted.risks if item["Account reference"] == "B-MULTI"]
+    rows = [item for item in converted.risks if item["Policy ID"] == "B-MULTI"]
     assert [item["Primary site"] for item in rows] == ["Yes", "No", "No"]
 
 

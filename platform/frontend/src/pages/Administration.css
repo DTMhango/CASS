@@ -38,3 +38,28 @@
   overflow-wrap: anywhere;
   color: var(--grey-900);
 }
+
+/* Engine health, the directory and the audit trail all sit in unpadded cards,
+   so anything that is not a table row carries its own inset. */
+.admin-engines__message {
+  padding: var(--space-4);
+}
+
+.admin-engines__adapter,
+.admin-audit__subject-type {
+  font-size: var(--text-sm);
+}
+
+.admin-engines__url {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  max-width: 28ch;
+}
+
+.admin-audit__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--grey-100);
+}

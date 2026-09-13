@@ -159,3 +159,20 @@
 .event-log__stage {
   font-weight: 500;
 }
+
+/* Evidence: the artifacts a run read and wrote. */
+.run-detail__role {
+  font-size: var(--text-sm);
+}
+
+.run-detail__checksum {
+  font-size: var(--text-sm);
+  /* A checksum is for comparing, not reading, so it may wrap rather than
+     stretch the table past the width of the screen. */
+  overflow-wrap: anywhere;
+  max-width: 22ch;
+}
+
+.run-detail__empty {
+  padding: var(--space-4);
+}

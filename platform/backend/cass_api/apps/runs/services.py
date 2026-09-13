@@ -73,6 +73,7 @@ from cass_adapters.oasis import OasisPhase, PortfolioFileKind
 from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_core.runs import RunState
 from cass_keys.lookup import lookup as keys_lookup
+from cass_oed import ord as ord_results
 from cass_oed.perspectives import Perspective
 
 from .models import AnalysisRun
@@ -180,6 +181,15 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
     requested = {str(item) for item in (analysis_run.perspectives or [])}
     if not requested:
         requested = {str(Perspective.GROUND_UP)}
+    if str(Perspective.REINSURANCE) in requested:
+        # Reinsurance is computed from the insured position: the engine applies
+        # the contracts to the insured stream and needs it calculated and
+        # summarised to write the reinsurance summary files at all. Asked for
+        # reinsurance alone, it builds the reinsurance structures and then stops
+        # on a missing insured summary index. So the insured stream is asked for
+        # too, and its result is published beside the ceded one -- which is the
+        # comparison a reinsurance analyst wants in front of them anyway.
+        requested.add(str(Perspective.INSURED))
 
     supplier, model_name, _ = oasis_model_triple()
     settings_document: dict = {
@@ -323,7 +333,15 @@ def _keys(analysis_run, actor) -> dict:
     model_version = analysis_run.model_version
 
     grid = load_grid(model_version.grid)
-    vulnerability = load_vulnerability(model_version.vulnerability_set)
+    # What can answer a function is what the attached hazard set carries. A
+    # function demanding a measure this hazard did not compute is reported as
+    # unsupported, with the value behind it, rather than answered from a
+    # measure it was not built for.
+    hazard_set = model_version.hazard_set
+    vulnerability = load_vulnerability(
+        model_version.vulnerability_set,
+        supported_imts=frozenset(hazard_set.imts) if hazard_set else None,
+    )
 
     files = exposure_services.load_files(analysis_run.exposure_version)
     # The raw text, not the coerced values: section 5 keeps reported exposure
@@ -604,13 +622,158 @@ def _collect(analysis_run, engine, actor) -> dict:
         defaults={"created_by": actor},
     )
 
+    ingested = _ingest_results(analysis_run, payload, actor)
+
     run.advance(
         "collect",
         actor=actor,
-        message="Collected the Oasis output package.",
+        message=(
+            "Collected the Oasis output package and published "
+            f"{len(ingested['published'])} result set(s)."
+        ),
         metrics={"uri": ref.uri, "size_bytes": ref.size_bytes, "checksum": ref.checksum},
     )
-    return {"uri": ref.uri, "checksum": ref.checksum, "size_bytes": ref.size_bytes}
+    # Returned rather than written to the run here: ``execute`` assembles the
+    # manifest from what each stage returns and saves it at the end, so a write
+    # made directly to ``run.manifest`` at this point would be overwritten.
+    return {
+        "uri": ref.uri,
+        "checksum": ref.checksum,
+        "size_bytes": ref.size_bytes,
+        **ingested,
+    }
+
+
+def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
+    """Read the ORD tables and publish one result set per perspective.
+
+    Without this the analysis stops at a tarball: the run succeeds, the
+    artifact is registered, and the results workspace stays empty forever
+    because nothing ever turned the package into numbers.
+
+    A result arrives as a draft, never approved. Section 9 requires approved
+    decision output to be operationally distinct from a research run, and a
+    pipeline that published its own numbers as decision-grade would make the
+    reviewer role a formality. A research-prototype model version produces a
+    result marked research, which approval cannot lift.
+
+    Failure to read the package is deliberately not failure of the run. The
+    calculation happened, the output is stored and checksummed, and discarding
+    hours of engine time because a table was not where CASS expected it would
+    be the wrong trade -- so the reason is recorded on the run and the artifact
+    stays available for somebody to read by hand.
+    """
+    from apps.results.models import ResultSet, ResultState
+
+    run = analysis_run.run
+    model_version = analysis_run.model_version
+
+    try:
+        package = ord_results.open_package(payload)
+    except ord_results.OrdError as exc:
+        return {"published": [], "results_not_published": str(exc)}
+
+    published: list[dict] = []
+    requested = [str(item) for item in (analysis_run.perspectives or [])]
+
+    for perspective in requested:
+        try:
+            metrics = ord_results.metrics_for(package, perspective=perspective)
+        except ord_results.OrdError as exc:
+            published.append({"perspective": perspective, "not_published": str(exc)})
+            continue
+
+        label = (
+            f"{analysis_run.exposure_version.name} "
+            f"v{analysis_run.exposure_version.version} — "
+            f"{perspective.replace('_', '-')}"
+        )
+        result, _ = ResultSet.objects.update_or_create(
+            run=run,
+            perspective=perspective,
+            defaults={
+                "project": run.project,
+                "label": label,
+                # Research output stays research whatever a reviewer does: a
+                # prototype's number must not become a decision number by
+                # approval alone.
+                "state": (
+                    ResultState.RESEARCH
+                    if model_version.is_research_prototype
+                    else ResultState.DRAFT
+                ),
+                "average_annual_loss": metrics.average_annual_loss,
+                "standard_deviation": metrics.standard_deviation,
+                "currency": analysis_run.run_currency
+                or analysis_run.exposure_version.run_currency,
+                "return_period_losses": metrics.return_period_losses,
+                "model_version_reference": model_version.reference,
+                "assumption_set_reference": (
+                    analysis_run.enrichment_run.assumption_set.reference
+                    if analysis_run.enrichment_run_id
+                    and analysis_run.enrichment_run.assumption_set_id
+                    else ""
+                ),
+                "valuation_date": analysis_run.exposure_version.valuation_date,
+                "exposure_quality": _exposure_quality(analysis_run),
+                "peril_scope": model_version.peril_scope,
+                "material_exclusions": _material_exclusions(analysis_run, model_version),
+                # The basis travels with the number, because a package carries
+                # several and an analyst has to know which one they hold.
+                "uncertainty_attribution": {"ord_basis": metrics.basis},
+                "created_by": actor,
+                "updated_by": actor,
+            },
+        )
+        published.append(
+            {
+                "perspective": perspective,
+                "result_set": str(result.id),
+                "basis": metrics.basis,
+            }
+        )
+
+        audit.record(
+            action=AuditAction.CREATE,
+            subject_type="result_set",
+            subject_id=result.id,
+            actor=actor,
+            project=run.project,
+            subject_label=str(result),
+            after={"state": result.state, "perspective": perspective},
+        )
+
+    return {"published": published}
+
+
+def _exposure_quality(analysis_run) -> dict:
+    """What the keys lookup said about how much of the book was modelled."""
+    summary = analysis_run.keys_summary or {}
+    return {
+        "location_count": analysis_run.exposure_version.location_count,
+        "source_tiv": str(analysis_run.exposure_version.total_tiv or ""),
+        "successful_tiv": summary.get("successful_tiv"),
+        "not_at_risk_tiv": summary.get("not_at_risk_tiv"),
+        "unmapped_tiv": summary.get("failed_tiv"),
+        "keys_reconciled": analysis_run.keys_reconciled,
+    }
+
+
+def _material_exclusions(analysis_run, model_version) -> list[str]:
+    """What this number does not include, from the exposure and the model.
+
+    Two sources, and both matter. A sub-peril the portfolio covers but the
+    release does not model is missing loss; a sub-peril the model version
+    declares excluded is missing loss as well. Reporting only one of them would
+    understate what the number leaves out.
+    """
+    exclusions: list[str] = list(analysis_run.exposure_version.unmodelled_subperils or [])
+    for peril, treatment in (model_version.peril_scope or {}).items():
+        if not isinstance(treatment, Mapping):
+            continue
+        if str(treatment.get("treatment", "")).lower() == "excluded":
+            exclusions.append(peril)
+    return sorted(set(exclusions))
 
 
 # -- the driver -------------------------------------------------------------

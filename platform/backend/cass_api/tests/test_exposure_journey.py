@@ -34,7 +34,7 @@ def upload(api, exposure_id, kind, payload, filename="source.csv"):
 def create_version(api, project, name="Pilot portfolio"):
     response = api.post(
         f"{API}/exposure-versions/",
-        {"project": str(project.id), "name": name, "cedant": "Test Cedant"},
+        {"project": str(project.id), "name": name},
         format="json",
     )
     assert response.status_code == 201, response.data
@@ -124,7 +124,7 @@ def test_a_published_version_cannot_be_changed(api, project, earthquake_location
 
     version = ExposureVersion.objects.get(id=exposure_id)
     with pytest.raises(ImmutableError):
-        version.cedant = "Someone else"
+        version.source_description = "Someone else"
         version.save()
 
 

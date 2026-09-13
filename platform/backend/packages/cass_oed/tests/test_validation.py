@@ -235,6 +235,82 @@ def test_layer_gap_is_reported_as_a_warning():
     assert any(f.code == "layer_gap" for f in report.findings)
 
 
+TERM_HEADER = (
+    "PortNumber,AccNumber,LocNumber,BuildingID,CountryCode,Latitude,Longitude,"
+    "OccupancyCode,ConstructionCode,LocPerilsCovered,BuildingTIV,ContentsTIV,"
+    "LocCurrency,LocDed6All,LocDedType6All,LocPeril"
+)
+
+
+def test_a_deductible_with_no_basis_is_reported_here_not_inside_the_engine(make_location):
+    """OED requires the basis beside the amount, and the engine refuses without it.
+
+    Left to the engine, a deductible with no basis stops the run several stages
+    later, in a file reader's traceback, long after the person who could fix it
+    has moved on.
+    """
+    files = make_location(
+        "1,A1,L1,1,ID,-6.2,106.8,1050,5100,QEQ,100000,0,USD,5000,,",
+        header=TERM_HEADER,
+    )
+
+    report = validate(files)
+
+    missing = [f for f in report.findings if f.code == "missing_term_basis"]
+    assert {finding.field for finding in missing} == {"LocDedType6All", "LocPeril"}
+
+
+def test_a_zero_deductible_needs_no_basis(make_location):
+    """Nothing is a term here, and demanding a basis would flag every row."""
+    files = make_location(
+        "1,A1,L1,1,ID,-6.2,106.8,1050,5100,QEQ,100000,0,USD,0,,",
+        header=TERM_HEADER,
+    )
+
+    report = validate(files)
+
+    assert not [f for f in report.findings if f.code == "missing_term_basis"]
+
+
+def test_a_percentage_deductible_basis_is_refused_rather_than_treated_as_flat(
+    make_location,
+):
+    files = make_location(
+        "1,A1,L1,1,ID,-6.2,106.8,1050,5100,QEQ,100000,0,USD,5000,1,QEQ",
+        header=TERM_HEADER,
+    )
+
+    report = validate(files)
+
+    assert any(
+        finding.code == "invalid_code" and finding.field == "LocDedType6All"
+        for finding in report.findings
+    )
+
+
+def test_a_contract_reference_that_is_not_a_number_is_reported_here(piwind_files):
+    """OED numbers contracts, and the engine parses that column as a number.
+
+    A book whose contracts were called "RE001" validated clean and then failed
+    inside the engine's own file reader, which is the kind of discovery this
+    validator exists to make first.
+    """
+    piwind_files.reins_scope = read_bytes(
+        FileKind.REINS_SCOPE,
+        (
+            b"ReinsNumber,PortNumber,AccNumber,CededPercent\n"
+            b"RE001,1,A11111,0.1\n"
+        ),
+    )
+
+    report = validate(piwind_files)
+
+    assert any(
+        finding.code == "invalid_number" and finding.field == "ReinsNumber"
+        for finding in report.findings
+    )
+
+
 def test_reinsurance_scope_matching_nothing_is_blocking(piwind_files):
     piwind_files.reins_scope = read_bytes(
         FileKind.REINS_SCOPE,

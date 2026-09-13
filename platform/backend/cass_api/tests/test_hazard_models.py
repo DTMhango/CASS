@@ -229,22 +229,16 @@ def test_every_file_of_the_package_reaches_the_artifact_store(model):
     assert "hazard_model:ssm/src.xml" in roles
 
 
-def test_a_model_arrives_as_a_draft_that_is_not_cleared(model):
+def test_a_model_arrives_as_a_draft_under_the_internal_use_basis(model):
+    """Draft until somebody publishes it; cleared for use the moment it lands.
+
+    Use of model data is a fact about this installation -- internal to Klapton
+    Re, not redistributed and not sold -- so it is recorded once and applied,
+    rather than asked of whoever happens to be uploading.
+    """
     assert model.publication_state == PublicationState.DRAFT
-    assert model.licence_cleared is False
-    assert "has not been cleared" in model.licence_note
-
-
-def test_a_licence_clearance_needs_something_behind_it(modeller):
-    with pytest.raises(hazard_models.HazardModelError, match="needs a note"):
-        hazard_models.register_model(
-            archive(),
-            country_code="ID",
-            version="cleared",
-            label="x",
-            licence_cleared=True,
-            actor=modeller,
-        )
+    assert model.licence_cleared is True
+    assert "Internal use within Klapton Re" in model.licence_note
 
 
 def test_uploading_the_same_version_twice_replaces_it(model, modeller):

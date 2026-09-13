@@ -187,12 +187,28 @@ def test_an_entry_with_no_codes_matches_anything(vulnerability, modeller):
 
 
 def test_the_supported_imts_stay_at_the_release_default(vulnerability, modeller):
-    """Which IMTs exist is a property of the converter, not of the taxonomy."""
+    """A caller that cannot say what hazard is in play gets the safe answer."""
     attach_vulnerability_mapping(vulnerability, MAPPING, actor=modeller)
     loaded = load_vulnerability(vulnerability)
 
     assert "SA(0.3)" in loaded.supported_imts
     assert "PGA" not in loaded.supported_imts
+
+
+def test_the_measures_a_run_can_answer_come_from_its_hazard(vulnerability, modeller):
+    """What answers a function is the ground motion computed, not a fixed list.
+
+    A run carries a hazard set, and that set is what says whether PGA exists.
+    Holding the keys service to a release-wide SA-only list refused three
+    quarters of a portfolio's value against a hazard set that carried PGA.
+    """
+    attach_vulnerability_mapping(vulnerability, MAPPING, actor=modeller)
+
+    loaded = load_vulnerability(
+        vulnerability, supported_imts=frozenset({"PGA", "SA(0.3)"})
+    )
+
+    assert loaded.supported_imts == frozenset({"PGA", "SA(0.3)"})
 
 
 def test_a_function_without_a_required_imt_is_refused(vulnerability, modeller):

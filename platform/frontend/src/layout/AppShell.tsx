@@ -11,6 +11,7 @@
 
 import { NavLink, Outlet } from "react-router-dom";
 
+import { ApiError } from "@/api/client";
 import { useSession, useSignOut } from "@/api/hooks";
 import { Button } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
@@ -26,66 +27,57 @@ interface NavItem {
   description: string;
 }
 
-/** The product areas of build plan section 3, in workflow order. */
+/**
+ * The sidebar, in the order the work happens.
+ *
+ * A person goes: pick a project, get the exposure right, build a run, watch it,
+ * read the answer. That is the spine, and it is what the sidebar is for. Work
+ * that is concurrent or cyclic rather than sequential -- import review beside
+ * portfolio building, hazard runs beside the packages they feed -- sits in tabs
+ * inside the area it belongs to, so the sidebar keeps meaning "what comes next"
+ * instead of becoming a list of every screen.
+ */
 const NAVIGATION: NavItem[] = [
   {
     to: "/",
     label: "Portfolio dashboard",
-    glyph: "▤",
+    glyph: "\u25a4",
     description: "Current work, run status and exceptions",
   },
   {
-    to: "/models",
-    label: "Model catalogue",
-    glyph: "◈",
-    description: "Approved model versions and their limitations",
-  },
-  {
     to: "/exposure",
-    label: "Exposure workspace",
-    glyph: "▦",
-    description: "Create, import, validate and publish portfolio inputs",
-  },
-  {
-    to: "/import-review",
-    label: "Import review",
-    glyph: "◫",
-    description: "Eligibility, missing inputs and the review backlog",
+    label: "Exposure",
+    glyph: "\u25a6",
+    description: "Import, review, correct and publish portfolio inputs",
   },
   {
     to: "/analysis",
     label: "Analysis builder",
-    glyph: "▷",
+    glyph: "\u25b7",
     description: "Configure a governed run",
   },
   {
     to: "/runs",
     label: "Run monitor",
-    glyph: "◐",
-    description: "Progress, logs, artifacts and retry controls",
+    glyph: "\u25d0",
+    description: "Progress and what each stage did",
   },
   {
     to: "/results",
-    label: "Results workspace",
-    glyph: "◔",
+    label: "Results",
+    glyph: "\u25d4",
     description: "Loss metrics, comparisons and exports",
   },
   {
-    to: "/model-build",
-    label: "Model build",
-    glyph: "⚒",
-    description: "Hazard runs, converter QA and approval gates",
-  },
-  {
-    to: "/hazard-models",
-    label: "Hazard models",
-    glyph: "◇",
-    description: "Upload a published seismic model and configure a run",
+    to: "/models",
+    label: "Models",
+    glyph: "\u25c8",
+    description: "Model versions, hazard runs and packages",
   },
   {
     to: "/administration",
     label: "Administration",
-    glyph: "⚙",
+    glyph: "\u2699",
     description: "Users, engines, storage and audit",
   },
 ];
@@ -108,7 +100,7 @@ export function AppShell() {
           <img className="rail__logo" src={logoBox} alt="Klapton Re" />
           <span className="rail__brand-text">
             <span className="rail__brand-name">CASS</span>
-            <span className="rail__brand-sub">Modelling Platform</span>
+            <span className="rail__brand-sub">Catastrophe Analytics & Scenario Suite</span>
           </span>
         </div>
 
@@ -156,14 +148,24 @@ export function AppShell() {
           </div>
           <div className="topbar__actions">
             {user ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => signOut.mutate()}
-                busy={signOut.isPending}
-              >
-                Sign out
-              </Button>
+              <>
+                {/* A sign out that fails silently is indistinguishable from a
+                    button that does nothing, and the person is still signed
+                    in, so the failure is said rather than swallowed. */}
+                {signOut.isError ? (
+                  <p className="topbar__signout-error" role="alert">
+                    {signOutMessage(signOut.error)}
+                  </p>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => signOut.mutate()}
+                  busy={signOut.isPending}
+                >
+                  Sign out
+                </Button>
+              </>
             ) : null}
           </div>
         </header>
@@ -176,6 +178,12 @@ export function AppShell() {
       </div>
     </div>
   );
+}
+
+/** What to say when the API could not end the session. */
+function signOutMessage(error: unknown): string {
+  if (error instanceof ApiError) return `${error.message} You are still signed in.`;
+  return "Signing out could not reach the platform. You are still signed in.";
 }
 
 function roleLabel(role: string): string {

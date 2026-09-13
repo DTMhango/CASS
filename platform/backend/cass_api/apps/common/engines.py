@@ -19,6 +19,7 @@ from typing import Any
 from django.conf import settings
 
 from cass_adapters.oasis import OasisAdapter
+from cass_adapters.openquake import OpenQuakeAdapter
 
 
 def oasis_adapter(**overrides: Any) -> OasisAdapter:
@@ -29,6 +30,16 @@ def oasis_adapter(**overrides: Any) -> OasisAdapter:
     }
     kwargs.update(overrides)
     return OasisAdapter(settings.CASS_OASIS_API_URL, **kwargs)
+
+
+def openquake_adapter(**overrides: Any) -> OpenQuakeAdapter:
+    """Build an OpenQuake adapter from the deployment configuration."""
+    kwargs: dict[str, Any] = {
+        "username": settings.CASS_OPENQUAKE_USERNAME,
+        "password": settings.CASS_OPENQUAKE_PASSWORD,
+    }
+    kwargs.update(overrides)
+    return OpenQuakeAdapter(settings.CASS_OPENQUAKE_URL, **kwargs)
 
 
 def oasis_model_triple() -> tuple[str, str, str]:
@@ -54,17 +65,15 @@ def describe_engines() -> dict[str, Mapping[str, Any]]:
     health without portfolio contents. This is the live half of that; the
     static half is the platform metadata endpoint.
 
-    An engine with no adapter yet is reported as such rather than omitted. A
-    missing row reads as "nothing to see", which is the wrong thing to tell an
-    operator about a service the deployment is running.
+    Every engine the deployment runs gets a row, reachable or not. A missing
+    row reads as "nothing to see", which is the wrong thing to tell an operator
+    about a service that is down. The configured URL travels with each answer
+    so the support bundle records what was probed, not merely what replied.
     """
     return {
-        "oasis": oasis_adapter().describe(),
+        "oasis": {**oasis_adapter().describe(), "url": settings.CASS_OASIS_API_URL},
         "openquake": {
-            "engine": "OpenQuake",
-            "reachable": None,
+            **openquake_adapter().describe(),
             "url": settings.CASS_OPENQUAKE_URL,
-            "adapter": "not yet implemented",
-            "compatible": None,
         },
     }

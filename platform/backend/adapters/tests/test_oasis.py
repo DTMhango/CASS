@@ -176,6 +176,24 @@ def test_the_losses_phase_reads_ready_as_not_yet_started(status, expected):
     assert analysis_state(status, OasisPhase.LOSSES) is expected
 
 
+def test_a_portfolio_the_model_could_not_key_fails_with_a_reason():
+    """The engine has a status of its own for it, and it is not an error status.
+
+    Left unrecognised, a portfolio that keyed to nothing was reported to the
+    analyst as "an unrecognised status", which says nothing about the model, the
+    portfolio, or what to do next.
+    """
+    for phase in OasisPhase:
+        assert (
+            analysis_state(AnalysisStatus.INPUTS_GENERATION_NO_KEYS, phase)
+            is EngineState.FAILED
+        )
+    job = adapter(server(status="INPUTS_GENERATION_NO_KEYS")).job(7, OasisPhase.INPUTS)
+
+    assert job.state is EngineState.FAILED
+    assert "no keys" in job.message
+
+
 def test_a_failed_input_generation_fails_the_loss_phase_too():
     """A run waiting behind failed inputs will never start, so it must not show as pending."""
     assert (

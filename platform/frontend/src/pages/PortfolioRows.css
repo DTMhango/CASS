@@ -1,0 +1,78 @@
+.rows__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.rows__kinds {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.rows__kind {
+  appearance: none;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  color: var(--grey-700);
+}
+
+.rows__kind--active {
+  background: var(--kre-blue-subtle);
+  border-color: var(--kre-blue-border);
+  color: var(--kre-blue);
+  font-weight: 600;
+}
+
+.rows__scroll {
+  overflow-x: auto;
+}
+
+.rows__table th[scope="col"] {
+  white-space: nowrap;
+}
+
+.rows__editing > td {
+  background: var(--kre-blue-subtle);
+  vertical-align: top;
+}
+
+.rows__editing input,
+.rows__editing select {
+  min-width: 8rem;
+}
+
+.rows__error {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--status-error, #b42318);
+}
+
+.rows__actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.rows__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.rows__pager {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.rows__message {
+  padding: var(--space-4) var(--space-5) 0;
+}

@@ -38,6 +38,11 @@ paths:
         description: Which field to use when ordering the results.
         schema:
           type: string
+      - in: query
+        name: run
+        schema:
+          type: string
+          format: uuid
       tags:
       - api
       security:
@@ -1430,10 +1435,6 @@ paths:
     get:
       operationId: api_v1_exposure_versions_list
       parameters:
-      - in: query
-        name: cedant
-        schema:
-          type: string
       - name: limit
         required: false
         in: query
@@ -1619,6 +1620,43 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/exposure-versions/{id}/correct/:
+    post:
+      operationId: api_v1_exposure_versions_correct_create
+      description: Copy a published version into the next one, for correcting.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExposureVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/exposure-versions/{id}/files/:
     post:
       operationId: api_v1_exposure_versions_files_create
@@ -1742,6 +1780,169 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExposureVersion'
+          description: ''
+  /api/v1/exposure-versions/{id}/rows/:
+    get:
+      operationId: api_v1_exposure_versions_rows_retrieve
+      description: |-
+        The rows of one attached file, with what each column accepts.
+
+        The columns come from the same schema the file was validated against,
+        so the editor can refuse a value before it is stored rather than
+        reporting it as a finding afterwards.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      - in: query
+        name: kind
+        schema:
+          type: string
+        description: location, account, reins_info or reins_scope
+      - in: query
+        name: limit
+        schema:
+          type: integer
+      - in: query
+        name: offset
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/exposure-versions/{id}/rows/add/:
+    post:
+      operationId: api_v1_exposure_versions_rows_add_create
+      description: Add a row, checked the same way a correction is.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/exposure-versions/{id}/rows/edit/:
+    post:
+      operationId: api_v1_exposure_versions_rows_edit_create
+      description: Correct one row in place, or refuse it with the reason.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/exposure-versions/{id}/rows/remove/:
+    post:
+      operationId: api_v1_exposure_versions_rows_remove_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this exposure version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/exposure-versions/{id}/validate/:
     post:
@@ -1969,6 +2170,277 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/hazard-models/:
+    get:
+      operationId: api_v1_hazard_models_list
+      description: |-
+        Uploading a published PSHA model and configuring a run of it.
+
+        Read-only as a model viewset because a hazard model is not edited through
+        the API in the ordinary way: it is uploaded whole, and what an operator
+        changes afterwards is a *run* of it, never the model. Editing a source
+        logic tree through a REST field would make a model nobody published while
+        keeping the name of one who did.
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - in: query
+        name: licence_cleared
+        schema:
+          type: boolean
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedHazardModelList'
+          description: ''
+  /api/v1/hazard-models/{id}/:
+    get:
+      operationId: api_v1_hazard_models_retrieve
+      description: |-
+        Uploading a published PSHA model and configuring a run of it.
+
+        Read-only as a model viewset because a hazard model is not edited through
+        the API in the ordinary way: it is uploaded whole, and what an operator
+        changes afterwards is a *run* of it, never the model. Editing a source
+        logic tree through a REST field would make a model nobody published while
+        keeping the name of one who did.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard model.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
+  /api/v1/hazard-models/{id}/configure/:
+    post:
+      operationId: api_v1_hazard_models_configure_create
+      description: |-
+        Work out what a configured run would do, without running it.
+
+        Called on every edit, so the screen shows the resolved configuration,
+        the conversion's changes and every problem while the operator is still
+        looking at it. A national calculation is hours; finding out there is
+        the expensive way.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard model.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
+  /api/v1/hazard-models/{id}/specs/:
+    get:
+      operationId: api_v1_hazard_models_specs_retrieve
+      description: List this model's configured runs, or save another.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard model.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
+    post:
+      operationId: api_v1_hazard_models_specs_create
+      description: List this model's configured runs, or save another.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard model.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
+  /api/v1/hazard-models/{id}/specs/{spec_id}/launch/:
+    post:
+      operationId: api_v1_hazard_models_specs_launch_create
+      description: |-
+        Run a saved configuration on OpenQuake.
+
+        The run is created and queued here; the calculation itself happens in a
+        worker. A national hazard calculation runs for hours, and section 3
+        requires the work to continue whether or not the browser stays open, so
+        the response is the queued run rather than the hazard.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard model.
+        required: true
+      - in: path
+        name: spec_id
+        schema:
+          type: string
+          format: uuid
+        description: The saved configuration to launch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
+  /api/v1/hazard-models/inspect/:
+    post:
+      operationId: api_v1_hazard_models_inspect_create
+      description: |-
+        Read an archive and say what it is, without storing anything.
+
+        So an operator who uploaded the wrong file finds out from a screen
+        rather than from a registry record they then have to explain.
+      tags:
+      - api
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HazardModelUploadRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
+  /api/v1/hazard-models/parameters/:
+    get:
+      operationId: api_v1_hazard_models_parameters_retrieve
+      description: Every parameter the editor can offer, with what changing it costs.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
+  /api/v1/hazard-models/upload/:
+    post:
+      operationId: api_v1_hazard_models_upload_create
+      description: Register an uploaded package as a configurable hazard model.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardModel'
+          description: ''
   /api/v1/hazard-runs/:
     get:
       operationId: api_v1_hazard_runs_list
@@ -2147,6 +2619,94 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/hazard-sets/:
+    get:
+      operationId: api_v1_hazard_sets_list
+      description: Registered hazard sets, which a model version is pointed at to
+        produce loss.
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - in: query
+        name: grid
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedHazardSetList'
+          description: ''
+  /api/v1/hazard-sets/{id}/:
+    get:
+      operationId: api_v1_hazard_sets_retrieve
+      description: Registered hazard sets, which a model version is pointed at to
+        produce loss.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardSet'
+          description: ''
   /api/v1/model-versions/:
     get:
       operationId: api_v1_model_versions_list
@@ -2348,6 +2908,88 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/model-versions/{id}/attach-hazard/:
+    post:
+      operationId: api_v1_model_versions_attach_hazard_create
+      description: |-
+        Point this model version at a hazard set.
+
+        Refused unless the set was computed on this version's grid and carries
+        every measure its vulnerability functions demand -- half the measures
+        would answer half the functions and report zero for the rest.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this model version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
+  /api/v1/model-versions/{id}/build-package/:
+    post:
+      operationId: api_v1_model_versions_build_package_create
+      description: |-
+        Convert this version into an Oasis model package, as a run.
+
+        The response is the queued conversion run. The policy is stated by the
+        caller and cleared by a converter-candidate approval somebody else
+        decided; the converter has no default for either open question.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this model version.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelVersionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
   /api/v1/model-versions/{id}/publish/:
     post:
       operationId: api_v1_model_versions_publish_create
@@ -2575,6 +3217,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportBatch'
           description: ''
+  /api/v1/portfolio-imports/{id}/import-results/:
+    get:
+      operationId: api_v1_portfolio_imports_import_results_retrieve
+      description: |-
+        Everything work package 2's screen shows, in one response.
+
+        One payload rather than six calls, because the screen's whole job is to
+        let a person see the import as a single picture -- what came in, what
+        was excluded and why, how value was allocated, what a review has
+        changed, and which mode the result may be used in. Six requests would
+        let it render half a picture and look complete.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
   /api/v1/portfolio-imports/{id}/locations/:
     get:
       operationId: api_v1_portfolio_imports_locations_retrieve
@@ -2591,6 +3264,42 @@ paths:
           type: string
           format: uuid
         description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
+  /api/v1/portfolio-imports/{id}/locations/{location_id}/decide/:
+    post:
+      operationId: api_v1_portfolio_imports_locations_decide_create
+      description: |-
+        Record one review decision, with the reason for it.
+
+        The staged row is not edited. A decision is a separate record laid over
+        it, so the batch keeps saying what the workbook said and a later
+        promotion reads the overlay.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      - in: path
+        name: location_id
+        schema:
+          type: string
+          format: uuid
+        description: The staged location the decision is about.
         required: true
       tags:
       - api
@@ -2655,6 +3364,30 @@ paths:
         ``country`` narrows the selection to one country, because a model
         version covers one. A business with sites in two is excluded from both
         rather than split, for the same reason a partial schedule is.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+          description: ''
+  /api/v1/portfolio-imports/{id}/review-queue/:
+    get:
+      operationId: api_v1_portfolio_imports_review_queue_retrieve
+      description: The locations a person still owes a decision on.
       parameters:
       - in: path
         name: id
@@ -3911,6 +4644,16 @@ components:
         * `sign_in_failed` - Sign-in failed
     AnalysisRun:
       type: object
+      description: |-
+        An analysis, and the run that carries it.
+
+        The two are created together rather than separately. A ``Run`` with no
+        detail record is a row nothing can execute and nothing can explain, so
+        there is no endpoint that makes one on its own: a caller names what the
+        analysis should use, and the lifecycle record comes with it.
+
+        The three write-only fields below are the run half of that -- which
+        project owns it, what to call it, and the resource envelope of section 11.
       properties:
         id:
           type: string
@@ -3919,6 +4662,7 @@ components:
         run:
           type: string
           format: uuid
+          readOnly: true
         run_detail:
           allOf:
           - $ref: '#/components/schemas/Run'
@@ -3978,10 +4722,17 @@ components:
       - run_detail
     AnalysisRunRequest:
       type: object
+      description: |-
+        An analysis, and the run that carries it.
+
+        The two are created together rather than separately. A ``Run`` with no
+        detail record is a row nothing can execute and nothing can explain, so
+        there is no endpoint that makes one on its own: a caller names what the
+        analysis should use, and the lifecycle record comes with it.
+
+        The three write-only fields below are the run half of that -- which
+        project owns it, what to call it, and the resource envelope of section 11.
       properties:
-        run:
-          type: string
-          format: uuid
         exposure_version:
           type: string
           format: uuid
@@ -4004,10 +4755,23 @@ components:
           nullable: true
           description: The approval that permitted an unreconciled or exceptional
             run to proceed.
+        project:
+          type: string
+          format: uuid
+          writeOnly: true
+          description: The project that will own the run, its artifacts and its results.
+        label:
+          type: string
+          writeOnly: true
+          maxLength: 200
+        execution_profile:
+          type: string
+          writeOnly: true
+          maxLength: 32
       required:
       - exposure_version
       - model_version
-      - run
+      - project
     Approval:
       type: object
       properties:
@@ -4539,6 +5303,7 @@ components:
         hazard_run:
           type: string
           format: uuid
+          nullable: true
         model_version:
           type: string
           format: uuid
@@ -4574,7 +5339,6 @@ components:
           readOnly: true
       required:
       - created_at
-      - hazard_run
       - id
       - run
       - run_detail
@@ -4587,6 +5351,7 @@ components:
         hazard_run:
           type: string
           format: uuid
+          nullable: true
         model_version:
           type: string
           format: uuid
@@ -4617,7 +5382,6 @@ components:
           type: boolean
           nullable: true
       required:
-      - hazard_run
       - run
     DecisionEnum:
       enum:
@@ -4741,9 +5505,6 @@ components:
           allOf:
           - $ref: '#/components/schemas/ExposureVersionStateEnum'
           readOnly: true
-        cedant:
-          type: string
-          maxLength: 200
         valuation_date:
           type: string
           format: date
@@ -4837,9 +5598,6 @@ components:
           type: string
           minLength: 1
           maxLength: 200
-        cedant:
-          type: string
-          maxLength: 200
         valuation_date:
           type: string
           format: date
@@ -4897,6 +5655,129 @@ components:
         * `model_release` - Model release
         * `platform_release` - Platform release
         * `run_exception` - Permitted run exception
+    HazardModel:
+      type: object
+      description: A registered PSHA package, and what running it would take.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+        country_code:
+          type: string
+          readOnly: true
+        version:
+          type: string
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        source_organisation:
+          type: string
+          readOnly: true
+        publication_reference:
+          type: string
+          readOnly: true
+        licence:
+          type: string
+          readOnly: true
+        licence_cleared:
+          type: boolean
+          readOnly: true
+        licence_note:
+          type: string
+          readOnly: true
+        archive_checksum:
+          type: string
+          readOnly: true
+        archive_bytes:
+          type: integer
+          readOnly: true
+        file_manifest:
+          readOnly: true
+          description: Every file in the package, with its size and checksum.
+        published_calculation_mode:
+          type: string
+          readOnly: true
+        intensity_measures:
+          readOnly: true
+        tectonic_regions:
+          readOnly: true
+        estimated_realizations:
+          type: integer
+          readOnly: true
+        logic_tree_summary:
+          readOnly: true
+        needs_conversion:
+          type: boolean
+          readOnly: true
+        needs_sampling:
+          type: boolean
+          readOnly: true
+        publication_state:
+          allOf:
+          - $ref: '#/components/schemas/PublicationStateEnum'
+          readOnly: true
+        notes:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - archive_bytes
+      - archive_checksum
+      - country_code
+      - created_at
+      - estimated_realizations
+      - file_manifest
+      - id
+      - intensity_measures
+      - label
+      - licence
+      - licence_cleared
+      - licence_note
+      - logic_tree_summary
+      - needs_conversion
+      - needs_sampling
+      - notes
+      - publication_reference
+      - publication_state
+      - published_calculation_mode
+      - reference
+      - source_organisation
+      - tectonic_regions
+      - version
+    HazardModelUploadRequest:
+      type: object
+      properties:
+        archive:
+          type: string
+          format: binary
+        country_code:
+          type: string
+          minLength: 1
+        version:
+          type: string
+          minLength: 1
+        label:
+          type: string
+          minLength: 1
+        source_organisation:
+          type: string
+          minLength: 1
+        publication_reference:
+          type: string
+          minLength: 1
+      required:
+      - archive
+      - country_code
+      - label
+      - version
     HazardRun:
       type: object
       properties:
@@ -5036,6 +5917,97 @@ components:
       required:
       - grid
       - run
+    HazardSet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+        country_code:
+          type: string
+          readOnly: true
+        version:
+          type: string
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        source_model:
+          type: string
+          readOnly: true
+          description: The seismic source model, such as GEM Global Hazard Mosaic
+            v2023.
+        licence:
+          type: string
+          readOnly: true
+        licence_cleared:
+          type: boolean
+          readOnly: true
+        grid:
+          type: string
+          format: uuid
+          readOnly: true
+        engine_version:
+          type: string
+          readOnly: true
+        investigation_time:
+          type: number
+          format: double
+          readOnly: true
+        stochastic_event_sets:
+          type: integer
+          readOnly: true
+        event_count:
+          type: integer
+          readOnly: true
+        cell_count:
+          type: integer
+          readOnly: true
+        footprint_row_count:
+          type: integer
+          readOnly: true
+        imts:
+          readOnly: true
+          description: Intensity measures this hazard set carries.
+        samples_above_range:
+          type: integer
+          readOnly: true
+        publication_state:
+          allOf:
+          - $ref: '#/components/schemas/PublicationStateEnum'
+          readOnly: true
+        notes:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - cell_count
+      - country_code
+      - created_at
+      - engine_version
+      - event_count
+      - footprint_row_count
+      - grid
+      - id
+      - imts
+      - investigation_time
+      - label
+      - licence
+      - licence_cleared
+      - notes
+      - publication_state
+      - reference
+      - samples_above_range
+      - source_model
+      - stochastic_event_sets
+      - version
     Health:
       type: object
       properties:
@@ -5198,6 +6170,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/VulnerabilitySet'
           readOnly: true
+        hazard_set:
+          type: string
+          format: uuid
+          nullable: true
         hazard_source_model:
           type: string
           maxLength: 200
@@ -5298,6 +6274,10 @@ components:
         vulnerability_set:
           type: string
           format: uuid
+        hazard_set:
+          type: string
+          format: uuid
+          nullable: true
         hazard_source_model:
           type: string
           maxLength: 200
@@ -5551,6 +6531,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExposureVersion'
+    PaginatedHazardModelList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardModel'
     PaginatedHazardRunList:
       type: object
       required:
@@ -5574,6 +6577,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HazardRun'
+    PaginatedHazardSetList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardSet'
     PaginatedImportBatchList:
       type: object
       required:
@@ -5760,10 +6786,17 @@ components:
             $ref: '#/components/schemas/VulnerabilitySet'
     PatchedAnalysisRunRequest:
       type: object
+      description: |-
+        An analysis, and the run that carries it.
+
+        The two are created together rather than separately. A ``Run`` with no
+        detail record is a row nothing can execute and nothing can explain, so
+        there is no endpoint that makes one on its own: a caller names what the
+        analysis should use, and the lifecycle record comes with it.
+
+        The three write-only fields below are the run half of that -- which
+        project owns it, what to call it, and the resource envelope of section 11.
       properties:
-        run:
-          type: string
-          format: uuid
         exposure_version:
           type: string
           format: uuid
@@ -5786,6 +6819,19 @@ components:
           nullable: true
           description: The approval that permitted an unreconciled or exceptional
             run to proceed.
+        project:
+          type: string
+          format: uuid
+          writeOnly: true
+          description: The project that will own the run, its artifacts and its results.
+        label:
+          type: string
+          writeOnly: true
+          maxLength: 200
+        execution_profile:
+          type: string
+          writeOnly: true
+          maxLength: 32
     PatchedApprovalRequest:
       type: object
       properties:
@@ -5914,6 +6960,7 @@ components:
         hazard_run:
           type: string
           format: uuid
+          nullable: true
         model_version:
           type: string
           format: uuid
@@ -5952,9 +6999,6 @@ components:
         name:
           type: string
           minLength: 1
-          maxLength: 200
-        cedant:
-          type: string
           maxLength: 200
         valuation_date:
           type: string
@@ -6050,6 +7094,10 @@ components:
         vulnerability_set:
           type: string
           format: uuid
+        hazard_set:
+          type: string
+          format: uuid
+          nullable: true
         hazard_source_model:
           type: string
           maxLength: 200
@@ -6127,9 +7175,6 @@ components:
         candidate:
           type: string
           format: uuid
-        differences:
-          description: AAL, return-period and segment differences with the drivers
-            identified.
         commentary:
           type: string
     PatchedResultSetRequest:
@@ -6214,8 +7259,7 @@ components:
           maxLength: 120
         licence_cleared:
           type: boolean
-          description: Whether commercial use has been confirmed in writing by the
-            licensor.
+          description: Cleared under the installation's internal-use basis.
         licence_note:
           type: string
         function_count:
@@ -6409,10 +7453,19 @@ components:
         baseline:
           type: string
           format: uuid
+        baseline_detail:
+          allOf:
+          - $ref: '#/components/schemas/ResultSet'
+          readOnly: true
         candidate:
           type: string
           format: uuid
+        candidate_detail:
+          allOf:
+          - $ref: '#/components/schemas/ResultSet'
+          readOnly: true
         differences:
+          readOnly: true
           description: AAL, return-period and segment differences with the drivers
             identified.
         commentary:
@@ -6426,8 +7479,11 @@ components:
           readOnly: true
       required:
       - baseline
+      - baseline_detail
       - candidate
+      - candidate_detail
       - created_at
+      - differences
       - id
       - is_like_for_like
       - label
@@ -6448,9 +7504,6 @@ components:
         candidate:
           type: string
           format: uuid
-        differences:
-          description: AAL, return-period and segment differences with the drivers
-            identified.
         commentary:
           type: string
       required:
@@ -6907,8 +7960,7 @@ components:
           maxLength: 120
         licence_cleared:
           type: boolean
-          description: Whether commercial use has been confirmed in writing by the
-            licensor.
+          description: Cleared under the installation's internal-use basis.
         licence_note:
           type: string
         function_count:
@@ -6975,8 +8027,7 @@ components:
           maxLength: 120
         licence_cleared:
           type: boolean
-          description: Whether commercial use has been confirmed in writing by the
-            licensor.
+          description: Cleared under the installation's internal-use basis.
         licence_note:
           type: string
         function_count:

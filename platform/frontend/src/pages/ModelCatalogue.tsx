@@ -35,7 +35,7 @@ const SCOPE_TONE: Record<string, "ok" | "warning" | "error" | "idle"> = {
   not_material: "idle",
 };
 
-export function ModelCatalogue() {
+export function ModelCatalogue({ embedded = false }: { embedded?: boolean } = {}) {
   const { data: models, isLoading } = useModelCatalogue();
   const context = useWorkingContext();
 
@@ -43,10 +43,10 @@ export function ModelCatalogue() {
 
   return (
     <>
-      <PageHeader
+      {embedded ? null : <PageHeader
         title="Model catalogue"
         description="Approved earthquake model versions, what each one covers, and what it does not. Select a version to carry it into the analysis builder."
-      />
+      />}
 
       {!models || models.length === 0 ? (
         <Card>

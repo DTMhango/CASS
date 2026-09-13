@@ -1,7 +1,22 @@
+/* The frame fills the window exactly, and the canvas is the only thing that
+   scrolls vertically. Two things would otherwise let the page itself scroll,
+   leaving an empty stretch below the end of the content:
+
+   a row track sized to its contents grows past the window as soon as a table
+   is long, so the row is a fr track that cannot exceed the space it is given;
+
+   and a screen-reader-only span -- there is one inside every status badge and
+   every required field -- is absolutely positioned, so with no positioned
+   ancestor it resolves against the page and lands where it would have been in
+   flow, which on a long table is hundreds of pixels below the fold. Making
+   this the containing block keeps those spans inside the frame. */
 .shell {
   display: grid;
   grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
+  position: relative;
+  overflow: hidden;
   background: var(--surface-canvas);
 }
 
@@ -179,10 +194,25 @@
   flex-shrink: 0;
 }
 
+/* Sits beside the button rather than above it: the header is a fixed height,
+   and a message that grew it would move every screen down. */
+.topbar__signout-error {
+  margin: 0;
+  max-width: 22rem;
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  color: var(--status-error);
+  text-align: right;
+}
+
 .canvas {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-6);
+  /* Positioned so the hidden spans inside the content scroll with the rows
+     they describe rather than resolving against the frame. */
+  position: relative;
   animation: canvas-fade-in 0.22s ease-out;
 }
 

@@ -28,7 +28,12 @@ from apps.modelregistry.assets import (
     attach_grid_cells,
     attach_vulnerability_mapping,
 )
-from apps.modelregistry.models import AreaPerilGrid, ModelVersion, VulnerabilitySet
+from apps.modelregistry.models import (
+    AreaPerilGrid,
+    ModelVersion,
+    PublicationState,
+    VulnerabilitySet,
+)
 from apps.runs.models import AnalysisRun, Run, RunKind
 from apps.runs.services import (
     DEFAULT_ORD_OUTPUT,
@@ -184,7 +189,7 @@ def published_exposure(api, project, earthquake_location_csv) -> ExposureVersion
     """A validated, published three-location Indonesian portfolio."""
     created = api.post(
         f"{API}/exposure-versions/",
-        {"project": str(project.id), "name": "M2 portfolio", "cedant": "Test Cedant"},
+        {"project": str(project.id), "name": "M2 portfolio"},
         format="json",
     )
     assert created.status_code == 201, created.data
@@ -425,6 +430,22 @@ def test_each_requested_perspective_is_carried_into_the_settings(analysis_run):
     assert {"gul_summaries", "il_summaries", "ri_summaries"} <= set(document)
 
 
+def test_reinsurance_asks_for_the_insured_position_it_is_derived_from(analysis_run):
+    """The engine applies contracts to the insured stream, not to ground-up loss.
+
+    Asked for reinsurance alone it builds the reinsurance structures and then
+    stops on a missing insured summary index, several minutes into a run.
+    """
+    analysis_run.perspectives = ["reinsurance"]
+
+    document = build_analysis_settings(analysis_run)
+
+    assert document["ri_output"] is True
+    assert document["il_output"] is True
+    assert "il_summaries" in document
+    assert document["gul_output"] is False
+
+
 def test_the_default_output_set_is_not_every_output_oasis_can_produce(analysis_run):
     """Section 11: the PiWind all-output run peaked near 21.6 GB."""
     ord_output = build_analysis_settings(analysis_run)["gul_summaries"][0]["ord_output"]
@@ -509,6 +530,31 @@ def test_a_failed_loss_calculation_fails_the_run(analysis_run, analyst):
     assert run.state == RunState.FAILED
     assert run.failure_stage == "losses"
     assert "MemoryError" in run.failure_detail
+
+
+def test_a_failure_longer_than_the_column_is_still_recorded(analysis_run, analyst):
+    """An engine's answer is not ours to size.
+
+    A kernel traceback came back longer than the failure column, the write was
+    refused by the database, and the run stayed RUNNING for ever with its
+    failure nowhere -- the unintelligible state the monitor exists to prevent.
+    """
+    run = Run.objects.get(id=analysis_run.run_id)
+    run.transition(RunState.QUEUED, actor=analyst)
+    run.transition(RunState.RUNNING, actor=analyst)
+
+    run.transition(
+        RunState.FAILED,
+        actor=analyst,
+        stage="losses",
+        failure_summary="x" * 2000,
+        failure_detail="y" * 20000,
+    )
+
+    run.refresh_from_db()
+    assert run.state == RunState.FAILED
+    assert len(run.failure_summary) == 500
+    assert run.events.filter(state=RunState.FAILED).exists()
 
 
 def test_an_oasis_lookup_that_loses_locations_stops_the_run(analysis_run, analyst):
@@ -995,3 +1041,321 @@ def test_a_blocked_run_reports_itself_as_blocked_rather_than_failed_to_the_task(
     assert result["state"] == RunState.BLOCKED
     assert result["stage"] == "reconcile_keys"
     assert "could not be mapped" in result["summary"]
+
+
+# -- configuring an analysis through the API --------------------------------
+#
+# The analysis builder of section 3 has to be able to make the thing it
+# submits. Until it could, a run existed only where a test or a shell made one,
+# which is the shape of a workflow that is finished everywhere except the end a
+# person touches.
+
+@pytest.fixture()
+def published_model_version(model_version, modeller) -> ModelVersion:
+    """The catalogue only offers published versions, so a builder only sees these."""
+    model_version.publication_state = PublicationState.PUBLISHED
+    model_version.save()
+    return model_version
+
+
+def configure(api, project, exposure, model_version, **extra):
+    body = {
+        "project": str(project.id),
+        "exposure_version": str(exposure.id),
+        "model_version": str(model_version.id),
+        "perspectives": ["ground_up"],
+    }
+    body.update(extra)
+    return api.post(f"{API}/analysis-runs/", body, format="json")
+
+
+def test_configuring_an_analysis_creates_the_run_that_carries_it(
+    api, project, published_exposure, published_model_version
+):
+    """A detail record and a lifecycle record, made as one act."""
+    response = configure(api, project, published_exposure, published_model_version)
+
+    assert response.status_code == 201, response.data
+    analysis = AnalysisRun.objects.get(id=response.data["id"])
+    assert analysis.run.kind == RunKind.ANALYSIS
+    assert analysis.run.project_id == project.id
+    assert analysis.run.state == RunState.DRAFT
+    # The response carries the monitor record, so the builder can link
+    # straight to the run it just made.
+    assert response.data["run_detail"]["state"] == RunState.DRAFT
+
+
+def test_a_configured_analysis_can_then_be_submitted(
+    api, project, published_exposure, published_model_version, oasis_is
+):
+    """The whole path, from an empty builder to a completed run."""
+    oasis_is(oasis_server())
+    created = configure(api, project, published_exposure, published_model_version)
+
+    submitted = api.post(f"{API}/analysis-runs/{created.data['id']}/submit/")
+
+    assert submitted.status_code == 202
+    analysis = AnalysisRun.objects.get(id=created.data["id"])
+    assert analysis.run.state == RunState.SUCCEEDED
+
+
+def test_an_unpublished_exposure_version_cannot_be_configured(
+    api, project, published_model_version, analyst
+):
+    draft = ExposureVersion.objects.create(
+        project=project, name="Draft", version=41, created_by=analyst
+    )
+    response = configure(api, project, draft, published_model_version)
+
+    assert response.status_code == 400
+    assert "not published" in str(response.data["exposure_version"])
+
+
+def test_an_unpublished_model_version_cannot_be_configured(
+    api, project, published_exposure, model_version
+):
+    """A draft model version is not in the catalogue and is not runnable."""
+    response = configure(api, project, published_exposure, model_version)
+
+    assert response.status_code == 400
+    assert "rather than published" in str(response.data["model_version"])
+
+
+def test_a_perspective_the_source_data_cannot_support_is_refused(
+    api, project, published_exposure, published_model_version
+):
+    """Section 8: no empty financial file is invented to imply a perspective."""
+    response = configure(
+        api, project, published_exposure, published_model_version,
+        perspectives=["reinsurance"],
+    )
+
+    assert response.status_code == 400
+    assert "not supported by this portfolio" in str(response.data["perspectives"])
+
+
+def test_an_execution_profile_this_installation_does_not_declare_is_refused(
+    api, project, published_exposure, published_model_version
+):
+    response = configure(
+        api, project, published_exposure, published_model_version,
+        execution_profile="unlimited",
+    )
+
+    assert response.status_code == 400
+    assert "not an execution profile" in str(response.data["execution_profile"])
+
+
+def test_someone_without_write_access_cannot_configure_a_run(
+    client_for, outsider, project, published_exposure, published_model_version
+):
+    response = configure(
+        client_for(outsider), project, published_exposure, published_model_version
+    )
+
+    assert response.status_code == 400
+    assert AnalysisRun.objects.filter(run__project=project).count() == 0
+
+
+def test_a_retried_analysis_carries_the_configuration_that_makes_it_runnable(
+    api, analysis_run, oasis_is
+):
+    """A retry the monitor offers has to produce a run that can actually run.
+
+    Copying the lifecycle record alone made a row an analyst could see, submit
+    and watch do nothing, because the detail that says which portfolio and
+    which model version was left behind on the failed attempt.
+    """
+    oasis_is(oasis_server(loss_status="RUN_ERROR"))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    assert Run.objects.get(id=analysis_run.run_id).state == RunState.FAILED
+
+    retried = api.post(f"{API}/runs/{analysis_run.run_id}/retry/")
+    assert retried.status_code == 201
+
+    replacement = Run.objects.get(id=retried.data["id"])
+    carried = replacement.analysis
+    assert carried.exposure_version_id == analysis_run.exposure_version_id
+    assert carried.model_version_id == analysis_run.model_version_id
+    assert carried.perspectives == analysis_run.perspectives
+    # The failed attempt's engine identifiers are not inherited: the retry is
+    # a new analysis on the engine, not a second reading of the old one.
+    assert carried.oasis_analysis_id == ""
+    assert carried.keys_reconciled is None
+
+
+def test_a_retried_analysis_can_be_submitted_and_succeed(api, analysis_run, oasis_is):
+    oasis_is(oasis_server(loss_status="RUN_ERROR"))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    retried = api.post(f"{API}/runs/{analysis_run.run_id}/retry/")
+
+    oasis_is(oasis_server())
+    replacement = Run.objects.get(id=retried.data["id"])
+    submitted = api.post(f"{API}/analysis-runs/{replacement.analysis.id}/submit/")
+
+    assert submitted.status_code == 202
+    replacement.refresh_from_db()
+    assert replacement.state == RunState.SUCCEEDED
+
+# -- publishing the results -------------------------------------------------
+#
+# Until this landed the pipeline stopped at a tarball: the run succeeded, the
+# artifact was registered, and the results workspace stayed empty forever
+# because nothing turned the package into numbers. These hold the step that
+# closes that gap, and the rules about what a published number may claim.
+
+def ord_package(
+    *,
+    perspectives=("gul",),
+    aal="232122.90",
+    sd="623738.00",
+) -> bytes:
+    """An Oasis output package in the shape the engine actually serves one."""
+    import io
+    import tarfile
+
+    ept_rows = [
+        "SummaryId,EPCalc,EPType,ReturnPeriod,Loss",
+        # The requested basis: mean sample (4), AEP (3).
+        "1,4,3,250.000000,9000000.000000",
+        "1,4,3,100.000000,5000000.000000",
+        "1,4,3,10.000000,633300.000000",
+        # A different calculation and type in the same file, which must not be
+        # mixed into the curve.
+        "1,2,1,250.000000,1.000000",
+        "1,4,1,100.000000,2.000000",
+    ]
+    palt_rows = [
+        "SummaryId,SampleType,MeanLoss,SDLoss",
+        "1,1,999999.00,111111.00",
+        f"1,2,{aal},{sd}",
+    ]
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for prefix in perspectives:
+            for table, rows in (("ept", ept_rows), ("palt", palt_rows)):
+                payload = ("\n".join(rows) + "\n").encode("utf-8")
+                info = tarfile.TarInfo(f"output/{prefix}_S1_{table}.csv")
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def test_a_completed_analysis_publishes_a_result_set(analysis_run, oasis_is, api):
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    assert result.perspective == "ground_up"
+    assert result.average_annual_loss == Decimal("232122.90")
+    assert result.standard_deviation == Decimal("623738.00")
+
+
+def test_the_exceedance_curve_takes_only_the_requested_basis(
+    analysis_run, oasis_is, api
+):
+    """An EPT holds several calculations; mixing them draws no real curve."""
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    curve = ResultSet.objects.get(run=analysis_run.run_id).return_period_losses
+    assert curve == {
+        "10": "633300.000000",
+        "100": "5000000.000000",
+        "250": "9000000.000000",
+    }
+
+
+def test_the_basis_travels_with_the_number(analysis_run, oasis_is, api):
+    """A package carries several numbers; the result says which one it is."""
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    basis = ResultSet.objects.get(run=analysis_run.run_id).uncertainty_attribution
+    assert basis["ord_basis"]["ep_type"] == "AEP"
+    assert basis["ord_basis"]["average_loss"] == "sample"
+
+
+def test_a_published_result_is_never_approved_by_the_pipeline(
+    analysis_run, oasis_is, api, model_version
+):
+    """A pipeline that approved its own output makes the reviewer a formality."""
+    from apps.results.models import ResultSet, ResultState
+
+    model_version.is_research_prototype = False
+    model_version.save()
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    assert result.state == ResultState.DRAFT
+    assert result.usable_for_decisions is False
+
+
+def test_a_research_prototype_produces_research_output(analysis_run, oasis_is, api):
+    """Section 9: research output stays distinct from a decision number."""
+    from apps.results.models import ResultSet, ResultState
+
+    assert analysis_run.model_version.is_research_prototype is True
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    assert ResultSet.objects.get(run=analysis_run.run_id).state == ResultState.RESEARCH
+
+
+def test_the_result_carries_what_the_number_rests_on(analysis_run, oasis_is, api):
+    """Section 9 requires the caveat block, so the fields behind it are filled."""
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    caveats = result.export_caveats()
+    assert caveats["model_version"] == analysis_run.model_version.reference
+    assert caveats["currency"]
+    assert result.exposure_quality["keys_reconciled"] is True
+
+
+def test_only_the_perspectives_the_run_asked_for_are_published(
+    analysis_run, oasis_is, api
+):
+    """A ground-up run must not quietly publish an insured number as well."""
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package(perspectives=("gul", "il"))))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    published = list(
+        ResultSet.objects.filter(run=analysis_run.run_id).values_list(
+            "perspective", flat=True
+        )
+    )
+    assert published == ["ground_up"]
+
+
+def test_an_unreadable_package_does_not_fail_a_completed_run(
+    analysis_run, oasis_is, api
+):
+    """Hours of engine time are not discarded because a table moved.
+
+    The calculation happened and the output is stored and checksummed. The run
+    succeeds, the reason no results were published is recorded, and somebody
+    can read the artifact by hand.
+    """
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=b"not an archive at all"))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    run = Run.objects.get(id=analysis_run.run_id)
+    assert run.state == RunState.SUCCEEDED
+    assert not ResultSet.objects.filter(run=run).exists()
+    assert "results_not_published" in run.manifest["output"]

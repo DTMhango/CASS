@@ -47,8 +47,8 @@ import enum
 import io
 import json
 import time
-from collections.abc import Callable, Iterator, Mapping
-from typing import Any, BinaryIO, Protocol
+from collections.abc import Callable, Mapping
+from typing import Any, BinaryIO
 
 from .base import (
     AdapterError,
@@ -58,6 +58,14 @@ from .base import (
     EngineState,
     EngineUnavailable,
     EngineVersion,
+)
+from .http import (
+    HttpResponse,
+    HttpSession,
+    Transport,
+)
+from .http import (
+    body_text as _body_text,
 )
 
 __all__ = [
@@ -87,6 +95,7 @@ class AnalysisStatus(enum.StrEnum):
     INPUTS_GENERATION_STARTED = "INPUTS_GENERATION_STARTED"
     INPUTS_GENERATION_CANCELLED = "INPUTS_GENERATION_CANCELLED"
     INPUTS_GENERATION_ERROR = "INPUTS_GENERATION_ERROR"
+    INPUTS_GENERATION_NO_KEYS = "INPUTS_GENERATION_NO_KEYS"
     READY = "READY"
     RUN_QUEUED = "RUN_QUEUED"
     RUN_STARTED = "RUN_STARTED"
@@ -123,6 +132,7 @@ _INPUT_STATES: Mapping[AnalysisStatus, EngineState] = {
     AnalysisStatus.INPUTS_GENERATION_STARTED: EngineState.RUNNING,
     AnalysisStatus.INPUTS_GENERATION_CANCELLED: EngineState.CANCELLED,
     AnalysisStatus.INPUTS_GENERATION_ERROR: EngineState.FAILED,
+    AnalysisStatus.INPUTS_GENERATION_NO_KEYS: EngineState.FAILED,
     AnalysisStatus.READY: EngineState.SUCCEEDED,
     AnalysisStatus.RUN_QUEUED: EngineState.SUCCEEDED,
     AnalysisStatus.RUN_STARTED: EngineState.SUCCEEDED,
@@ -141,6 +151,7 @@ _LOSS_STATES: Mapping[AnalysisStatus, EngineState] = {
     AnalysisStatus.INPUTS_GENERATION_STARTED: EngineState.PENDING,
     AnalysisStatus.INPUTS_GENERATION_CANCELLED: EngineState.CANCELLED,
     AnalysisStatus.INPUTS_GENERATION_ERROR: EngineState.FAILED,
+    AnalysisStatus.INPUTS_GENERATION_NO_KEYS: EngineState.FAILED,
     AnalysisStatus.READY: EngineState.PENDING,
     AnalysisStatus.RUN_QUEUED: EngineState.PENDING,
     AnalysisStatus.RUN_STARTED: EngineState.RUNNING,
@@ -157,6 +168,11 @@ _MESSAGES: Mapping[AnalysisStatus, str] = {
     AnalysisStatus.INPUTS_GENERATION_STARTED: "Oasis is running keys and generating the kernel files.",
     AnalysisStatus.INPUTS_GENERATION_CANCELLED: "Input generation was cancelled before it finished.",
     AnalysisStatus.INPUTS_GENERATION_ERROR: "Oasis could not generate the input files.",
+    AnalysisStatus.INPUTS_GENERATION_NO_KEYS: (
+        "The model returned no keys for any location in this portfolio, so there is "
+        "nothing to calculate a loss on. Its keys-errors file says why each one was "
+        "refused."
+    ),
     AnalysisStatus.READY: "The input files are generated and the analysis is ready to run.",
     AnalysisStatus.RUN_QUEUED: "Waiting for an Oasis worker to begin the loss calculation.",
     AnalysisStatus.RUN_STARTED: "Oasis is calculating losses.",
@@ -182,28 +198,6 @@ def analysis_state(status: str, phase: OasisPhase) -> EngineState:
 
 # -- the transport ----------------------------------------------------------
 
-class HttpResponse(Protocol):
-    """The part of a ``requests`` response this adapter uses."""
-
-    status_code: int
-    text: str
-
-    def json(self) -> Any: ...
-
-    def iter_content(self, chunk_size: int = ...) -> Iterator[bytes]: ...
-
-
-class HttpSession(Protocol):
-    """The part of a ``requests.Session`` this adapter uses.
-
-    Kept this narrow so a contract test can supply a fake in a dozen lines, and
-    so the adapter never reaches for session state that a different transport
-    would not have.
-    """
-
-    def request(self, method: str, url: str, **kwargs: Any) -> HttpResponse: ...
-
-
 @dataclasses.dataclass(frozen=True, slots=True)
 class OasisModel:
     """A model as the Oasis server has it registered."""
@@ -218,12 +212,6 @@ class OasisModel:
 
 
 #: Statuses that mean the server is briefly unavailable rather than refusing.
-_RETRYABLE_STATUS = frozenset({502, 503, 504})
-
-#: Statuses that mean the token has expired or is not accepted.
-_AUTH_STATUS = frozenset({401, 403})
-
-
 class OasisAdapter(EngineAdapter):
     """Drive an Oasis Platform server over its documented REST API."""
 
@@ -257,10 +245,15 @@ class OasisAdapter(EngineAdapter):
         self._api = self._base + api_version.strip("/") + "/"
         self._username = username
         self._password = password
-        self._timeout = timeout
-        self._retries = max(1, retries)
-        self._retry_delay = retry_delay
-        self._sleep = sleep
+        self._transport = Transport(
+            session,
+            engine_name=self.engine_name,
+            base_url=self._base,
+            timeout=timeout,
+            retries=retries,
+            retry_delay=retry_delay,
+            sleep=sleep,
+        )
 
         self._access_token = ""
         self._refresh_token = ""
@@ -369,70 +362,33 @@ class OasisAdapter(EngineAdapter):
         headers: Mapping[str, str] | None = None,
         **kwargs: Any,
     ) -> HttpResponse:
-        """Make one API call, retrying what is worth retrying.
+        """Make one API call through the shared transport.
 
-        Three failures are distinguished, because the run monitor treats them
-        differently. A connection failure or a gateway status is transient and
-        the run may be retried. An expired token is recovered once, in place. A
-        4xx refusal is the engine saying no, and repeating it only wastes the
-        queue slot without changing the answer.
+        What is Oasis-specific is the pair of callbacks: a bearer token in the
+        authorization header, and one attempt to refresh it -- falling back to
+        signing in again -- when the server says it has expired. The retry
+        rules themselves are the same for every engine and live in
+        :mod:`cass_adapters.http`.
         """
-        refreshed = False
-        last_error = ""
 
-        for attempt in range(1, self._retries + 1):
-            request_headers = {"accept": "application/json"}
+        def auth_headers() -> Mapping[str, str]:
             if authenticate and self._access_token:
-                request_headers["authorization"] = "Bearer " + self._access_token
-            if headers:
-                request_headers.update(headers)
+                return {"authorization": "Bearer " + self._access_token}
+            return {}
 
-            try:
-                response = self._session.request(
-                    method,
-                    url,
-                    headers=request_headers,
-                    timeout=self._timeout,
-                    **kwargs,
-                )
-            except Exception as exc:  # transport failure: no response at all
-                last_error = type(exc).__name__ + ": " + str(exc)
-                if attempt < self._retries:
-                    self._sleep(self._retry_delay * attempt)
-                    continue
-                raise EngineUnavailable(
-                    self.engine_name + " at " + self._base + " did not respond.",
-                    detail=last_error,
-                ) from exc
+        def recover() -> bool:
+            if not authenticate:
+                return False
+            return bool(self._refresh() or self._reauthenticate())
 
-            status = response.status_code
-            if 200 <= status < 300:
-                return response
-
-            body = _body_text(response)
-            if status in _AUTH_STATUS and authenticate and not refreshed:
-                refreshed = True
-                if self._refresh() or self._reauthenticate():
-                    continue
-                raise EngineRejected(
-                    self.engine_name + " rejected the CASS credentials.",
-                    detail=_detail(status, url, body),
-                )
-            if status in _RETRYABLE_STATUS and attempt < self._retries:
-                last_error = _detail(status, url, body)
-                self._sleep(self._retry_delay * attempt)
-                continue
-            if status in _RETRYABLE_STATUS:
-                raise EngineUnavailable(
-                    self.engine_name + " is not currently serving requests.",
-                    detail=_detail(status, url, body),
-                )
-            raise EngineRejected(
-                _refusal_summary(method, status), detail=_detail(status, url, body)
-            )
-
-        raise EngineUnavailable(  # pragma: no cover - the loop returns or raises
-            self.engine_name + " at " + self._base + " did not respond.", detail=last_error
+        return self._transport.send(
+            method,
+            url,
+            headers=headers,
+            auth_headers=auth_headers,
+            recover_auth=recover if authenticate else None,
+            refusal_summary=_refusal_summary,
+            **kwargs,
         )
 
     # -- the base contract -------------------------------------------------
@@ -650,7 +606,7 @@ class OasisAdapter(EngineAdapter):
                         + " phase."
                     ),
                 )
-            self._sleep(interval)
+            self._transport.sleep(interval)
             waited += interval
             last = self.job(analysis_id, phase)
 
@@ -791,18 +747,6 @@ def _identifier(response: HttpResponse, what: str) -> int:
             "Oasis Platform did not return an identifier for the new " + what + ".",
             detail=json.dumps(dict(body))[:2000],
         ) from None
-
-
-def _body_text(response: HttpResponse) -> str:
-    """Read a response body as text without letting the read itself fail."""
-    try:
-        return response.text or ""
-    except Exception:  # pragma: no cover - defensive
-        return ""
-
-
-def _detail(status: int, url: str, body: str) -> str:
-    return "HTTP " + str(status) + " from " + url + ": " + body[:4000]
 
 
 def _refusal_summary(method: str, status: int) -> str:

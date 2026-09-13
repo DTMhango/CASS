@@ -121,9 +121,49 @@ function query(params: Record<string, string | number | boolean | undefined>): s
   return encoded ? `?${encoded}` : "";
 }
 
+/**
+ * Fetch a file rather than a document.
+ *
+ * The JSON path reads the body as text, which would corrupt a workbook. This
+ * one stays inside the same client so that authentication, the CSRF header and
+ * the refusal messages are decided in one place: a download reached by a bare
+ * anchor would bypass all three and report a governance refusal as a broken
+ * file.
+ */
+async function download(
+  path: string,
+  params?: Record<string, string | number | boolean | undefined>,
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`${BASE}${path}${params ? query(params) : ""}`, {
+    headers: { Accept: "*/*" },
+    credentials: "same-origin",
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    const parsed: unknown = text ? safeParse(text) : null;
+    throw new ApiError(response.status, messageFrom(response.status, parsed), parsed);
+  }
+
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  return { blob: await response.blob(), filename: match?.[1] ?? "download" };
+}
+
+/** Hand a fetched file to the browser to save. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
   get: <T>(path: string, params?: Record<string, string | number | boolean | undefined>) =>
     request<T>(`${path}${params ? query(params) : ""}`),
+  download,
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body }),

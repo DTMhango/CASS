@@ -114,7 +114,6 @@ export interface ExposureVersion {
   name: string;
   version: number;
   state: ExposureState;
-  cedant: string;
   valuation_date: string | null;
   source_description: string;
   run_currency: string;
@@ -218,6 +217,9 @@ export interface Run {
   failure_stage: string;
   failure_summary: string;
   failure_detail: string;
+  /** Why a run is waiting at a governance gate. A blocked run has not failed. */
+  gate_summary: string;
+  gate_detail: string;
   settings_hash: string;
   retry_of: UUID | null;
   may_retry: boolean;
@@ -511,6 +513,16 @@ export interface ConfiguredRun {
     notes: string[];
   };
   site_join: Record<string, unknown>;
+  /** How much of the grid the run computes, against the whole grid. */
+  coverage?: {
+    grid_cells?: number;
+    onshore_cells?: number;
+    cells_computed?: number;
+    cells_skipped?: number;
+    covered_share?: number;
+    region?: Record<string, number> | null;
+  };
+  region?: Record<string, number> | null;
   problems: JobProblem[];
   runnable: boolean;
   job_checksum: string;
@@ -526,3 +538,375 @@ export interface AreaPerilGridSummary {
   cell_count: number;
   publication_state: string;
 }
+
+
+// -- analysis configuration and execution ------------------------------------
+
+export interface AnalysisRun {
+  id: UUID;
+  run: UUID;
+  run_detail: Run;
+  exposure_version: UUID;
+  enrichment_run: UUID | null;
+  model_version: UUID;
+  perspectives: PerspectiveKey[];
+  analysis_settings: Record<string, unknown>;
+  run_currency: string;
+  oasis_analysis_id: string;
+  oasis_portfolio_id: string;
+  /** Section 8: successful, not-at-risk and failed TIV against the source. */
+  keys_summary: Record<string, unknown>;
+  keys_reconciled: boolean | null;
+  may_proceed_past_keys: boolean;
+  exception_approval: UUID | null;
+  created_at: string;
+}
+
+/** What a run consumed and produced, as the artifact store recorded it. */
+export interface RunArtifact {
+  /** Addresses the download endpoint; a URI alone cannot be retrieved. */
+  id: UUID;
+  role: string;
+  direction: "input" | "output";
+  uri: string;
+  checksum: string;
+  size_bytes: number;
+  retention: string;
+  readable: boolean;
+}
+
+// -- operations --------------------------------------------------------------
+
+export interface EngineStatus {
+  engine: string;
+  /** Null where no adapter exists yet: unknown is not the same as unreachable. */
+  reachable: boolean | null;
+  url: string;
+  version?: string;
+  adapter?: string;
+  compatible: boolean | null;
+  detail?: string;
+}
+
+export type AuditActionKey =
+  | "create" | "update" | "delete" | "read" | "download" | "upload"
+  | "publish" | "submit" | "cancel" | "retry" | "approve" | "reject"
+  | "override" | "configure" | "sign_in" | "sign_in_failed";
+
+export interface AuditEvent {
+  id: UUID;
+  actor_label: string;
+  action: AuditActionKey;
+  subject_type: string;
+  subject_id: UUID | null;
+  subject_label: string;
+  project: UUID | null;
+  before_reference: string;
+  after_reference: string;
+  correlation_id: string;
+  source_ip: string;
+  detail: string;
+  created_at: string;
+}
+
+export interface Approval {
+  id: UUID;
+  gate: string;
+  decision: "pending" | "approved" | "rejected";
+  subject_type: string;
+  subject_id: UUID | null;
+  requested_by: UUID | null;
+  requested_by_label: string;
+  decided_by: UUID | null;
+  decided_by_label: string;
+  decided_at: string | null;
+  rationale: string;
+  evidence: Record<string, unknown>;
+  is_open: boolean;
+  is_cleared: boolean;
+  created_at: string;
+}
+
+/** A configured hazard job, saved against the model it runs. */
+export interface HazardJobSpec {
+  id: UUID;
+  model: UUID;
+  grid: UUID;
+  name: string;
+  overrides: Record<string, string | number>;
+  /** Bounds of the cells the run computes; empty means the whole grid. */
+  region: Record<string, number>;
+  resolved_configuration: JobConfiguration;
+  conversion_report: Record<string, unknown>;
+  site_join_report: Record<string, unknown>;
+  problems: JobProblem[];
+  blocking_problems: JobProblem[];
+  is_runnable: boolean;
+  job_checksum: string;
+  created_at: string;
+}
+
+
+/**
+ * A model version in the registry, at any stage of the section 10 path.
+ *
+ * Distinct from ``CatalogueModel``, which is the analyst's view and only ever
+ * lists what may be selected. This one includes candidates that are not
+ * published, because the model build workspace exists to work on those.
+ */
+export interface ModelVersion {
+  id: UUID;
+  country_code: string;
+  peril: string;
+  version: string;
+  label: string;
+  reference: string;
+  grid: UUID;
+  vulnerability_set: UUID;
+  hazard_set: UUID | null;
+  hazard_source_model: string;
+  hazard_source_licence: string;
+  openquake_version: string;
+  oasis_version: string;
+  converter_version: string;
+  oed_schema_version: string;
+  imts: string[];
+  peril_scope: Record<string, unknown>;
+  known_limitations: string;
+  unsupported_taxonomy_report: Record<string, unknown>;
+  is_research_prototype: boolean;
+  publication_state: PublicationState;
+  published_at: string | null;
+  validation_date: string | null;
+  usable_for_decisions: boolean;
+  publication_blockers: string[];
+  supersedes: UUID | null;
+  is_frozen: boolean;
+  created_at: string;
+}
+
+
+// -- the assumptions a promotion may run under -------------------------------
+
+export interface AssumptionOption {
+  value: string;
+  label: string;
+  description?: string;
+  baseline?: boolean;
+}
+
+export interface CoverageSplitOption {
+  name: string;
+  description: string;
+  percentages: Record<string, number>;
+  /** Whether an approved prior stands behind this, rather than a test value. */
+  approved?: boolean;
+}
+
+export interface OccupancyOption {
+  name: string;
+  description: string;
+  occupancy_code: string;
+  construction_code: string;
+  approved?: boolean;
+}
+
+export interface AssumptionCatalogue {
+  cohorts: AssumptionOption[];
+  allocation_methods: AssumptionOption[];
+  coverage_splits: CoverageSplitOption[];
+  coverages: AssumptionOption[];
+  occupancy_assumptions: OccupancyOption[];
+  default_coverage_split: string;
+  default_occupancy: string;
+}
+
+/** What a promotion produced, as the exposure version records it. */
+export interface PromotionSummary {
+  exposure_version: UUID;
+  name: string;
+  version: number;
+  location_count: number;
+  total_tiv: string;
+  [key: string]: unknown;
+}
+
+
+// -- comparing two governed results ------------------------------------------
+
+/**
+ * One compared quantity.
+ *
+ * Every monetary field is a string, and every one of them was computed on the
+ * server: ADR 5 keeps money arithmetic off the browser, so the interface reads
+ * these and formats them, and never subtracts one from another.
+ */
+export interface ComparedMetric {
+  metric: string;
+  label: string;
+  baseline: string | null;
+  candidate: string | null;
+  change: string | null;
+  /** A ratio, or null where the baseline was zero and a proportion is meaningless. */
+  relative_change: string | null;
+  direction: "increase" | "decrease" | "unchanged" | "unknown";
+}
+
+export interface ComparedReturnPeriod extends Omit<ComparedMetric, "metric" | "label"> {
+  return_period: string;
+}
+
+export interface ComparisonDriver {
+  driver: string;
+  label: string;
+  baseline: string;
+  candidate: string;
+  note: string;
+}
+
+export interface ComparisonDifferences {
+  perspective: string;
+  currency: string;
+  metrics: ComparedMetric[];
+  return_periods: {
+    shared: ComparedReturnPeriod[];
+    only_in_baseline: string[];
+    only_in_candidate: string[];
+  };
+  drivers: ComparisonDriver[];
+  /** True where nothing either result records accounts for the change. */
+  unexplained: boolean;
+  unexplained_note: string;
+  decision_use: {
+    baseline: boolean;
+    candidate: boolean;
+    both_approved: boolean;
+    warning: string;
+  };
+}
+
+export interface ResultComparison {
+  id: UUID;
+  project: UUID;
+  label: string;
+  baseline: UUID;
+  baseline_detail: ResultSet;
+  candidate: UUID;
+  candidate_detail: ResultSet;
+  differences: ComparisonDifferences;
+  commentary: string;
+  is_like_for_like: boolean;
+  created_at: string;
+}
+
+// -- allocation scenarios ----------------------------------------------------
+
+export interface AllocationScenario {
+  method: string;
+  baseline: boolean;
+  total_tiv: string;
+  mapped_tiv: string;
+  failed_tiv: string;
+  reconciles: boolean;
+  location_count: number;
+  area_peril_count: number;
+  tiv_by_area_peril: Record<string, string>;
+  methods_used: string[];
+}
+
+export interface BusinessMateriality {
+  business_id: string;
+  location_count: number;
+  area_peril_count: number;
+  total_tiv: string;
+  /** Whether moving value between this business's sites changes anything. */
+  material: boolean;
+  reason: string;
+}
+
+export interface AllocationScenarios {
+  rule_version: string;
+  allocation_rule_version: string;
+  grid: string;
+  vulnerability: string;
+  /** Whether every scenario carries the same money, which makes it a sensitivity. */
+  total_holds_across_scenarios: boolean;
+  scenarios: AllocationScenario[];
+  movement_from_baseline: Record<string, Record<string, string>>;
+  materiality: {
+    businesses: number;
+    businesses_where_allocation_is_material: number;
+    material_tiv: string;
+    total_tiv: string;
+    material_share: number;
+    detail: BusinessMateriality[];
+  };
+  envelope: Record<
+    string,
+    { candidate_area_perils: number[]; count: number; total_tiv: string }
+  >;
+  interpretation: string;
+}
+
+/** The queued run a launched hazard configuration produces. */
+export interface LaunchedHazardRun {
+  run: UUID;
+  hazard_run: UUID;
+  state: RunState;
+  job_checksum: string;
+}
+
+/** A registered event set and its footprints, with the calculation behind them. */
+export interface HazardSet {
+  id: UUID;
+  reference: string;
+  country_code: string;
+  version: string;
+  label: string;
+  source_model: string;
+  licence: string;
+  licence_cleared: boolean;
+  grid: UUID;
+  engine_version: string;
+  investigation_time: number;
+  stochastic_event_sets: number;
+  event_count: number;
+  cell_count: number;
+  footprint_row_count: number;
+  imts: string[];
+  samples_above_range: number;
+  publication_state: string;
+  notes: string;
+  created_at: string;
+}
+
+/** What one column of an OED file holds, and what it will accept. */
+export interface RowColumn {
+  name: string;
+  label: string;
+  help: string;
+  required: boolean;
+  type: string;
+  allowed: string[] | null;
+  minimum: number | null;
+  maximum: number | null;
+  is_tiv: boolean;
+  is_financial_term: boolean;
+}
+
+export interface PortfolioRow {
+  row_number: number;
+  values: Record<string, string>;
+}
+
+/** A page of a portfolio's rows, with the schema the editor builds fields from. */
+export interface RowPage {
+  kind: string;
+  columns: RowColumn[];
+  rows: PortfolioRow[];
+  count: number;
+  total: number;
+  editable: boolean;
+  attached: string[];
+}
+

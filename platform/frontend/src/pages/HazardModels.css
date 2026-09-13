@@ -167,3 +167,9 @@
   overflow-x: auto;
   max-height: 420px;
 }
+
+.spec__checksum {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  max-width: 26ch;
+}

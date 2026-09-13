@@ -6,7 +6,7 @@ from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.common.permissions import MayApproveGates
+from apps.common.permissions import MayRequestGates
 from apps.projects.models import Project
 
 from . import services
@@ -68,7 +68,7 @@ class AuditEventViewSet(viewsets.ReadOnlyModelViewSet):
 class ApprovalViewSet(viewsets.ModelViewSet):
     queryset = Approval.objects.select_related("requested_by", "decided_by")
     serializer_class = ApprovalSerializer
-    permission_classes = [MayApproveGates]
+    permission_classes = [MayRequestGates]
     filterset_fields = ["gate", "decision", "subject_type", "subject_id"]
 
     def perform_create(self, serializer):

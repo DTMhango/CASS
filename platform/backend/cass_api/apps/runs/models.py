@@ -233,7 +233,11 @@ class Run(BaseModel):
             run=self,
             stage=stage or self.stage,
             state=self.state,
-            message=failure_summary,
+            # Truncated for the same reason the field above is: an engine can
+            # hand back a failure longer than this column, and a run whose
+            # failure could not be written stays RUNNING for ever -- the
+            # unintelligible state the monitor exists to prevent.
+            message=failure_summary[:500],
             created_by=actor,
         )
         return self
@@ -301,8 +305,15 @@ class ConversionRun(BaseModel):
     """OpenQuake to Oasis lineage (section 5)."""
 
     run = models.OneToOneField(Run, on_delete=models.CASCADE, related_name="conversion")
+    #: The hazard run whose output is converted, where the hazard set came from
+    #: one. A set registered from exports on disk has none, and its lineage is on
+    #: the hazard set record instead.
     hazard_run = models.ForeignKey(
-        HazardRun, on_delete=models.PROTECT, related_name="conversions"
+        HazardRun,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="conversions",
     )
     model_version = models.ForeignKey(
         "modelregistry.ModelVersion", null=True, blank=True,

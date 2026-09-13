@@ -11,11 +11,20 @@
  * workers actually follow.
  */
 
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
-import { useCancelRun, useRetryRun, useRun, useRunEvents, useRuns } from "@/api/hooks";
-import type { PipelineStage, Run } from "@/api/types";
+import {
+  useAnalysisForRun,
+  useCancelRun,
+  useDownloadArtifact,
+  useRetryRun,
+  useRun,
+  useRunArtifacts,
+  useRunEvents,
+  useRuns,
+} from "@/api/hooks";
+import type { AnalysisRun, PipelineStage, Run, RunArtifact } from "@/api/types";
 import { RunStateBadge, StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
@@ -27,7 +36,7 @@ import {
   Spinner,
 } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
-import { formatDateTime, formatDuration } from "@/lib/format";
+import { formatBytes, formatDateTime, formatDuration, formatMoney } from "@/lib/format";
 
 import "./RunMonitor.css";
 
@@ -63,7 +72,7 @@ export function RunMonitor() {
               {runs.map((item) => (
                 <tr key={item.id}>
                   <th scope="row">
-                    <a href={`/runs/${item.id}`}>{item.label || item.id.slice(0, 8)}</a>
+                    <Link to={`/runs/${item.id}`}>{item.label || item.id.slice(0, 8)}</Link>
                   </th>
                   <td>{item.kind}</td>
                   <td>
@@ -93,6 +102,8 @@ function RunDetail({ run }: { run: Run }) {
   const cancel = useCancelRun(run.id);
   const retry = useRetryRun(run.id);
   const { data: events } = useRunEvents(run.id, run.is_active);
+  const { data: artifacts } = useRunArtifacts(run.id);
+  const { data: analysis } = useAnalysisForRun(run.id, run.kind);
 
   const cancelError = cancel.error as ApiError | null;
   const retryError = retry.error as ApiError | null;
@@ -148,9 +159,19 @@ function RunDetail({ run }: { run: Run }) {
       ) : null}
 
       {run.state === "blocked" ? (
-        <Notice tone="warning" title="Waiting for an approval">
-          This run reached a governance gate. A reviewer must clear it before the run
-          rejoins the queue. It has not failed and no work has been lost.
+        <Notice
+          tone="warning"
+          title={run.gate_summary || "Waiting for an approval"}
+        >
+          <p>
+            This run reached a governance gate. A reviewer must clear it before the run
+            rejoins the queue. It has not failed and no work has been lost.
+          </p>
+          {run.gate_detail ? (
+            <Disclosure summary="What the gate is holding">
+              <pre className="run-detail__pre">{run.gate_detail}</pre>
+            </Disclosure>
+          ) : null}
         </Notice>
       ) : null}
 
@@ -178,12 +199,46 @@ function RunDetail({ run }: { run: Run }) {
             <RunFact term="Peak memory">
               {run.peak_memory_mb ? `${run.peak_memory_mb} MB` : "—"}
             </RunFact>
-            <RunFact term="Settings hash">
-              <span className="mono">{run.settings_hash || "—"}</span>
-            </RunFact>
+
           </dl>
         </Card>
       </div>
+
+      {analysis ? <KeysReconciliation analysis={analysis} /> : null}
+
+      <Card
+        title="Evidence"
+        description="What this run read and what it wrote."
+        padded={false}
+      >
+        {artifacts && artifacts.length > 0 ? (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Artifact</th>
+                <th scope="col">Direction</th>
+                <th scope="col" className="numeric">
+                  Size
+                </th>
+                <th scope="col">Kept until</th>
+                <th scope="col" />
+              </tr>
+            </thead>
+            <tbody>
+              {artifacts.map((artifact) => (
+                <ArtifactRow key={`${artifact.role}-${artifact.uri}`} artifact={artifact} />
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="run-detail__empty">
+            <EmptyState
+              title="No artifacts recorded yet"
+              description="Inputs and outputs appear here as the run produces them."
+            />
+          </div>
+        )}
+      </Card>
 
       <Card title="Stage history" description="Append-only. A retry creates a new run.">
         {events && events.length > 0 ? (
@@ -206,6 +261,134 @@ function RunDetail({ run }: { run: Run }) {
     </>
   );
 }
+
+/**
+ * One artifact row.
+ *
+ * A role a reader cannot interpret is worse than a technical name they can
+ * look up, so the recorded role is shown as it was written and explained
+ * beside it where CASS knows what it is. ``readable`` is the artifact store\'s
+ * answer about this user, not a guess: section 10 requires per-project
+ * authorization on artifact retrieval as well as metadata, so a row the
+ * viewer may not open says so rather than offering a link that will refuse.
+ */
+function ArtifactRow({ artifact }: { artifact: RunArtifact }) {
+  const download = useDownloadArtifact();
+
+  return (
+    <tr>
+      <th scope="row">
+        <span className="mono">{artifact.role}</span>
+        {ARTIFACT_ROLES[artifact.role] ? (
+          <span className="muted run-detail__role"> {ARTIFACT_ROLES[artifact.role]}</span>
+        ) : null}
+      </th>
+      <td>
+        <StatusBadge tone={artifact.direction === "output" ? "ok" : "idle"} size="sm">
+          {artifact.direction}
+        </StatusBadge>
+      </td>
+
+      <td className="numeric">{formatBytes(artifact.size_bytes)}</td>
+      <td className="muted">{artifact.retention}</td>
+      <td>
+        {artifact.readable ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            busy={download.isPending}
+            onClick={() =>
+              download.mutate({
+                id: artifact.id,
+                filename: artifact.uri.split("/").pop() || artifact.role,
+              })
+            }
+            title="Retrieve this artifact. The download is authorized and recorded."
+          >
+            Download
+          </Button>
+        ) : (
+          <StatusBadge
+            tone="idle"
+            size="sm"
+            detail="Your project role does not permit retrieving this artifact."
+          >
+            not yours to read
+          </StatusBadge>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/** What CASS knows an artifact role to be, where it knows. */
+const ARTIFACT_ROLES: Record<string, string> = {
+  oed_location: "the published location file",
+  oed_account: "the published account file",
+  cass_keys: "every location, coverage and sub-peril the model mapped",
+  cass_keys_errors: "the rows the lookup could not map, with the reason",
+  oasis_output: "the loss output collected from the engine",
+};
+
+/**
+ * The section 8 keys gate.
+ *
+ * Two different things are shown apart because they are two different things.
+ * Value that has gone missing is a defect in the lookup -- every location is
+ * supposed to produce exactly one response -- and nothing approves that away.
+ * Value the model could not map is a fact about the portfolio, and section 8
+ * requires a person to accept it before the analysis proceeds.
+ */
+function KeysReconciliation({ analysis }: { analysis: AnalysisRun }) {
+  const summary = analysis.keys_summary ?? {};
+  const rows = KEYS_ROWS.filter((row) => summary[row.key] !== undefined);
+
+  if (analysis.keys_reconciled === null && rows.length === 0) return null;
+
+  return (
+    <Card
+      title="Keys reconciliation"
+      description="Successful, not-at-risk and failed value, against the published source."
+    >
+      {analysis.keys_reconciled ? (
+        <Notice tone="ok" title="The accounting balances">
+          Every location, coverage and sub-peril produced exactly one response.
+        </Notice>
+      ) : (
+        <Notice tone="error" title="Value is unaccounted for">
+          The lookup did not return one response per location, coverage and sub-peril.
+          This is a defect in the lookup rather than a fact about the portfolio, so it
+          cannot be approved away.
+        </Notice>
+      )}
+
+      {rows.length > 0 ? (
+        <dl className="run-facts">
+          {rows.map((row) => (
+            <RunFact key={row.key} term={row.label}>
+              <span className="numeric">{formatMoney(String(summary[row.key]))}</span>
+            </RunFact>
+          ))}
+        </dl>
+      ) : null}
+
+      {analysis.keys_reconciled && !analysis.may_proceed_past_keys ? (
+        <Notice tone="warning" title="Unmapped value is waiting to be accepted">
+          Value the model could not map is a fact about this portfolio, and section 8
+          requires somebody to accept it before the analysis proceeds. A reviewer
+          clears this on the governance gate.
+        </Notice>
+      ) : null}
+    </Card>
+  );
+}
+
+const KEYS_ROWS = [
+  { key: "successful_tiv", label: "Mapped to a vulnerability function" },
+  { key: "not_at_risk_tiv", label: "Not at risk" },
+  { key: "failed_tiv", label: "The model could not map" },
+  { key: "source_tiv", label: "Published source total" },
+] as const;
 
 function Pipeline({ run }: { run: Run }) {
   const currentIndex = run.pipeline.findIndex((stage) => stage.key === run.stage);

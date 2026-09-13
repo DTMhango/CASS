@@ -164,10 +164,18 @@ CASS_DEFAULT_EXECUTION_PROFILE = env("CASS_DEFAULT_EXECUTION_PROFILE", "standard
 # -- engine adapters --------------------------------------------------------
 
 CASS_OPENQUAKE_URL = env("CASS_OPENQUAKE_URL", "http://openquake:8800")
+#: OpenQuake WebUI credentials. A server with LOCKDOWN off has no login
+#: endpoint at all and needs neither; one with it on needs both. The adapter
+#: distinguishes "refused these credentials" from "wants a user and has none".
+CASS_OPENQUAKE_USERNAME = env("CASS_OPENQUAKE_USERNAME", "")
+CASS_OPENQUAKE_PASSWORD = env("CASS_OPENQUAKE_PASSWORD", "")
 #: The Oasis Platform serves its API under an /api prefix, so the base URL
 #: carries it. Pointing at the bare host answers 404 to every call.
 CASS_OASIS_API_URL = env("CASS_OASIS_API_URL", "http://oasis-api:8000/api")
 CASS_KEYS_SERVICE_URL = env("CASS_KEYS_SERVICE_URL", "http://keys:8010")
+#: Where an assembled Oasis model package is deployed. The Oasis worker mounts
+#: the same volume as its model root, so this is the directory the engine reads.
+CASS_OASIS_MODEL_ROOT = env("CASS_OASIS_MODEL_ROOT", "/oasis-model")
 CASS_CONVERTER_URL = env("CASS_CONVERTER_URL", "http://converter:8020")
 
 #: Oasis Platform credentials. The adapter asks the server whether it wants
@@ -185,7 +193,12 @@ CASS_OASIS_MODEL_VERSION_ID = env("CASS_OASIS_MODEL_VERSION_ID", "1")
 #: Tested engine combinations. Section 18 requires promotion only after
 #: contract and regression suites pass, so this is data a release updates.
 CASS_COMPATIBILITY_MATRIX = [
-    {"oasis": "2.5.7", "oed": "4.0.0", "ods_tools": "4.3.5"},
+    {
+        "oasis": "2.5.7",
+        "openquake": "3.23.0",
+        "oed": "4.0.0",
+        "ods_tools": "4.3.5",
+    },
 ]
 
 # -- API --------------------------------------------------------------------

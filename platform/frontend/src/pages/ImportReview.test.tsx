@@ -180,7 +180,100 @@ let decideBody: Record<string, unknown> | null = null;
 let decideStatus = 201;
 let decideDetail = "";
 
+const MODEL_ID = "55555555-5555-5555-5555-555555555555";
+
+const CATALOGUE = {
+  models: [
+    {
+      id: MODEL_ID,
+      reference: "id-eq-0.1.0-sa",
+      label: "Indonesia earthquake",
+      country_code: "ID",
+      peril: "EQ",
+      version: "0.1.0-sa",
+      imts: ["SA(0.3)"],
+      publication_state: "published",
+      usable_for_decisions: false,
+      is_research_prototype: true,
+      validation_date: null,
+      grid: "id-grid-0.1.0",
+      assumptions_note: "",
+      peril_scope: {},
+      unsupported_taxonomy_report: {},
+      blockers: [],
+    },
+  ],
+};
+
+/** As the server computes it: every monetary figure a decimal string. */
+const SCENARIOS = {
+  rule_version: "scenario-1.0.0",
+  allocation_rule_version: "allocation-1.0.0",
+  grid: "id-grid-0.1.0",
+  vulnerability: "id-vuln-2026.0.0",
+  total_holds_across_scenarios: true,
+  scenarios: [
+    {
+      method: "equal_location_v1",
+      baseline: true,
+      total_tiv: "1000000.00",
+      mapped_tiv: "1000000.00",
+      failed_tiv: "0.00",
+      reconciles: true,
+      location_count: 4,
+      area_peril_count: 3,
+      tiv_by_area_peril: { "101": "600000.00", "102": "400000.00" },
+      methods_used: ["equal_location_v1"],
+    },
+    {
+      method: "primary_concentrated_v1",
+      baseline: false,
+      total_tiv: "1000000.00",
+      mapped_tiv: "1000000.00",
+      failed_tiv: "0.00",
+      reconciles: true,
+      location_count: 4,
+      area_peril_count: 3,
+      tiv_by_area_peril: { "101": "700000.00", "102": "300000.00" },
+      methods_used: ["primary_concentrated_v1"],
+    },
+  ],
+  movement_from_baseline: { primary_concentrated_v1: { "101": "100000.00" } },
+  materiality: {
+    businesses: 5,
+    businesses_where_allocation_is_material: 2,
+    material_tiv: "650000.00",
+    total_tiv: "1000000.00",
+    material_share: 0.65,
+    detail: [
+      {
+        business_id: "BUS-1",
+        location_count: 3,
+        area_peril_count: 2,
+        total_tiv: "650000.00",
+        material: true,
+        reason:
+          "3 sites across 2 area-peril cells, so the allocation assumption changes which hazard the value sees.",
+      },
+      {
+        business_id: "BUS-2",
+        location_count: 2,
+        area_peril_count: 1,
+        total_tiv: "350000.00",
+        material: false,
+        reason:
+          "2 sites, all in one area-peril cell. The allocation moves value between places this grid cannot distinguish, so it cannot change the loss.",
+      },
+    ],
+  },
+  envelope: {},
+  interpretation:
+    "Movement is exposure moving between area-peril cells, not a loss difference.",
+};
+
 function routeFor(url: string): unknown {
+  if (url.includes("/allocation-scenarios/")) return SCENARIOS;
+  if (url.includes("/model-versions/catalogue/")) return CATALOGUE;
   if (url.includes("/projects/")) {
     return { count: 1, next: null, previous: null, results: [PROJECT] };
   }
@@ -328,5 +421,70 @@ describe("ImportReview", () => {
     expect(
       screen.getByText(/Flagged for review by the geocoder/),
     ).toBeInTheDocument();
+  });
+
+  // -- whether the allocation assumption is economically live ---------------
+
+  it("computes no materiality until a model version supplies a grid", async () => {
+    renderScreen();
+
+    // The question is whether the split moves value between cells the hazard
+    // can tell apart, and without a grid there is nothing to ask it against.
+    // A figure against a grid nobody picked is worse than none: it gets quoted.
+    expect(
+      await screen.findByText(/Nothing is computed until a model version is chosen/),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      const asked = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(
+        (call) => String(call[0]).includes("/allocation-scenarios/"),
+      );
+      expect(asked).toBe(false);
+    });
+  });
+
+  it("reports how much of the book the allocation assumption is live for", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    // The select renders with its placeholder before the catalogue arrives,
+    // so wait for the option rather than for the control.
+    await screen.findByRole("option", { name: "id-eq-0.1.0-sa" });
+    await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
+
+    expect(await screen.findByText(/65\.0% of the selection/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/3 sites across 2 area-peril cells/),
+    ).toBeInTheDocument();
+  });
+
+  it("names the maximum-ignorance allocation as the baseline", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    // The select renders with its placeholder before the catalogue arrives,
+    // so wait for the option rather than for the control.
+    await screen.findByRole("option", { name: "id-eq-0.1.0-sa" });
+    await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
+
+    const row = (await screen.findByText(/equal location v1/)).closest("th");
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain("baseline");
+  });
+
+  it("says when the assumption changes nothing at all", async () => {
+    SCENARIOS.materiality.businesses_where_allocation_is_material = 0;
+    const user = userEvent.setup();
+    renderScreen();
+
+    // The select renders with its placeholder before the catalogue arrives,
+    // so wait for the option rather than for the control.
+    await screen.findByRole("option", { name: "id-eq-0.1.0-sa" });
+    await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
+
+    expect(
+      await screen.findByText(/allocation assumption changes nothing here/),
+    ).toBeInTheDocument();
+    SCENARIOS.materiality.businesses_where_allocation_is_material = 2;
   });
 });

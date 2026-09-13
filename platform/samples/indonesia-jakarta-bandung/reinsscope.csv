@@ -1,0 +1,5 @@
+ReinsNumber,PortNumber,AccNumber,CededPercent,CountryCode,OEDVersion
+1,IDJB01,ACC002,0.3,ID,4.0.0
+1,IDJB01,ACC003,0.3,ID,4.0.0
+2,IDJB01,ACC003,1.0,ID,4.0.0
+3,IDJB01,,1.0,ID,4.0.0

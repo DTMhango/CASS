@@ -451,7 +451,7 @@ def valued(**overrides):
 
     risks, policies = structural_template()
     for row in risks:
-        if row["Account reference"] == "B-SINGLE":
+        if row["Policy ID"] == "B-SINGLE":
             row.update(overrides)
     return as_template(risks, policies), policies, policy_row, risk_row
 
@@ -536,7 +536,7 @@ def test_a_mixed_portfolio_says_how_much_rested_on_the_assumption(project, analy
 
     risks, policies = structural_template()
     for row in risks:
-        if row["Account reference"] == "B-SHARED":
+        if row["Policy ID"] == "B-SHARED":
             row["Total insured value"] = ""
             row["Building value"] = "250000.00"
 
@@ -564,7 +564,7 @@ def test_a_risk_with_no_value_and_no_policy_total_is_refused(project, analyst):
     risks, policies = structural_template()
     for row in risks:
         row["Total insured value"] = ""
-    policies = [item for item in policies if item["Account reference"] != "B-SINGLE"]
+    policies = [item for item in policies if item["Policy ID"] != "B-SINGLE"]
 
     batch = import_portfolio(
         project, as_template(risks, policies), filename="p.xlsx", actor=analyst

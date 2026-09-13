@@ -10,7 +10,8 @@ may be used for decisions and what is blocking publication.
 from __future__ import annotations
 
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -19,13 +20,17 @@ from rest_framework.response import Response
 from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from apps.common.permissions import MayPublishModels
+from apps.modelregistry.assets import ModelAssetError, load_grid
+from apps.runs.models import HazardRun, Run, RunKind
 
+from . import hazard as hazard_registry
 from . import hazard_models
 from .models import (
     AreaPerilGrid,
     AssumptionSet,
     HazardJobSpec,
     HazardModel,
+    HazardSet,
     ModelVersion,
     PublicationState,
     VulnerabilitySet,
@@ -89,7 +94,7 @@ class ModelVersionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "country_code", "peril", "version", "label", "reference",
             "grid", "grid_detail", "vulnerability_set", "vulnerability_detail",
-            "hazard_source_model", "hazard_source_licence",
+            "hazard_set", "hazard_source_model", "hazard_source_licence",
             "openquake_version", "oasis_version", "converter_version",
             "oed_schema_version", "imts", "peril_scope", "known_limitations",
             "unsupported_taxonomy_report", "is_research_prototype",
@@ -189,6 +194,144 @@ class ModelVersionViewSet(viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(model_version).data)
 
+    @action(detail=True, methods=["post"], url_path="attach-hazard")
+    def attach_hazard(self, request, pk=None, version=None):
+        """Point this model version at a hazard set.
+
+        Refused unless the set was computed on this version's grid and carries
+        every measure its vulnerability functions demand -- half the measures
+        would answer half the functions and report zero for the rest.
+        """
+        model_version = self.get_object()
+        hazard_set = HazardSet.objects.filter(pk=request.data.get("hazard_set") or None).first()
+        if hazard_set is None:
+            return Response(
+                {"detail": "Name the hazard set to attach."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        before = {"hazard_set": str(model_version.hazard_set_id or "")}
+        try:
+            hazard_registry.attach(model_version, hazard_set, actor=request.user)
+        except hazard_registry.HazardRegistrationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        audit.record(
+            action=AuditAction.CONFIGURE,
+            subject_type="model_version",
+            subject_id=model_version.id,
+            actor=request.user,
+            subject_label=str(model_version),
+            before=before,
+            after={"hazard_set": str(hazard_set.id)},
+            request=request,
+        )
+        return Response(self.get_serializer(model_version).data)
+
+    @action(detail=True, methods=["post"], url_path="build-package")
+    def build_package(self, request, pk=None, version=None):
+        """Convert this version into an Oasis model package, as a run.
+
+        The response is the queued conversion run. The policy is stated by the
+        caller and cleared by a converter-candidate approval somebody else
+        decided; the converter has no default for either open question.
+        """
+        from apps.audit.models import Approval
+        from apps.runs.models import ConversionRun, HazardRun, Run, RunKind
+        from apps.runs.tasks import execute_conversion
+        from cass_converter import oasis_package, pilot_bins
+        from cass_converter.policy import ConversionPolicy, EventIdentity, IMTRepresentation
+
+        model_version = self.get_object()
+        hazard_set = model_version.hazard_set
+        if hazard_set is None:
+            return Response(
+                {"detail": "Attach a hazard set before building a package."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        approval = Approval.objects.filter(
+            pk=request.data.get("approval") or None,
+            gate=Approval.Gate.CONVERTER_CANDIDATE,
+        ).first()
+        if approval is None or not approval.is_cleared:
+            return Response(
+                {
+                    "detail": (
+                        "A package is built under a converter-candidate approval that "
+                        "has been decided. Request the gate for this model version and "
+                        "have a reviewer approve it."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            event_identity = EventIdentity(
+                request.data.get("event_identity") or EventIdentity.OCCURRENCE_PER_EVENT
+            )
+            imt_representation = IMTRepresentation(
+                request.data.get("imt_representation") or IMTRepresentation.CORRELATED_CHANNELS
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        policy = ConversionPolicy(
+            event_identity=event_identity,
+            imt_representation=imt_representation,
+            approval_reference=f"approval:{approval.id}",
+            imts=tuple(hazard_set.imts),
+            investigation_time=hazard_set.investigation_time,
+        )
+        blockers = policy.blockers()
+        if blockers:
+            return Response(
+                {"detail": "The conversion policy is not runnable.", "blockers": blockers},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        hazard_run = HazardRun.objects.filter(
+            run__manifest__hazard__hazard_set__id=str(hazard_set.id)
+        ).first()
+        run = Run.objects.create(
+            kind=RunKind.CONVERSION,
+            project=None,
+            label=f"Oasis package for {model_version.reference}",
+            execution_profile="model_build",
+            manifest={
+                "policy": {
+                    "event_identity": str(event_identity),
+                    "imt_representation": str(imt_representation),
+                    "approval": str(approval.id),
+                    "approval_reference": policy.approval_reference,
+                },
+                "hazard_set": str(hazard_set.id),
+            },
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        conversion = ConversionRun.objects.create(
+            run=run,
+            hazard_run=hazard_run,
+            model_version=model_version,
+            converter_version=oasis_package.PACKAGE_VERSION,
+            event_policy=str(event_identity),
+            occurrence_policy="engine_year_as_period",
+            intensity_bin_set=pilot_bins.PILOT_BIN_VERSION,
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        audit.record(
+            action=AuditAction.SUBMIT,
+            subject_type="conversion_run",
+            subject_id=run.id,
+            actor=request.user,
+            subject_label=str(run),
+            after={"model_version": model_version.reference, "approval": str(approval.id)},
+            request=request,
+        )
+        execute_conversion.delay(str(conversion.id))
+        run.refresh_from_db()
+        return Response(
+            {"run": str(run.id), "conversion_run": str(conversion.id), "state": run.state},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
     @action(detail=False, methods=["get"], url_path="catalogue")
     def catalogue(self, request, version=None):
         """The analyst-facing catalogue: what may be selected, and why not."""
@@ -259,6 +402,30 @@ class HazardModelSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class HazardSetSerializer(serializers.ModelSerializer):
+    reference = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = HazardSet
+        fields = [
+            "id", "reference", "country_code", "version", "label", "source_model",
+            "licence", "licence_cleared", "grid", "engine_version",
+            "investigation_time", "stochastic_event_sets", "event_count",
+            "cell_count", "footprint_row_count", "imts", "samples_above_range",
+            "publication_state", "notes", "created_at",
+        ]
+        read_only_fields = fields
+
+
+class HazardSetViewSet(viewsets.ReadOnlyModelViewSet):
+    """Registered hazard sets, which a model version is pointed at to produce loss."""
+
+    queryset = HazardSet.objects.select_related("grid").order_by("-created_at")
+    serializer_class = HazardSetSerializer
+    permission_classes = [MayPublishModels]
+    filterset_fields = ["country_code", "grid", "publication_state"]
+
+
 class HazardJobSpecSerializer(serializers.ModelSerializer):
     blocking_problems = serializers.ListField(read_only=True)
 
@@ -270,6 +437,7 @@ class HazardJobSpecSerializer(serializers.ModelSerializer):
             "grid",
             "name",
             "overrides",
+            "region",
             "resolved_configuration",
             "conversion_report",
             "site_join_report",
@@ -308,9 +476,7 @@ class HazardModelViewSet(viewsets.ReadOnlyModelViewSet):
                     "version": serializers.CharField(),
                     "label": serializers.CharField(),
                     "source_organisation": serializers.CharField(required=False),
-                    "licence": serializers.CharField(required=False),
-                    "licence_cleared": serializers.BooleanField(required=False),
-                    "licence_note": serializers.CharField(required=False),
+                    "publication_reference": serializers.CharField(required=False),
                 },
             )
         },
@@ -370,12 +536,9 @@ class HazardModelViewSet(viewsets.ReadOnlyModelViewSet):
                 publication_reference=str(
                     request.data.get("publication_reference") or ""
                 ),
-                licence=str(request.data.get("licence") or ""),
-                licence_cleared=str(
-                    request.data.get("licence_cleared") or ""
-                ).lower()
-                in ("true", "1", "yes", "on"),
-                licence_note=str(request.data.get("licence_note") or ""),
+                # Not asked for on upload: this installation holds everything
+                # under one internal-use basis, recorded once rather than
+                # re-stated by whoever happens to be uploading.
                 actor=request.user,
             )
         except hazard_models.HazardModelError as exc:
@@ -424,10 +587,18 @@ class HazardModelViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             return Response(
                 hazard_models.resolve(
-                    model, grid, overrides=request.data.get("overrides") or {}
+                    model,
+                    grid,
+                    overrides=request.data.get("overrides") or {},
+                    # The grid's cells and the published site model, so the
+                    # editor shows how much of the country the run covers and
+                    # which cells carry measured ground rather than rock.
+                    cells=load_grid(grid).cells,
+                    region=request.data.get("region") or None,
+                    site_points=hazard_models.published_site_points(model),
                 )
             )
-        except hazard_models.HazardModelError as exc:
+        except (hazard_models.HazardModelError, ModelAssetError) as exc:
             return Response(
                 {"detail": str(exc)}, status=status.HTTP_409_CONFLICT
             )
@@ -453,12 +624,146 @@ class HazardModelViewSet(viewsets.ReadOnlyModelViewSet):
                 grid,
                 name=str(request.data.get("name") or "Unnamed run"),
                 overrides=request.data.get("overrides") or {},
+                cells=load_grid(grid).cells,
+                region=request.data.get("region") or None,
+                site_points=hazard_models.published_site_points(model),
                 actor=request.user,
             )
-        except hazard_models.HazardModelError as exc:
+        except (hazard_models.HazardModelError, ModelAssetError) as exc:
             return Response(
                 {"detail": str(exc)}, status=status.HTTP_409_CONFLICT
             )
         return Response(
             HazardJobSpecSerializer(spec).data, status=status.HTTP_201_CREATED
+        )
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "spec_id",
+                OpenApiTypes.UUID,
+                OpenApiParameter.PATH,
+                description="The saved configuration to launch.",
+            )
+        ]
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"specs/(?P<spec_id>[^/.]+)/launch",
+    )
+    def launch(self, request, pk=None, version=None, spec_id=None):
+        """Run a saved configuration on OpenQuake.
+
+        The run is created and queued here; the calculation itself happens in a
+        worker. A national hazard calculation runs for hours, and section 3
+        requires the work to continue whether or not the browser stays open, so
+        the response is the queued run rather than the hazard.
+        """
+        model = self.get_object()
+        spec = model.job_specs.filter(pk=spec_id).first()
+        if spec is None:
+            return Response(
+                {"detail": "That configuration does not belong to this model."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not spec.is_runnable:
+            return Response(
+                {
+                    "detail": (
+                        f"{spec.name} has problems that stop a run. Resolve the "
+                        "configuration again and save it before launching."
+                    ),
+                    "problems": spec.blocking_problems,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        # Everything on this installation is held under one internal-use basis,
+        # so this is normally cleared and the run is an ordinary one. It stays
+        # here for the case it was written for: data somebody has deliberately
+        # marked as not usable here, which still calculates but cannot support
+        # a decision.
+        research_only = not model.licence_cleared
+
+        try:
+            assembled = hazard_models.job_files(spec)
+        except (hazard_models.HazardModelError, ModelAssetError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        if not assembled["checksum_matches"]:
+            return Response(
+                {
+                    "detail": (
+                        "The configuration no longer resolves to the job it was "
+                        "saved as, usually because the grid was republished. "
+                        "Resolve and save it again so the run has a checksum "
+                        "somebody reviewed."
+                    ),
+                    "saved_checksum": assembled["saved_checksum"],
+                    "current_checksum": assembled["job_checksum"],
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        run = Run.objects.create(
+            kind=RunKind.HAZARD,
+            project=None,
+            label=(
+                f"{spec.name} ({model.reference})"
+                + (" -- research only, licence not cleared" if research_only else "")
+            ),
+            execution_profile="model_build",
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        hazard_run = HazardRun.objects.create(
+            run=run,
+            grid=spec.grid,
+            job_settings={
+                # The specification and the checksum, not the package. A
+                # national source model is hundreds of megabytes of NRML, and
+                # carrying it through a JSON column to be read once would put
+                # the whole model in the database. The worker rebuilds from the
+                # specification and refuses if the checksum has moved.
+                "spec": str(spec.id),
+                "job_checksum": assembled["job_checksum"],
+                "file_names": sorted(assembled["files"]),
+                "problems": assembled["problems"],
+            },
+            imts=list(spec.resolved_configuration.get("intensity_measures") or []),
+            investigation_time=spec.overrides.get("investigation_time"),
+            stochastic_event_sets=spec.overrides.get("ses_per_logic_tree_path"),
+            random_seed=spec.overrides.get("random_seed"),
+            created_by=request.user,
+            updated_by=request.user,
+        )
+
+        audit.record(
+            action=AuditAction.SUBMIT,
+            subject_type="hazard_run",
+            subject_id=run.id,
+            actor=request.user,
+            subject_label=str(run),
+            after={
+                "spec": str(spec.id),
+                "job_checksum": assembled["job_checksum"],
+                "research_only": research_only,
+            },
+            request=request,
+        )
+
+        from apps.runs.tasks import execute_hazard
+
+        execute_hazard.delay(str(hazard_run.id))
+        run.refresh_from_db()
+        return Response(
+            {
+                "run": str(run.id),
+                "hazard_run": str(hazard_run.id),
+                "state": run.state,
+                "job_checksum": assembled["job_checksum"],
+                "research_only": research_only,
+                "licence_note": model.licence_note if research_only else "",
+            },
+            status=status.HTTP_202_ACCEPTED,
         )

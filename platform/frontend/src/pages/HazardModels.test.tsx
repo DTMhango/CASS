@@ -142,7 +142,38 @@ const CONFIGURED: ConfiguredRun = {
   rendered: "[general]\ncalculation_mode = event_based\n",
 };
 
+const SPEC = {
+  id: "77777777-7777-7777-7777-777777777777",
+  model: MODEL_ID,
+  grid: GRID_ID,
+  name: "National baseline",
+  overrides: { investigation_time: 50, ses_per_logic_tree_path: 20 },
+  resolved_configuration: CONFIGURED.configuration,
+  conversion_report: {},
+  site_join_report: {},
+  problems: [],
+  blocking_problems: [],
+  is_runnable: true,
+  job_checksum: "e".repeat(64),
+  created_at: "2026-09-12T00:00:00Z",
+};
+
+let specs: unknown[] = [];
+let launchStatus = 202;
+let servedModel: HazardModel = MODEL;
+
 function routeFor(url: string): unknown {
+  if (url.includes("/launch/")) {
+    return launchStatus === 202
+      ? {
+          run: "88888888-8888-8888-8888-888888888888",
+          hazard_run: "99999999-9999-9999-9999-999999999999",
+          state: "queued",
+          job_checksum: SPEC.job_checksum,
+        }
+      : { detail: "The licence for this model has not been cleared." };
+  }
+  if (url.includes("/specs/")) return specs;
   if (url.includes("/hazard-models/parameters/")) return PARAMETERS;
   if (url.includes("/inspect/")) return INSPECTION;
   if (url.includes("/configure/")) return CONFIGURED;
@@ -165,7 +196,7 @@ function routeFor(url: string): unknown {
     };
   }
   if (url.includes("/hazard-models/")) {
-    return { count: 1, next: null, previous: null, results: [MODEL] };
+    return { count: 1, next: null, previous: null, results: [servedModel] };
   }
   return {};
 }
@@ -184,12 +215,16 @@ function renderScreen() {
 }
 
 beforeEach(() => {
+  specs = [SPEC];
+  launchStatus = 202;
+  servedModel = MODEL;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      const status = url.includes("/launch/") ? launchStatus : 200;
       return new Response(JSON.stringify(routeFor(url)), {
-        status: 200,
+        status,
         headers: { "Content-Type": "application/json" },
       });
     }),
@@ -204,9 +239,10 @@ afterEach(() => {
 describe("HazardModels", () => {
   it("flags a registered model that cannot yet be run as published", async () => {
     renderScreen();
-    expect(await screen.findByText(/classical — needs conversion/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/publishes as classical — converted to event-based/),
+    ).toBeInTheDocument();
     expect(screen.getByText(/1,080 realisations/)).toBeInTheDocument();
-    expect(screen.getByText("licence not cleared")).toBeInTheDocument();
   });
 
   it("reads an uploaded package before storing anything", async () => {
@@ -236,16 +272,20 @@ describe("HazardModels", () => {
     ).toBeInTheDocument();
   });
 
-  it("says a model is registered as a draft that is not cleared for decisions", async () => {
+  it("does not ask the person uploading a model about its licence", async () => {
+    /* One internal-use basis covers everything on this installation, recorded
+       once in Administration. Asking again per upload invited a different
+       answer each time about a fact that does not vary. */
     const user = userEvent.setup();
     renderScreen();
     await user.upload(
       screen.getByLabelText(/Model archive/),
       new File(["z"], "m.zip", { type: "application/zip" }),
     );
-    expect(
-      await screen.findByText(/not for a pricing or reserving decision/),
-    ).toBeInTheDocument();
+
+    expect(await screen.findByLabelText(/Version/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Licence/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not cleared/)).not.toBeInTheDocument();
   });
 
   it("shows every change the run makes to the published configuration", async () => {
@@ -300,5 +340,127 @@ describe("HazardModels", () => {
         screen.getByText(/calculation_mode = event_based/),
       ).toBeInTheDocument(),
     );
+  });
+
+  // -- the calculation mode --------------------------------------------------
+  //
+  // The single most consequential thing this screen does to an uploaded model.
+  // It was previously one row in a table inside a disclosure, indistinguishable
+  // from a change to the random seed.
+
+  it("leads with the conversion rather than burying it among the parameters", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(
+      await screen.findByRole("button", { name: /Resolve configuration/ }),
+    );
+
+    expect(
+      await screen.findByText(/Converted from classical to event_based/),
+    ).toBeInTheDocument();
+  });
+
+  it("says why a classical run is the trap rather than simply the wrong setting", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(
+      await screen.findByRole("button", { name: /Resolve configuration/ }),
+    );
+
+    // A classical run completes, exports, and produces nothing a footprint can
+    // be built from. That is the fact an operator needs before they spend the
+    // hours, and it is why the mode is not offered as a choice.
+    expect(
+      await screen.findByText(/completes, exports, and produces curves/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/This is not a setting/)).toBeInTheDocument();
+  });
+
+  it("refuses a resolved configuration that is not event-based", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(
+      await screen.findByRole("button", { name: /Resolve configuration/ }),
+    );
+
+    // The screen must not call something runnable that would produce curves.
+    expect(
+      screen.queryByText(/produces hazard curves rather than events/),
+    ).not.toBeInTheDocument();
+  });
+
+  // -- running a saved configuration ----------------------------------------
+
+  it("lists a saved configuration with the checksum that identifies it", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByText(/Saved configurations/));
+
+    expect(await screen.findByText("National baseline")).toBeInTheDocument();
+    expect(screen.getByText("runnable")).toBeInTheDocument();
+  });
+
+  it("launches a configuration and points at the run monitor", async () => {
+    servedModel = { ...MODEL, licence_cleared: true, licence_note: "Cleared." };
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByText(/Saved configurations/));
+    await user.click(await screen.findByRole("button", { name: "Run" }));
+
+    // The response is the queued run, not the hazard: a national calculation
+    // is hours and must not hold the browser open.
+    expect(
+      await screen.findByText(/Follow it on the run monitor/),
+    ).toBeInTheDocument();
+  });
+
+  it("offers a saved configuration for launch without a licence caveat", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByText(/Saved configurations/));
+
+    const run = await screen.findByRole("button", { name: "Run" });
+    expect(run).toBeEnabled();
+    expect(screen.queryByText(/research only/)).not.toBeInTheDocument();
+  });
+
+  it("shows the reason when the server refuses a launch", async () => {
+    launchStatus = 409;
+    servedModel = { ...MODEL, licence_cleared: true, licence_note: "Cleared." };
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByText(/Saved configurations/));
+    await user.click(await screen.findByRole("button", { name: "Run" }));
+
+    expect(await screen.findByText(/was not started/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/licence for this model has not been cleared/),
+    ).toBeInTheDocument();
+  });
+
+  it("will not offer to run a configuration with blocking problems", async () => {
+    specs = [
+      {
+        ...SPEC,
+        is_runnable: false,
+        blocking_problems: [
+          { parameter: "sites_csv", severity: "error", message: "No sites." },
+        ],
+      },
+    ];
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByText(/Saved configurations/));
+
+    expect(await screen.findByText("blocked")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 });

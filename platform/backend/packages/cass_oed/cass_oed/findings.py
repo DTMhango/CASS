@@ -173,6 +173,11 @@ CATALOGUE: Mapping[str, tuple[Severity, str]] = {
         Severity.ERROR,
         "Remove the term, or record an approved treatment before running an insured perspective.",
     ),
+    "missing_term_basis": (
+        Severity.ERROR,
+        "Name the basis (0 for a flat amount) and the peril the term is written "
+        "against, in the columns beside the amount.",
+    ),
     "layer_gap": (
         Severity.WARNING,
         "Layer numbers are not contiguous. Confirm the programme structure is intended.",

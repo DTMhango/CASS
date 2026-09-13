@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from apps.common.engines import describe_engines, oasis_adapter, oasis_model_triple
+from apps.common.engines import (
+    describe_engines,
+    oasis_adapter,
+    oasis_model_triple,
+    openquake_adapter,
+)
 
 from .conftest import API
 
@@ -45,6 +50,50 @@ class StubSession:
         return StubResponse(
             200, {"version": self.version, "config": {"API_AUTH_TYPE": "simple"}}
         )
+
+
+class StubTextResponse:
+    """OpenQuake answers ``engine_version`` with a bare string, not a document."""
+
+    def __init__(self, status_code=200, text=""):
+        self.status_code = status_code
+        self.text = text
+
+    def json(self):
+        raise ValueError("not JSON")
+
+
+class StubOpenQuakeSession:
+    def __init__(self, version="3.23.0", *, reachable=True):
+        self.version = version
+        self.reachable = reachable
+        self.urls = []
+
+    def request(self, method, url, **kwargs):
+        self.urls.append(url)
+        if not self.reachable:
+            raise OSError("connection refused")
+        if url.endswith("engine_version"):
+            return StubTextResponse(200, self.version)
+        return StubTextResponse(404, "not found")
+
+
+@pytest.fixture()
+def openquake_at(settings, monkeypatch):
+    """Point the factory at a stubbed OpenQuake and return the stub."""
+
+    def _configure(version="3.23.0", *, reachable=True):
+        settings.CASS_OPENQUAKE_URL = "http://openquake:8800"
+        stub = StubOpenQuakeSession(version, reachable=reachable)
+        monkeypatch.setattr(
+            "apps.common.engines.openquake_adapter",
+            lambda **kwargs: openquake_adapter(
+                session=stub, retries=1, retry_delay=0, sleep=lambda _: None, **kwargs
+            ),
+        )
+        return stub
+
+    return _configure
 
 
 @pytest.fixture()
@@ -111,12 +160,46 @@ def test_an_unreachable_engine_is_reported_rather_than_raising(oasis_at):
     assert "did not respond" in oasis["error"]
 
 
-def test_an_engine_without_an_adapter_is_named_rather_than_omitted(oasis_at):
+def test_every_engine_the_deployment_runs_is_named(oasis_at, openquake_at):
     """A missing row reads as nothing to see, which is the wrong thing to say."""
     oasis_at()
+    openquake_at()
+    described = describe_engines()
+    assert set(described) == {"oasis", "openquake"}
+    # The configured endpoint travels with each answer, so a support bundle
+    # records what was probed rather than only what replied.
+    assert described["openquake"]["url"] == "http://openquake:8800"
+
+
+def test_openquake_reports_its_version_and_compatibility(oasis_at, openquake_at):
+    oasis_at()
+    openquake_at("3.23.0")
     openquake = describe_engines()["openquake"]
-    assert openquake["adapter"] == "not yet implemented"
-    assert openquake["reachable"] is None
+    assert openquake["reachable"] is True
+    assert openquake["version"] == "3.23.0"
+    assert openquake["compatible"] is True
+
+
+def test_an_untested_openquake_is_reported_before_a_run_is_submitted(
+    oasis_at, openquake_at
+):
+    """Section 18: a result from an untested engine cannot be defended."""
+    oasis_at()
+    openquake_at("3.19.0")
+    openquake = describe_engines()["openquake"]
+    assert openquake["reachable"] is True
+    assert openquake["compatible"] is False
+
+
+def test_an_unreachable_openquake_does_not_hide_a_healthy_oasis(
+    oasis_at, openquake_at
+):
+    """One engine being down must not cost the operator the other's status."""
+    oasis_at()
+    openquake_at(reachable=False)
+    described = describe_engines()
+    assert described["oasis"]["reachable"] is True
+    assert described["openquake"]["reachable"] is False
 
 
 # -- the endpoint -----------------------------------------------------------

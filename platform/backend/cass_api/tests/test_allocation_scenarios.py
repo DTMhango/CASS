@@ -324,7 +324,7 @@ def stated(project, analyst):
     risks, policies = structural_template()
     shares = {"1": "1800000.00", "2": "900000.00", "3": "300000.00"}
     for row in risks:
-        if row["Account reference"] == "B-MULTI":
+        if row["Policy ID"] == "B-MULTI":
             row["Total insured value"] = shares[row["Risk reference"]]
 
     return import_portfolio(

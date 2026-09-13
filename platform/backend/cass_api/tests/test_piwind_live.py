@@ -77,7 +77,6 @@ def piwind_exposure(api, project, piwind_root) -> ExposureVersion:
         {
             "project": str(project.id),
             "name": "PiWind baseline",
-            "cedant": "Oasis PiWind reference model",
         },
         format="json",
     )

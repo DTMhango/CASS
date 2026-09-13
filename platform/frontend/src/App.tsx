@@ -16,11 +16,8 @@ import { AppShell } from "@/layout/AppShell";
 import { Administration } from "@/pages/Administration";
 import { AnalysisBuilder } from "@/pages/AnalysisBuilder";
 import { Dashboard } from "@/pages/Dashboard";
-import { ExposureWorkspace } from "@/pages/ExposureWorkspace";
-import { HazardModels } from "@/pages/HazardModels";
-import { ImportReview } from "@/pages/ImportReview";
-import { ModelBuild } from "@/pages/ModelBuild";
-import { ModelCatalogue } from "@/pages/ModelCatalogue";
+import { Exposure } from "@/pages/Exposure";
+import { Models } from "@/pages/Models";
 import { ResultsWorkspace } from "@/pages/ResultsWorkspace";
 import { RunMonitor } from "@/pages/RunMonitor";
 import { SignIn } from "@/pages/SignIn";
@@ -42,16 +39,24 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<Dashboard />} />
-        <Route path="models" element={<ModelCatalogue />} />
-        <Route path="exposure" element={<ExposureWorkspace />} />
-        <Route path="exposure/:exposureId" element={<ExposureWorkspace />} />
-        <Route path="import-review" element={<ImportReview />} />
+        <Route path="models" element={<Models />} />
+        <Route path="exposure" element={<Exposure />} />
+        <Route path="exposure/:exposureId" element={<Exposure />} />
+        {/* The addresses these pages used to have, kept working: a link in
+            somebody's notes or a bookmark still lands on the right tab. */}
+        <Route
+          path="import-review"
+          element={<Navigate to="/exposure?tab=import-review" replace />}
+        />
         <Route path="analysis" element={<AnalysisBuilder />} />
         <Route path="runs" element={<RunMonitor />} />
         <Route path="runs/:runId" element={<RunMonitor />} />
         <Route path="results" element={<ResultsWorkspace />} />
-        <Route path="model-build" element={<ModelBuild />} />
-        <Route path="hazard-models" element={<HazardModels />} />
+        <Route path="model-build" element={<Navigate to="/models?tab=build" replace />} />
+        <Route
+          path="hazard-models"
+          element={<Navigate to="/models?tab=hazard" replace />}
+        />
         <Route path="administration" element={<Administration />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

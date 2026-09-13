@@ -12,7 +12,12 @@ import json
 from django.conf import settings
 from django.http import HttpResponse
 from django.utils.dateparse import parse_date
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    extend_schema,
+    inline_serializer,
+)
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -33,8 +38,8 @@ from cass_extract import profile as intake_profile
 from cass_extract import template as intake_template
 from cass_oed.schema import FileKind
 
+from . import editing, promotion, review, scenarios, services
 from . import extract as extract_service
-from . import promotion, review, scenarios, services
 from .models import (
     AttributeOverride,
     EnrichmentRun,
@@ -59,7 +64,6 @@ class ExposureVersionSerializer(serializers.ModelSerializer):
             "name",
             "version",
             "state",
-            "cedant",
             "valuation_date",
             "source_description",
             "run_currency",
@@ -176,7 +180,7 @@ class ExposureVersionViewSet(viewsets.ModelViewSet):
     serializer_class = ExposureVersionSerializer
     permission_classes = [IsProjectMember]
     parser_classes = [MultiPartParser, FormParser, *viewsets.ModelViewSet.parser_classes]
-    filterset_fields = ["project", "state", "cedant"]
+    filterset_fields = ["project", "state"]
     ordering_fields = ["created_at", "total_tiv"]
 
     def get_queryset(self):
@@ -268,6 +272,127 @@ class ExposureVersionViewSet(viewsets.ModelViewSet):
         except services.ExposureError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(self.get_serializer(exposure).data)
+
+    # -- reading and correcting the rows themselves --------------------------
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("kind", str, description="location, account, reins_info or reins_scope"),
+            OpenApiParameter("offset", int),
+            OpenApiParameter("limit", int),
+            OpenApiParameter("search", str),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    @action(detail=True, methods=["get"], url_path="rows")
+    def rows(self, request, pk=None, version=None):
+        """The rows of one attached file, with what each column accepts.
+
+        The columns come from the same schema the file was validated against,
+        so the editor can refuse a value before it is stored rather than
+        reporting it as a finding afterwards.
+        """
+        exposure = self.get_object()
+        kind = request.query_params.get("kind") or str(FileKind.LOCATION)
+        try:
+            page = editing.rows_page(
+                exposure,
+                FileKind(kind),
+                offset=max(0, int(request.query_params.get("offset", 0))),
+                limit=min(int(request.query_params.get("limit", 50)), 500),
+                search=request.query_params.get("search", ""),
+            )
+        except ValueError:
+            return Response(
+                {"detail": f"{kind} is not an OED file CASS reads."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.ExposureError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        page["attached"] = [str(item) for item in editing.attached_kinds(exposure)]
+        return Response(page)
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="rows/edit")
+    def edit_row(self, request, pk=None, version=None):
+        """Correct one row in place, or refuse it with the reason."""
+        exposure = self.get_object()
+        kind = request.data.get("kind") or str(FileKind.LOCATION)
+        values = request.data.get("values") or {}
+        try:
+            row_number = int(request.data.get("row_number"))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "Which row is being corrected was not stated."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            updated = editing.edit_row(
+                exposure, FileKind(kind), row_number, values, actor=request.user
+            )
+        except editing.RowError as exc:
+            return Response(
+                {"detail": "The correction was not stored.", "fields": exc.problems},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.ExposureError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        exposure.refresh_from_db()
+        return Response(
+            {"row": {"row_number": row_number, "values": updated},
+             "version": self.get_serializer(exposure).data}
+        )
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="rows/add")
+    def add_row(self, request, pk=None, version=None):
+        """Add a row, checked the same way a correction is."""
+        exposure = self.get_object()
+        kind = request.data.get("kind") or str(FileKind.LOCATION)
+        try:
+            row = editing.add_row(
+                exposure, FileKind(kind), request.data.get("values") or {}, actor=request.user
+            )
+        except editing.RowError as exc:
+            return Response(
+                {"detail": "The row was not added.", "fields": exc.problems},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.ExposureError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        exposure.refresh_from_db()
+        return Response(
+            {"row": row, "version": self.get_serializer(exposure).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="rows/remove")
+    def remove_row(self, request, pk=None, version=None):
+        exposure = self.get_object()
+        kind = request.data.get("kind") or str(FileKind.LOCATION)
+        try:
+            editing.delete_row(
+                exposure, FileKind(kind), int(request.data.get("row_number") or 0),
+                actor=request.user,
+            )
+        except services.ExposureError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        exposure.refresh_from_db()
+        return Response(self.get_serializer(exposure).data)
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="correct")
+    def correct(self, request, pk=None, version=None):
+        """Copy a published version into the next one, for correcting."""
+        exposure = self.get_object()
+        try:
+            corrected = editing.correct(exposure, actor=request.user)
+        except services.ExposureError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(
+            self.get_serializer(corrected).data, status=status.HTTP_201_CREATED
+        )
 
     @action(detail=True, methods=["get"], url_path="preview")
     def preview(self, request, pk=None, version=None):
@@ -685,6 +810,16 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         batch = self.get_object()
         return Response(review.queue(batch))
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "location_id",
+                OpenApiTypes.UUID,
+                OpenApiParameter.PATH,
+                description="The staged location the decision is about.",
+            )
+        ]
+    )
     @action(
         detail=True,
         methods=["post"],

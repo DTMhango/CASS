@@ -81,3 +81,58 @@
 .disclosure + .caveats {
   margin-top: var(--space-4);
 }
+
+/* Comparing two governed runs. */
+.compare__form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.compare__saved {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.compare__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.compare__heading {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-base);
+}
+
+.compare__drivers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* A driver reads as one statement: what changed, from what to what, and why
+   that moves a number. Stacking keeps the three parts in that order at every
+   width rather than letting the reason wrap away from its subject. */
+.compare__driver {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+.compare__driver:last-child {
+  border-bottom: none;
+}
+
+.compare__driver-name {
+  font-weight: 600;
+}

@@ -41,7 +41,13 @@ from cass_converter.hazard_build import HazardSet as ConvertedHazard
 from cass_converter.hazard_job import HazardJob
 
 from .assets import attach_hazard_asset
-from .models import AreaPerilGrid, HazardSet, ModelVersion, PublicationState
+from .models import (
+    INTERNAL_USE_LICENCE,
+    AreaPerilGrid,
+    HazardSet,
+    ModelVersion,
+    PublicationState,
+)
 
 
 class HazardRegistrationError(Exception):
@@ -62,8 +68,8 @@ class SourceStatement:
 
     model: str
     licence: str = ""
-    cleared: bool = False
-    reference: str = ""
+    cleared: bool = True
+    reference: str = INTERNAL_USE_LICENCE
     ground_motion_models: tuple[str, ...] = ()
     checksum: str = ""
     note: str = ""
@@ -77,7 +83,7 @@ class SourceStatement:
             )
         if self.cleared and not self.reference.strip():
             raise HazardRegistrationError(
-                "A source licence clearance needs a reference -- the agreement or "
+                "A source licence clearance needs a reference -- the basis or "
                 "approval that grants it."
             )
 

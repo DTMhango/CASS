@@ -11,15 +11,23 @@
  * belong to, so a user can act on them. And a perspective the source data does
  * not support is shown as unavailable with its reason, rather than being
  * offered and silently producing zero.
+ *
+ * There are two ways in, because there are two kinds of source. A cedant who
+ * already works in OED attaches the four files directly. Everybody else fills
+ * in the CASS intake template, and that arrives as an import to be reviewed
+ * before any of it becomes a portfolio. The second path starts here and
+ * finishes on the import review screen.
  */
 
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import {
   useCreateExposureVersion,
+  useImportWorkbook,
+  useIntakeTemplate,
   useExposureFindings,
-  useExposurePreview,
   useExposureVersion,
   useExposureVersions,
   useProjects,
@@ -32,7 +40,6 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
-  Disclosure,
   EmptyState,
   Field,
   MetricTile,
@@ -44,6 +51,8 @@ import {
 } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
 import { formatCount, formatMoney } from "@/lib/format";
+
+import { PortfolioRows } from "./PortfolioRows";
 
 import "./ExposureWorkspace.css";
 
@@ -70,7 +79,7 @@ const FILE_KINDS: { kind: OEDFileKind; label: string; requirement: string }[] = 
   },
 ];
 
-export function ExposureWorkspace() {
+export function ExposureWorkspace({ embedded = false }: { embedded?: boolean } = {}) {
   const context = useWorkingContext();
   const { data: versions, isLoading } = useExposureVersions(context.projectId);
   const [selectedId, setSelectedId] = useState<string | undefined>(context.exposureId);
@@ -79,10 +88,10 @@ export function ExposureWorkspace() {
 
   return (
     <>
-      <PageHeader
+      {embedded ? null : <PageHeader
         title="Exposure workspace"
         description="Import or create portfolio records, review how CASS interprets them as OED, resolve findings, then publish an immutable version that an analysis can use."
-      />
+      />}
 
       <div className="exposure-layout">
         <div className="exposure-layout__list">
@@ -134,6 +143,7 @@ export function ExposureWorkspace() {
             )}
           </Card>
 
+          <IntakeImportForm />
           <CreateVersionForm onCreated={setSelectedId} />
         </div>
 
@@ -150,7 +160,120 @@ export function ExposureWorkspace() {
           )}
         </div>
       </div>
+
+      {/* Full width rather than in the column beside the portfolio list: a
+          location file is twenty-odd columns, and reading it through a third
+          of the screen is how it stayed unread. */}
+      {selected ? <PortfolioRows version={selected} /> : null}
     </>
+  );
+}
+
+/**
+ * Import a completed CASS intake template.
+ *
+ * The template is downloaded rather than described, because a schedule typed
+ * into a workbook of somebody\'s own design is the thing the import review
+ * spends its afternoon reconciling. Generating it from the intake profile
+ * means the columns a person fills in are exactly the ones the reader
+ * interprets.
+ *
+ * Nothing becomes a portfolio here. An import is staged, profiled and put in
+ * front of a person, and only a promotion turns a reviewed cohort into an
+ * exposure version -- so the finish line is the import review, not this card.
+ */
+function IntakeImportForm() {
+  const context = useWorkingContext();
+  const template = useIntakeTemplate();
+  const importWorkbook = useImportWorkbook();
+
+  const [file, setFile] = useState<File | null>(null);
+  const [snapshotDate, setSnapshotDate] = useState("");
+
+  const projectId = context.projectId;
+  const error = (template.error ?? importWorkbook.error) as ApiError | null;
+
+  return (
+    <Card
+      title="Import a portfolio workbook"
+      description="For source data that is not already OED. The import is staged and profiled, then reviewed before any of it becomes a portfolio."
+    >
+      {error ? (
+        <Notice tone="error" title="The import was refused">
+          {error.message}
+        </Notice>
+      ) : null}
+
+      <Button
+        variant="secondary"
+        onClick={() => template.mutate(projectId)}
+        busy={template.isPending}
+      >
+        Download the intake template
+      </Button>
+
+      <Field
+        label="Completed template"
+        htmlFor="intake-file"
+        hint="Read as it stands. Nothing in it is corrected on the way in."
+      >
+        <input
+          id="intake-file"
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        />
+      </Field>
+
+      <Field
+        label="Snapshot date"
+        htmlFor="intake-snapshot"
+        hint="The date the schedule describes, where it differs from today."
+      >
+        <TextInput
+          id="intake-snapshot"
+          type="date"
+          value={snapshotDate}
+          onChange={(event) => setSnapshotDate(event.target.value)}
+        />
+      </Field>
+
+      <Button
+        variant="primary"
+        disabled={!file || !projectId}
+        busy={importWorkbook.isPending}
+        onClick={() => {
+          if (file && projectId) {
+            importWorkbook.mutate({
+              project: projectId,
+              file,
+              snapshot_date: snapshotDate || undefined,
+            });
+          }
+        }}
+        title={
+          projectId
+            ? "Stage the workbook and profile what it contains."
+            : "Select a project first."
+        }
+      >
+        Import workbook
+      </Button>
+
+      {!projectId ? (
+        <p className="muted">Select a project before importing.</p>
+      ) : null}
+
+      {importWorkbook.isSuccess ? (
+        <Notice tone="ok" title="Imported and profiled">
+          Nothing has become a portfolio yet.{" "}
+          <Link to="/import-review">
+            Review what came in, what is missing and what it would cost
+          </Link>
+          , then promote a cohort to an exposure version.
+        </Notice>
+      ) : null}
+    </Card>
   );
 }
 
@@ -215,12 +338,24 @@ function ExposureStateBadge({ version }: { version: ExposureVersion }) {
   );
 }
 
+/**
+ * Start a portfolio from OED files.
+ *
+ * This is the other way in. The card above takes a completed intake template
+ * and stages it for review; this one makes an empty portfolio for source data
+ * that is already OED, which the four attachments below then fill.
+ *
+ * It asks for a name and nothing else. Everything else about a portfolio --
+ * how many locations, what they are worth, which perspectives the files
+ * support -- is read from the files rather than typed here, and a field a
+ * person fills in that nothing then reads is a field that will eventually
+ * disagree with the data.
+ */
 function CreateVersionForm({ onCreated }: { onCreated: (id: string) => void }) {
   const { data: projects } = useProjects();
   const context = useWorkingContext();
   const create = useCreateExposureVersion();
   const [name, setName] = useState("");
-  const [cedant, setCedant] = useState("");
 
   const projectId = context.projectId ?? projects?.[0]?.id;
   const error = create.error as ApiError | null;
@@ -229,20 +364,22 @@ function CreateVersionForm({ onCreated }: { onCreated: (id: string) => void }) {
     event.preventDefault();
     if (!projectId) return;
     create.mutate(
-      { project: projectId, name, cedant },
+      { project: projectId, name },
       {
         onSuccess: (version) => {
           onCreated(version.id);
           context.setExposure(version);
           setName("");
-          setCedant("");
         },
       },
     );
   }
 
   return (
-    <Card title="New portfolio version">
+    <Card
+      title="New portfolio version"
+      description="For source data that is already OED. Name it here, then attach the location, account and reinsurance files."
+    >
       <form onSubmit={submit}>
         {error ? (
           <Notice tone="error" title="Could not create the version">
@@ -260,13 +397,6 @@ function CreateVersionForm({ onCreated }: { onCreated: (id: string) => void }) {
             value={name}
             onChange={(event) => setName(event.target.value)}
             required
-          />
-        </Field>
-        <Field label="Cedant" htmlFor="new-exposure-cedant">
-          <TextInput
-            id="new-exposure-cedant"
-            value={cedant}
-            onChange={(event) => setCedant(event.target.value)}
           />
         </Field>
         <div className="exposure-form__actions">
@@ -341,8 +471,8 @@ function ExposureDetail({ version }: { version: ExposureVersion }) {
         ) : null}
         {current.is_frozen ? (
           <Notice tone="ok" title="Published">
-            Analyses may now use this version. The OED artifacts and their checksums are
-            fixed.
+            Analyses may now use this version, and it can no longer change. A
+            correction creates version {current.version + 1}.
           </Notice>
         ) : null}
 
@@ -366,7 +496,6 @@ function ExposureDetail({ version }: { version: ExposureVersion }) {
       <PerspectiveAvailabilityCard version={current} />
       {report ? <FindingsCard exposureId={current.id} /> : null}
       <TivBreakdown version={current} />
-      <PreviewCard exposureId={current.id} />
     </div>
   );
 }
@@ -387,7 +516,7 @@ function FileAttachments({ version }: { version: ExposureVersion }) {
   return (
     <Card
       title="Source files"
-      description="CASS reads these exactly as supplied and never rewrites them. Each is checksummed on upload."
+      description="CASS reads these exactly as supplied and never rewrites them."
     >
       {error ? (
         <Notice tone="error" title="Upload refused">
@@ -405,16 +534,14 @@ function FileAttachments({ version }: { version: ExposureVersion }) {
                 <p className="file-list__label">
                   {label}
                   {file ? (
-                    <StatusBadge tone="ok" size="sm" detail="Registered and checksummed.">
+                    <StatusBadge tone="ok" size="sm">
                       Attached
                     </StatusBadge>
                   ) : null}
                 </p>
                 <p className="file-list__requirement">{requirement}</p>
                 {file ? (
-                  <p className="file-list__checksum mono">
-                    {file.original_filename} · {file.checksum.slice(0, 23)}…
-                  </p>
+                  <p className="file-list__name">{file.original_filename}</p>
                 ) : null}
               </div>
               <div className="file-list__action">
@@ -596,65 +723,3 @@ function TivTable({
   );
 }
 
-function PreviewCard({ exposureId }: { exposureId: string }) {
-  const [open, setOpen] = useState(false);
-  const { data: preview, error } = useExposurePreview(exposureId, open);
-
-  return (
-    <Card
-      title="OED interpretation"
-      description="Exactly what CASS will hand to the model. Columns CASS does not interpret are listed rather than dropped silently."
-      actions={
-        <Button size="sm" onClick={() => setOpen((value) => !value)}>
-          {open ? "Hide" : "Show"} preview
-        </Button>
-      }
-    >
-      {!open ? (
-        <p className="muted">The preview is loaded on request because it reads the files.</p>
-      ) : error ? (
-        <Notice tone="warning" title="Preview unavailable">
-          {(error as ApiError).message}
-        </Notice>
-      ) : !preview ? (
-        <Spinner label="Reading files" />
-      ) : (
-        Object.entries(preview.files).map(([kind, file]) => (
-          <Disclosure
-            key={kind}
-            summary={`${kind} · ${formatCount(file.row_count)} rows`}
-            defaultOpen={kind === "location"}
-          >
-            {file.unrecognised_columns.length ? (
-              <Notice tone="warning" title="Columns CASS did not interpret">
-                {file.unrecognised_columns.join(", ")}
-              </Notice>
-            ) : null}
-            <div className="preview-scroll">
-              <table className="data-table data-table--compact">
-                <thead>
-                  <tr>
-                    {file.columns.map((column) => (
-                      <th key={column} scope="col">
-                        {column}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {file.rows.map((row, index) => (
-                    <tr key={index}>
-                      {file.columns.map((column) => (
-                        <td key={column}>{row[column]}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Disclosure>
-        ))
-      )}
-    </Card>
-  );
-}

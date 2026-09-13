@@ -6,16 +6,70 @@
  * approved local installation needs: versions and health, without portfolio
  * contents.
  *
- * The version and compatibility information here is the metadata half of that
- * bundle, and it is what a local user is asked for first when something is
- * wrong.
+ * Engine health is a live probe rather than a configured URL, because the
+ * question an operator is actually asking is not "what did we point this at"
+ * but "is it there, and is it a version we have tested against". Section 18 is
+ * the reason the second half matters: an engine answering on an untested
+ * version is a compatibility problem to see before submitting a run, not after
+ * one produces a result nobody can defend.
+ *
+ * The audit search is here rather than on each screen for the same reason the
+ * table is append-only: an auditor follows a correlation id across projects,
+ * runs and model versions, and a trail split across the screens that wrote it
+ * is not a trail.
  */
 
-import { usePlatformInfo, useSession } from "@/api/hooks";
+import { useState } from "react";
+
+import {
+  useAuditEvents,
+  useEngineStatus,
+  usePlatformInfo,
+  useProjects,
+  useSession,
+  useUsers,
+} from "@/api/hooks";
+import type { AuditEvent, EngineStatus } from "@/api/types";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Card, Notice, PageHeader, Spinner } from "@/components/primitives";
+import {
+  Card,
+  EmptyState,
+  Field,
+  Notice,
+  PageHeader,
+  Select,
+  Spinner,
+  TextInput,
+} from "@/components/primitives";
+import { formatDateTime } from "@/lib/format";
 
 import "./Administration.css";
+
+const ROLE_LABELS: Record<string, string> = {
+  analyst: "Portfolio analyst",
+  modeller: "Catastrophe modeller",
+  underwriter: "Underwriter",
+  reviewer: "Reviewer",
+  admin: "Platform administrator",
+};
+
+/** The governed actions, as the audit table records them. */
+const AUDIT_ACTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Every action" },
+  { value: "create", label: "Created" },
+  { value: "update", label: "Updated" },
+  { value: "publish", label: "Published" },
+  { value: "submit", label: "Submitted" },
+  { value: "cancel", label: "Cancelled" },
+  { value: "retry", label: "Retried" },
+  { value: "approve", label: "Approved" },
+  { value: "reject", label: "Rejected" },
+  { value: "override", label: "Overrode a value" },
+  { value: "download", label: "Downloaded" },
+  { value: "upload", label: "Uploaded" },
+  { value: "sign_in", label: "Signed in" },
+  { value: "sign_in_failed", label: "Sign-in failed" },
+];
 
 export function Administration() {
   const { data: platform, isLoading } = usePlatformInfo();
@@ -29,16 +83,18 @@ export function Administration() {
     <>
       <PageHeader
         title="Administration"
-        description="Versions, execution profiles and engine endpoints for this installation."
+        description="Versions, engine health, roles and the audit trail for this installation."
       />
 
       {!isAdmin ? (
         <Notice tone="info" title="Read-only view">
-          User, queue and retention management is restricted to platform administrators.
-          The version information below is available to everyone so it can be quoted in a
-          support request.
+          Queue and retention management is restricted to platform administrators. The
+          version and health information below is available to everyone so it can be
+          quoted in a support request.
         </Notice>
       ) : null}
+
+      <EngineHealth />
 
       <div className="admin-grid">
         <Card title="This installation">
@@ -50,6 +106,13 @@ export function Administration() {
             </AdminFact>
             <AdminFact term="Default resource profile">
               {platform?.default_execution_profile ?? "—"}
+            </AdminFact>
+            {/* Said once, here, rather than on every model and result screen:
+                it is a fact about this installation and it does not change
+                between uploads. */}
+            <AdminFact term="Use of model data">
+              Internal to Klapton Re. The models and data CASS carries are used
+              inside the company: not redistributed outside it and not sold.
             </AdminFact>
           </dl>
         </Card>
@@ -125,26 +188,346 @@ export function Administration() {
         </table>
       </Card>
 
-      <Card
-        title="Engine endpoints"
-        description="The CASS API reaches these. The browser never calls them directly."
-      >
-        <dl className="admin-facts">
-          {Object.entries(platform?.engines ?? {}).map(([name, url]) => (
-            <AdminFact key={name} term={name}>
-              <span className="mono">{url}</span>
-              <StatusBadge
-                tone="idle"
-                size="sm"
-                detail="Liveness reporting arrives with the engine adapters."
-              >
-                not probed
-              </StatusBadge>
-            </AdminFact>
-          ))}
-        </dl>
-      </Card>
+      <Directory />
+      <AuditSearch />
     </>
+  );
+}
+
+/**
+ * Whether each engine is reachable, and on a version that has been tested.
+ *
+ * An engine with no adapter is reported as such rather than omitted: a missing
+ * row reads as "nothing to see", which is the wrong thing to tell an operator
+ * about a service the deployment is running.
+ */
+function EngineHealth() {
+  const { data: engines, isLoading, error } = useEngineStatus();
+
+  const rows = Object.entries(engines ?? {});
+  const unreachable = rows.filter(([, engine]) => engine.reachable === false);
+  const untested = rows.filter(
+    ([, engine]) => engine.reachable === true && engine.compatible === false,
+  );
+
+  return (
+    <Card
+      title="Engine health"
+      description="Probed from the CASS API, which is the only thing that reaches an engine. The browser never calls one directly."
+      padded={false}
+    >
+      {error ? (
+        <div className="admin-engines__message">
+          <Notice tone="warning" title="Health could not be read">
+            The CASS API did not answer the engine probe. The endpoints below are what
+            this installation is configured to reach.
+          </Notice>
+        </div>
+      ) : null}
+
+      {untested.length > 0 ? (
+        <div className="admin-engines__message">
+          <Notice tone="warning" title="An engine is answering on an untested version">
+            {untested.map(([name]) => name).join(", ")}. A run against an untested
+            combination produces a result that cannot be defended, so submit nothing
+            until the compatibility matrix is updated or the engine is rolled back.
+          </Notice>
+        </div>
+      ) : null}
+
+      {unreachable.length > 0 ? (
+        <div className="admin-engines__message">
+          <Notice tone="error" title="An engine is not reachable">
+            {unreachable.map(([name]) => name).join(", ")}. Work that needs it will
+            queue rather than fail, and will proceed once it returns.
+          </Notice>
+        </div>
+      ) : null}
+
+      {isLoading ? (
+        <div className="admin-engines__message">
+          <Spinner label="Probing the engines" />
+        </div>
+      ) : rows.length > 0 ? (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th scope="col">Engine</th>
+              <th scope="col">Reachable</th>
+              <th scope="col">Version</th>
+              <th scope="col">Tested combination</th>
+              <th scope="col">Endpoint</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([name, engine]) => (
+              <EngineRow key={name} name={name} engine={engine} />
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="admin-engines__message">
+          <EmptyState title="No engines are configured for this installation" />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function EngineRow({ name, engine }: { name: string; engine: EngineStatus }) {
+  return (
+    <tr>
+      <th scope="row">
+        {engine.engine || name}
+        {engine.adapter ? (
+          <span className="muted admin-engines__adapter"> {engine.adapter}</span>
+        ) : null}
+      </th>
+      <td>
+        <StatusBadge
+          tone={
+            engine.reachable === true ? "ok" : engine.reachable === false ? "error" : "idle"
+          }
+          size="sm"
+          detail={engine.detail}
+        >
+          {/* Unknown is not the same as down, and an operator must not read one
+              as the other: an engine with no adapter has not been asked. */}
+          {engine.reachable === true
+            ? "reachable"
+            : engine.reachable === false
+              ? "not reachable"
+              : "not probed"}
+        </StatusBadge>
+      </td>
+      <td className="mono">{engine.version || "—"}</td>
+      <td>
+        <StatusBadge
+          tone={
+            engine.compatible === true
+              ? "ok"
+              : engine.compatible === false
+                ? "warning"
+                : "idle"
+          }
+          size="sm"
+        >
+          {engine.compatible === true
+            ? "tested"
+            : engine.compatible === false
+              ? "untested"
+              : "unknown"}
+        </StatusBadge>
+      </td>
+      <td className="mono admin-engines__url">{engine.url}</td>
+    </tr>
+  );
+}
+
+/** Who has which platform role. Membership of a project is set on the project. */
+function Directory() {
+  const { data: users, isLoading } = useUsers();
+
+  return (
+    <Card
+      title="Users and roles"
+      description="A platform role decides what somebody may do anywhere; project membership decides where."
+      padded={false}
+    >
+      {isLoading ? (
+        <div className="admin-engines__message">
+          <Spinner label="Loading the directory" />
+        </div>
+      ) : users && users.length > 0 ? (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th scope="col">Person</th>
+              <th scope="col">Platform role</th>
+              <th scope="col">May publish models</th>
+              <th scope="col">May decide gates</th>
+              <th scope="col">Local install</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id}>
+                <th scope="row">
+                  {user.full_name || user.username}
+                  {user.job_title ? (
+                    <span className="muted"> · {user.job_title}</span>
+                  ) : null}
+                </th>
+                <td>{ROLE_LABELS[user.platform_role] ?? user.platform_role}</td>
+                <td>
+                  <Permitted allowed={user.capabilities.publish_models} />
+                </td>
+                <td>
+                  <Permitted allowed={user.capabilities.approve_gates} />
+                </td>
+                <td>
+                  <StatusBadge
+                    tone={user.local_install_approved ? "ok" : "idle"}
+                    size="sm"
+                    detail={
+                      user.local_install_approved
+                        ? "May run an approved local installation."
+                        : "Uses the hosted installation only."
+                    }
+                  >
+                    {user.local_install_approved ? "approved" : "hosted only"}
+                  </StatusBadge>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="admin-engines__message">
+          <EmptyState title="No users are listed" />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Permitted({ allowed }: { allowed: boolean }) {
+  return (
+    <StatusBadge tone={allowed ? "ok" : "idle"} size="sm">
+      {allowed ? "yes" : "no"}
+    </StatusBadge>
+  );
+}
+
+/**
+ * Audit search.
+ *
+ * The correlation id is offered as its own field because it is the one an
+ * incident actually starts from: a person asks what else happened under the
+ * request that produced this run, and every event it touched carries it.
+ */
+function AuditSearch() {
+  const { data: projects } = useProjects();
+  const [action, setAction] = useState("");
+  const [project, setProject] = useState("");
+  const [correlationId, setCorrelationId] = useState("");
+
+  const { data: events, isLoading } = useAuditEvents({
+    action: action || undefined,
+    project: project || undefined,
+    correlation_id: correlationId.trim() || undefined,
+  });
+
+  return (
+    <Card
+      title="Audit trail"
+      description="Append-only. Every governed action, who took it and what it touched."
+      padded={false}
+    >
+      <div className="admin-audit__filters">
+        <Field label="Action" htmlFor="audit-action">
+          <Select
+            id="audit-action"
+            value={action}
+            onChange={(event) => setAction(event.target.value)}
+          >
+            {AUDIT_ACTIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="Project" htmlFor="audit-project">
+          <Select
+            id="audit-project"
+            value={project}
+            onChange={(event) => setProject(event.target.value)}
+          >
+            <option value="">Every project</option>
+            {projects?.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field
+          label="Correlation id"
+          htmlFor="audit-correlation"
+          hint="Everything that happened under one request."
+        >
+          <TextInput
+            id="audit-correlation"
+            value={correlationId}
+            onChange={(event) => setCorrelationId(event.target.value)}
+            placeholder="Paste from a run"
+          />
+        </Field>
+      </div>
+
+      {isLoading ? (
+        <div className="admin-engines__message">
+          <Spinner label="Searching the trail" />
+        </div>
+      ) : events && events.length > 0 ? (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Who</th>
+              <th scope="col">Action</th>
+              <th scope="col">Subject</th>
+              <th scope="col">Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((event) => (
+              <AuditRow key={event.id} event={event} />
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="admin-engines__message">
+          <EmptyState
+            title="Nothing matches"
+            description="No governed action matches these filters. An empty trail under a correlation id usually means the id came from somewhere other than a run."
+          />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AuditRow({ event }: { event: AuditEvent }) {
+  return (
+    <tr>
+      <th scope="row" className="muted">
+        {formatDateTime(event.created_at)}
+      </th>
+      <td>{event.actor_label || "the platform"}</td>
+      <td>
+        <StatusBadge
+          tone={
+            event.action === "reject" || event.action === "sign_in_failed"
+              ? "error"
+              : event.action === "approve" || event.action === "publish"
+                ? "ok"
+                : "idle"
+          }
+          size="sm"
+        >
+          {event.action.replace(/_/g, " ")}
+        </StatusBadge>
+      </td>
+      <td>
+        {event.subject_label || event.subject_type}
+        <span className="muted admin-audit__subject-type"> {event.subject_type}</span>
+      </td>
+      <td className="muted">{event.detail || "—"}</td>
+    </tr>
   );
 }
 

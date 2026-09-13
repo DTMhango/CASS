@@ -151,6 +151,28 @@ def _export(directory: pathlib.Path, stem: str) -> pathlib.Path:
     return found[0]
 
 
+def _realization_count(base: pathlib.Path, events: Sequence[Event]) -> int:
+    """How many logic-tree realisations produced this event set.
+
+    The engine publishes a realizations output only where there is a logic tree
+    to describe. A calculation on a single branch exposes none at all, and
+    refusing that calculation would refuse the only kind this converter accepts.
+    So the export is read where it exists, and otherwise the events are asked:
+    each carries the realisation it belongs to, which is the same fact counted
+    one row lower down.
+    """
+    found = sorted(base.glob("realizations_*.csv"))
+    if len(found) > 1:
+        raise HazardBuildError(
+            f"{base} holds {len(found)} realizations exports "
+            f"({', '.join(item.name for item in found)}). Give each calculation "
+            "its own directory."
+        )
+    if found:
+        return read_realization_count(found[0])
+    return len({event.realization_id for event in events})
+
+
 def build_hazard(
     directory: str | pathlib.Path,
     *,
@@ -174,13 +196,13 @@ def build_hazard(
         raise HazardBuildError(f"{base} is not a directory of OpenQuake exports.")
 
     gmf = _export(base, "gmf-data")
+    events = read_events(_export(base, "events"))
     metadata = dataclasses.replace(
         read_metadata(_export(base, "ruptures"), _export(base, "events"), gmf),
-        realization_count=read_realization_count(_export(base, "realizations")),
+        realization_count=_realization_count(base, events),
     )
     require_single_realization(metadata)
 
-    events = read_events(_export(base, "events"))
     table = occurrences(events)
 
     frequency = check_frequency(

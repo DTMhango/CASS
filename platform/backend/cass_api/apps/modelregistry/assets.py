@@ -33,6 +33,7 @@ from apps.artifacts.models import Artifact, ArtifactLink, ArtifactState
 from apps.common.storage import bucket, get_store
 from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_core.policy import IMTRepresentation
+from cass_keys import assets as keys_assets
 from cass_keys.lookup import (
     AreaPerilGrid as KeysGrid,
 )
@@ -225,6 +226,28 @@ def _asset_text(subject, subject_type: str, role: str, description: str) -> str:
         return handle.read().decode("utf-8-sig")
 
 
+def asset_bytes(subject, subject_type: str, role: str, description: str) -> bytes:
+    """One registered asset's bytes, refusing one that is missing or unreadable.
+
+    Bytes rather than text for the tables a package is built from: a footprint is
+    millions of rows and decoding it only to encode it again doubles the memory
+    for nothing.
+    """
+    link = (
+        ArtifactLink.objects.filter(subject_type=subject_type, subject_id=subject.id, role=role)
+        .select_related("artifact")
+        .order_by("-created_at")
+        .first()
+    )
+    if link is None or not link.artifact.is_readable:
+        raise ModelAssetError(
+            f"{description} has no registered {role.replace('_', ' ')}, so it cannot "
+            "be packaged."
+        )
+    with get_store().open(link.artifact.uri) as handle:
+        return handle.read()
+
+
 def load_grid(grid) -> KeysGrid:
     """Read a registry grid as the keys service's grid."""
     text = _asset_text(grid, "area_peril_grid", GRID_CELLS_ROLE, str(grid))
@@ -239,13 +262,18 @@ def load_grid(grid) -> KeysGrid:
     )
 
 
-def load_vulnerability(vulnerability_set) -> VulnerabilityMapping:
+def load_vulnerability(
+    vulnerability_set, *, supported_imts: frozenset[str] | None = None
+) -> VulnerabilityMapping:
     """Read a registry vulnerability set as the keys service's mapping.
 
-    ``supported_imts`` is left at the release default. Which intensity measures
-    the converter can actually produce is a property of the converter, not of
-    the vulnerability set, and section 6 requires a function demanding anything
-    else to be reported rather than rerouted.
+    ``supported_imts`` is what can actually answer a function, and that is a
+    property of neither the converter nor the vulnerability set: it is the set
+    of measures the hazard attached to the run carries. A caller that knows
+    which hazard set is in play passes its measures; one that does not leaves
+    the keys release default, which is the conservative answer. Section 6
+    requires a function demanding anything else to be reported rather than
+    rerouted, and either way it is.
 
     The multi-IMT representation comes from the registry record rather than the
     file, because it is a governance fact about the set -- which approval it was
@@ -262,6 +290,9 @@ def load_vulnerability(vulnerability_set) -> VulnerabilityMapping:
         raise ModelAssetError(
             f"{vulnerability_set} has a mapping file that defines no functions."
         )
+    optional = (
+        {"supported_imts": supported_imts} if supported_imts is not None else {}
+    )
     try:
         return VulnerabilityMapping(
             country_code=vulnerability_set.country_code,
@@ -271,6 +302,7 @@ def load_vulnerability(vulnerability_set) -> VulnerabilityMapping:
                 vulnerability_set.imt_representation
                 or IMTRepresentation.UNDECIDED
             ),
+            **optional,
         )
     except MappingError as exc:
         raise ModelAssetError(
@@ -308,36 +340,11 @@ def _decimal(row: dict[str, str], column: str, what: str) -> Decimal:
 
 
 def _read_cells(text: str) -> Iterator[GridCell]:
-    for row in _rows(text, GRID_COLUMNS, "grid cell"):
-        try:
-            area_peril_id = int(row["AreaPerilID"])
-        except (KeyError, ValueError) as exc:
-            raise ModelAssetError(
-                "The grid cell file has an unreadable AreaPerilID on line "
-                f"{row.get('__line__', '?')}: {row.get('AreaPerilID', '')!r}."
-            ) from exc
-
-        minimum_latitude = _decimal(row, "MinLatitude", "grid cell")
-        maximum_latitude = _decimal(row, "MaxLatitude", "grid cell")
-        minimum_longitude = _decimal(row, "MinLongitude", "grid cell")
-        maximum_longitude = _decimal(row, "MaxLongitude", "grid cell")
-        if minimum_latitude >= maximum_latitude or minimum_longitude >= maximum_longitude:
-            raise ModelAssetError(
-                f"Grid cell {area_peril_id} has an empty or inverted extent. A cell "
-                "that covers nothing would silently map no location to it."
-            )
-
-        vs30 = row.get("Vs30", "")
-        yield GridCell(
-            area_peril_id=area_peril_id,
-            min_latitude=minimum_latitude,
-            max_latitude=maximum_latitude,
-            min_longitude=minimum_longitude,
-            max_longitude=maximum_longitude,
-            country_code=row.get("CountryCode", ""),
-            offshore=_flag(row.get("Offshore", "")),
-            vs30=float(vs30) if vs30 else None,
-        )
+    """Grid cells, read by the same parser the Oasis package's lookup ships."""
+    try:
+        yield from keys_assets.read_cells(text)
+    except keys_assets.AssetFormatError as exc:
+        raise ModelAssetError(str(exc)) from exc
 
 
 def attach_vulnerability_functions(
@@ -420,84 +427,74 @@ def attach_hazard_model_file(model, path: str, payload: bytes, *, actor=None):
     )
 
 
-def _read_vulnerability(text: str) -> Iterator[VulnerabilityEntry]:
-    for row in _rows(text, VULNERABILITY_COLUMNS, "vulnerability mapping"):
-        try:
-            vulnerability_id = int(row["VulnerabilityID"])
-            coverage_type = int(row["CoverageTypeID"])
-        except (KeyError, ValueError) as exc:
-            raise ModelAssetError(
-                "The vulnerability mapping has an unreadable identifier on line "
-                f"{row.get('__line__', '?')}."
-            ) from exc
+def hazard_model_file(model, path: str) -> bytes | None:
+    """One file of an uploaded package by its path inside it, or ``None``.
 
-        required_imt = row.get("RequiredIMT", "")
-        if not required_imt:
-            raise ModelAssetError(
-                f"Vulnerability {vulnerability_id} declares no required intensity "
-                "measure, so it cannot be routed to a hazard channel."
-            )
-
-        band = row.get("StoreyBand", "")
-        yield VulnerabilityEntry(
-            vulnerability_id=vulnerability_id,
-            coverage_type=coverage_type,
-            required_imt=required_imt,
-            occupancy_codes=_codes(row.get("OccupancyCodes", "")),
-            construction_codes=_codes(row.get("ConstructionCodes", "")),
-            label=row.get("Label", ""),
-            storey_band=band,
-            min_storeys=_optional_int(row, "MinStoreys"),
-            max_storeys=_optional_int(row, "MaxStoreys"),
-            channel_weight=_channel_weight(row, vulnerability_id),
-        )
-
-
-def _optional_int(row: dict[str, str], column: str) -> int | None:
-    """A storey limit, or None where the band is open at that end."""
-    value = row.get(column, "")
-    if not value:
-        return None
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise ModelAssetError(
-            f"The vulnerability mapping has an unreadable {column} on line "
-            f"{row.get('__line__', '?')}: {value!r}."
-        ) from exc
-
-
-def _channel_weight(row: dict[str, str], vulnerability_id: int) -> float:
-    """This channel's share of its class; 1 where the column is absent.
-
-    A mapping written before channels existed has no such column and every one
-    of its classes is a single function, so the whole share belongs to the one
-    row. A column that is present and unreadable is refused rather than
-    defaulted -- silently reading a broken weight as 1 would turn a mixture
-    into several full-value functions.
+    Read alone rather than through :func:`hazard_model_files`, because the
+    configuration editor asks for the site model on every edit and a national
+    package is tens of megabytes of sources it does not need.
     """
-    value = row.get("ChannelWeight", "")
-    if not value:
-        return 1.0
-    try:
-        weight = float(value)
-    except ValueError as exc:
-        raise ModelAssetError(
-            f"Vulnerability {vulnerability_id} has an unreadable ChannelWeight "
-            f"{value!r} on line {row.get('__line__', '?')}."
-        ) from exc
-    if not 0.0 < weight <= 1.0:
-        raise ModelAssetError(
-            f"Vulnerability {vulnerability_id} has a ChannelWeight of {weight}, "
-            "which is not a share of its class."
+    link = (
+        ArtifactLink.objects.filter(
+            subject_type="hazard_model",
+            subject_id=model.id,
+            role=HAZARD_MODEL_ROLE_PREFIX + path,
         )
-    return weight
-
-
-def _codes(value: str) -> frozenset[str]:
-    return frozenset(
-        item.strip() for item in value.split(CODE_SEPARATOR) if item.strip()
+        .select_related("artifact")
+        .order_by("-created_at")
+        .first()
     )
+    if link is None or not link.artifact.is_readable:
+        return None
+    with get_store().open(link.artifact.uri) as handle:
+        return handle.read()
+
+
+def hazard_model_files(model) -> dict[str, bytes]:
+    """Every file of an uploaded package, keyed by its path inside it.
+
+    A source model logic tree references its files by relative path, so the
+    paths are what make the package assemble. Reading them back by path rather
+    than by role is the same reason they were stored that way.
+    """
+    links = (
+        ArtifactLink.objects.filter(
+            subject_type="hazard_model", subject_id=model.id
+        )
+        .select_related("artifact")
+        .order_by("created_at")
+    )
+    store = get_store()
+    found: dict[str, bytes] = {}
+    for link in links:
+        if not link.role.startswith(HAZARD_MODEL_ROLE_PREFIX):
+            continue
+        if not link.artifact.is_readable:
+            continue
+        path = link.role[len(HAZARD_MODEL_ROLE_PREFIX) :]
+        with store.open(link.artifact.uri) as handle:
+            found[path] = handle.read()
+    if not found:
+        raise ModelAssetError(
+            f"{model} has no registered package files. The archive was "
+            "registered but its contents are not in the artifact store, so "
+            "there is nothing to submit."
+        )
+    return found
+
+
+def _read_vulnerability(text: str) -> Iterator[VulnerabilityEntry]:
+    """Mapping rows, read by the same parser the Oasis package's lookup ships.
+
+    One parser for both lookups is the point: CASS reconciles a portfolio
+    before submitting it and the engine builds items from it afterwards, and
+    two readers of one file could disagree about a storey band without either
+    being wrong on its own terms.
+    """
+    try:
+        yield from keys_assets.read_mapping(text)
+    except keys_assets.AssetFormatError as exc:
+        raise ModelAssetError(str(exc)) from exc
 
 
 def _flag(value: str) -> bool:

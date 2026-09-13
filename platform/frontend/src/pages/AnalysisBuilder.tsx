@@ -6,16 +6,29 @@
  * preconditions: a published exposure version, an approved model, and a
  * perspective the source data supports.
  *
- * The builder checks those preconditions and says which are unmet. It does not
- * submit work yet: the Oasis and OpenQuake adapters are phase 2 and 3 of the
- * roadmap. Showing the gates now is deliberate -- section 13 requires each
- * engine capability to be exposed through a thin CASS workflow first.
+ * The builder checks those preconditions before it offers to submit, and the
+ * API checks them again when it does. That is not duplication: a screen is a
+ * courtesy and the API is the rule. What the screen adds is that an analyst
+ * finds out here, with the fix one link away, rather than from a refusal after
+ * they thought the work had started.
+ *
+ * Submission creates the run and queues it in one act, then hands the analyst
+ * to the run monitor. Nothing is held open: section 3 requires that work
+ * continues whether or not the browser stays open, so the response a submit
+ * returns is the queued run, never the loss calculation.
  */
 
-import { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
-import { useExposureVersions, useModelCatalogue, usePlatformInfo } from "@/api/hooks";
+import { ApiError } from "@/api/client";
+import {
+  useCreateAnalysis,
+  useExposureVersions,
+  useModelCatalogue,
+  usePlatformInfo,
+  useSubmitAnalysis,
+} from "@/api/hooks";
 import type { PerspectiveKey } from "@/api/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -25,6 +38,7 @@ import {
   Notice,
   PageHeader,
   Select,
+  TextInput,
 } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
 import { formatCount, formatMoney } from "@/lib/format";
@@ -40,9 +54,16 @@ interface Precondition {
 
 export function AnalysisBuilder() {
   const context = useWorkingContext();
+  const navigate = useNavigate();
   const { data: exposures } = useExposureVersions(context.projectId);
   const { data: models } = useModelCatalogue();
   const { data: platform } = usePlatformInfo();
+
+  const create = useCreateAnalysis();
+  const submit = useSubmitAnalysis();
+
+  const [label, setLabel] = useState("");
+  const [profile, setProfile] = useState("");
 
   const exposure = exposures?.find((item) => item.id === context.exposureId);
   const model = models?.find((item) => item.id === context.modelId);
@@ -94,6 +115,29 @@ export function AnalysisBuilder() {
   );
 
   const unmet = preconditions.filter((item) => !item.met);
+  const ready = unmet.length === 0;
+  const busy = create.isPending || submit.isPending;
+  const refusal = (create.error ?? submit.error) as ApiError | null;
+
+  async function submitAnalysis() {
+    if (!ready || !context.projectId || !exposure || !model) return;
+
+    try {
+      const analysis = await create.mutateAsync({
+        project: context.projectId,
+        exposure_version: exposure.id,
+        model_version: model.id,
+        perspectives: [context.perspective],
+        label: label.trim(),
+        execution_profile: profile || undefined,
+      });
+      await submit.mutateAsync(analysis.id);
+      navigate(`/runs/${analysis.run}`);
+    } catch {
+      // The refusal is already on the mutation and rendered above. Swallowing
+      // it here keeps a governance answer from being reported as a crash.
+    }
+  }
 
   return (
     <>
@@ -101,6 +145,15 @@ export function AnalysisBuilder() {
         title="Analysis builder"
         description="Select what the run will use, confirm the preconditions, then submit. Every setting comes from the approved model rather than a hand-edited engine file."
       />
+
+      {refusal ? (
+        <Notice tone="error" title="The run was not submitted">
+          <p>{refusal.message}</p>
+          <p className="muted">
+            Nothing was queued, and no partial run was left behind.
+          </p>
+        </Notice>
+      ) : null}
 
       <div className="builder">
         <Card title="What this run will use">
@@ -170,14 +223,33 @@ export function AnalysisBuilder() {
             htmlFor="builder-profile"
             hint="Declared limits, so one large job cannot exhaust the host."
           >
-            <Select id="builder-profile" defaultValue={platform?.default_execution_profile}>
-              {Object.entries(platform?.execution_profiles ?? {}).map(([key, profile]) => (
+            <Select
+              id="builder-profile"
+              value={profile || (platform?.default_execution_profile ?? "")}
+              onChange={(event) => setProfile(event.target.value)}
+            >
+              {Object.entries(platform?.execution_profiles ?? {}).map(([key, item]) => (
                 <option key={key} value={key}>
-                  {key} — {profile.cpu} CPU, {profile.memory_gb} GB,{" "}
-                  {Math.round(profile.timeout_seconds / 3600)}h limit
+                  {key} — {item.cpu} CPU, {item.memory_gb} GB,{" "}
+                  {Math.round(item.timeout_seconds / 3600)}h limit
                 </option>
               ))}
             </Select>
+          </Field>
+
+          <Field
+            label="Run name"
+            htmlFor="builder-label"
+            hint="What this run is for, in the words you would use to find it again. The portfolio and version are used if you leave it blank."
+          >
+            <TextInput
+              id="builder-label"
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder={
+                exposure ? `${exposure.name} v${exposure.version}` : "Quarterly baseline"
+              }
+            />
           </Field>
         </Card>
 
@@ -203,15 +275,32 @@ export function AnalysisBuilder() {
             </ul>
 
             <div className="builder__submit">
-              <Button variant="primary" disabled title={submitTitle(unmet.length)}>
+              <Button
+                variant="primary"
+                disabled={!ready || busy}
+                busy={busy}
+                onClick={submitAnalysis}
+                title={
+                  ready
+                    ? "Queue the run and follow it on the run monitor."
+                    : "Resolve the outstanding preconditions first."
+                }
+              >
                 Submit analysis
               </Button>
               <p className="muted builder__submit-note">
                 {unmet.length > 0
                   ? `${unmet.length} precondition(s) outstanding.`
-                  : "Submission is enabled once the Oasis adapter lands in phase 2 of the roadmap."}
+                  : "The run is queued in the background. You do not have to keep this page open."}
               </p>
             </div>
+
+            {ready && model?.is_research_prototype ? (
+              <Notice tone="warning" title="This run will produce research output">
+                {model.reference} is a research prototype. The result will be marked so
+                it cannot be used for a pricing, capital or underwriting decision.
+              </Notice>
+            ) : null}
           </Card>
 
           {exposure ? (
@@ -256,9 +345,3 @@ const DEFAULT_PERSPECTIVES = [
     reason: "",
   },
 ];
-
-function submitTitle(unmetCount: number): string {
-  return unmetCount > 0
-    ? "Resolve the outstanding preconditions first."
-    : "Analysis submission arrives with the Oasis adapter.";
-}

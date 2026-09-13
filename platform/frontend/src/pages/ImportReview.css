@@ -180,3 +180,49 @@
   margin: 2px 0 0;
   color: var(--grey-700);
 }
+
+/* The promotion form: assumptions chosen side by side, because they are read
+   together -- a cohort and an allocation only make sense against each other. */
+.promotion__form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+/* Allocation scenarios: whether the split assumption is economically live. */
+.scenarios__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.scenarios__interpretation {
+  margin: var(--space-3) 0 0;
+}
+
+.scenarios__businesses {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* One business reads as a sentence: whether the assumption is live, which
+   business, how much rides on it, and why. Wrapping keeps that order at
+   narrow widths instead of breaking the reason away from its subject. */
+.scenarios__business {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+.scenarios__business:last-child {
+  border-bottom: none;
+}
