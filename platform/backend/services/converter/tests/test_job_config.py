@@ -248,6 +248,28 @@ def test_a_short_event_set_is_a_warning_rather_than_a_refusal(published):
     assert "10 years" in warning.message
 
 
+def test_the_paths_a_run_samples_count_towards_the_span_it_covers(published):
+    """Twenty paths of one fifty-year set is a thousand years, not fifty.
+
+    The years of a pooled catalogue run across every path it sampled (ADR 18),
+    so a run configured the way CASS configures one is not a short event set --
+    and telling an operator it covered fifty years would send them to raise the
+    event set count twenty-fold for a span they already had.
+    """
+    pooled = (
+        published.set("calculation_mode", "event_based")
+        .set("ground_motion_fields", True)
+        .set("investigation_time", 50)
+        .set("ses_per_logic_tree_path", 1)
+        .set("number_of_logic_tree_samples", 20)
+    )
+    assert pooled.effective_time == 1000
+    problems = job_config.validate(pooled)
+    assert not [
+        item for item in problems if "years" in item.message and "covers" in item.message
+    ]
+
+
 def test_truncating_variability_low_warns_about_the_tail(published):
     problems = job_config.validate(published.set("truncation_level", 2))
     assert any(

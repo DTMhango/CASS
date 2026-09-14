@@ -580,12 +580,21 @@ class JobConfig:
 
     @property
     def effective_time(self) -> float | None:
-        """Years the event set covers, where both halves are set."""
+        """Years the event set covers, where the factors are set.
+
+        Three factors, not two: sampled paths are pooled into one catalogue
+        whose years run across all of them (ADR 18), so twenty paths of one
+        fifty-year set span a thousand years. Zero samples means enumeration,
+        which is refused elsewhere and counted as one path here rather than
+        collapsing the span to nothing.
+        """
         investigation = _number(self.get("investigation_time"))
         sets = _number(self.get("ses_per_logic_tree_path"))
         if investigation is None or sets is None:
             return None
-        return investigation * sets
+        samples = _number(self.get("number_of_logic_tree_samples"))
+        paths = samples if samples is not None and samples >= 1 else 1
+        return investigation * sets * paths
 
     def measures(self) -> tuple[str, ...]:
         """The intensity measures this configuration produces, whichever way
