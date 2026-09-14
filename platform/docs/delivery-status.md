@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 2,055 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 2,061 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
@@ -180,7 +180,28 @@ run. Production items that serve only a governed deployment are not pursued
   (no split value) 0.904 of the engine's average annual loss, with heights
   withheld (7.2% split) 1.032, and as commercial buildings of unknown height
   (all value split) 0.968. The stated book reproduced its earlier ratio exactly,
-  so the change leaves a class of one measure untouched.
+  so the change leaves a class of one measure untouched. The study's model
+  version, `id-qeq-0.1.0-study21`, is what the worker now serves: one package is
+  served at a time ([ADR 9](adr/0009-cass-writes-the-oasis-package.md)), so a run
+  against the earlier Indonesian version needs its package built again.
+- The realisation-weighting rule was decided against the published model's own
+  answer (item 22, [ADR 18](adr/0018-sampled-paths-pooled-as-one-catalogue.md)).
+  PuSGeN 2024 was run over 12 sites of the pilot region as a classical
+  calculation enumerating all 1,080 realisations — the weighted mean the model
+  states, 79 seconds — and then event-based over the same 2,000 simulated years
+  along 1, 5 and 20 sampled paths. Median ratio to that mean at the 100-year
+  return period: 1.198, 0.836, 1.237 and 0.988 for one path under four seeds,
+  1.031 for five paths, and 0.952 and 0.927 for twenty under two seeds. Every
+  arm took between 131 and 188 seconds. With one path the 1,000-year point was
+  undefined at up to 15 of the 36 site-measures; with twenty it was defined at
+  33 to 36.
+- The footprint storage format was decided at national scale (item 23,
+  [ADR 19](adr/0019-footprint-stays-a-ktools-binary.md)). The regional footprint
+  was repeated across 52,831 cells, labelled synthetic, and the same book run
+  through three formats: the ktools binary at 9,494 MB, built in 44s and read in
+  17s; compressed binary at 2,366 MB, 710s and 18s; Parquet at 2,566 MB, 296s
+  and 22s. All three produced the same loss to the cent, 570,652.25
+  analytically, which is also what the live run of that book produced.
 - The event representation was decided on the live event set (item 26,
   [ADR 17](adr/0017-an-oasis-event-is-a-simulated-occurrence.md)). The deployed
   package was rebuilt with every rupture's occurrences pooled into one event and
@@ -204,7 +225,7 @@ run. Production items that serve only a governed deployment are not pursued
 | --- | --- | --- | --- |
 | M1 Foundation | Met | Sign in, projects, OED attach, validation, preview, publication, background runs | — |
 | M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
-| M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; a full-country run; a realisation-weighting rule (item 22). Nepal acquires no hazard: it was a test country and Indonesia is covered |
+| M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery; the realisation-weighting rule decided and built ([ADR 18](adr/0018-sampled-paths-pooled-as-one-catalogue.md)) | Approved benchmark curves; a full-country run; an Indonesian hazard set rebuilt under the new weighting, since the one in use is the single path it was run on. Nepal acquires no hazard: it was a test country and Indonesia is covered |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances |
 | M5 Loss | Met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled, shown, and built on the platform | — |
 | M6 Product | Met | Result approval, export, two-result comparison, EP curve chart, event loss table, loss by area-peril cell with its map, scenario ranges across assumption sets, and the financial structure workspace | — |
@@ -295,7 +316,7 @@ reviewed research result, not a basis for pricing or reserving.
 | Model package | Binaries compiled with Oasis tools | Written by CASS, byte-checked against PiWind, CASS lookup inside | [ADR 9](adr/0009-cass-writes-the-oasis-package.md) |
 | Engine images | Unmodified upstream | Oasis worker patched at build time; OpenQuake unmodified | [ADR 10](adr/0010-patched-oasis-worker.md) |
 | Portfolio intake | Two-sheet extract; role-gated names; cedant segmentation | Intake template joined on Policy ID; no role gate; no cedant | [ADR 11](adr/0011-intake-template-and-policy-id.md) |
-| Hazard source | GEM source models | PuSGeN 2024 converted to event-based, one sampled path | [ADR 12](adr/0012-national-classical-model-run-event-based.md) |
+| Hazard source | GEM source models | PuSGeN 2024 converted to event-based, twenty sampled logic-tree paths pooled as one catalogue | [ADR 12](adr/0012-national-classical-model-run-event-based.md), [ADR 18](adr/0018-sampled-paths-pooled-as-one-catalogue.md) |
 | Navigation | One screen per sidebar entry | Models and Exposure areas with tabs | [ADR 13](adr/0013-product-areas-hold-tabs.md) |
 | Assumption sets | Enrichment applied to exposure | Re-weighted mixtures carried as vulnerability sets the engine selects per analysis; no value moves; pilot tilts are draft | [ADR 14](adr/0014-assumption-sets-as-vulnerability-sets.md) |
 
@@ -325,8 +346,8 @@ reviewed research result, not a basis for pricing or reserving.
 | 19 | CI: Oasis worker image build and the integration workflow | §17 | Done: CI builds the patched Oasis worker beside the other images, so raising the upstream version past the patched defect fails the build; it is the one image not scanned, because its findings are the upstream image's. A separate integration workflow runs on demand and weekly: it fetches GEM's exposure and vulnerability models at the commits the model manifest pins, runs the integration suite, and lists what it skipped for data CI cannot have — the national hazard package, an OpenQuake datastore, a live Oasis. The portfolio workbook never enters CI, and a deployment test refuses a workflow that names it. Neither workflow has run on GitHub yet: both parse, and reading the pinned commits from the manifest was run locally. SBOMs for releases stay dropped |
 | 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Done: every image the compose file pulls from a registry is pinned by digest as well as tag — `openquake/engine:3.23` among them, a minor-version tag that would otherwise move — and each pinned reference resolves to the image the installation already runs. Every base a CASS build starts from is pinned the same way, the patched Oasis worker's included; those digests were read from the registry, and no image has been rebuilt from them yet. The images this repository builds are not pinned, because their digest changes with every build: a run records the engine version and, where the deployment exposes it, the image digest it ran on. A deployment test refuses an unpinned image. The signed release bundle stays dropped |
 | 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Done, and decided in [ADR 16](adr/0016-multi-measure-classes-as-sub-peril-channels.md): a class spanning measures is carried as one earthquake sub-peril item per measure, each answered by its channel's function scaled by the channel's share, with the terms the engine receives scoped to all earthquake perils. Under the old refusal the 30 June benchmark book could not be modelled at all — it states no storey counts, so every class it reaches spans all four measures. On the live engine the split items add back to the class to under a cent per event and honour the location terms exactly; without the wider peril scope the insured loss was 40% too high, silently. Against the OpenQuake reference the book carried entirely this way is at 0.968 of the engine's average annual loss, inside the spread the book of stated heights shows (0.904, and 0.70–1.26 across return periods), and the stated book reproduced its earlier ratio exactly. A set is now built this way unless its specification asks for undecided. The plan, the numbers and what they do not settle are in [the decision studies](research/decision-studies.md) |
-| 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Not started. The hazard behind every Indonesian loss is one sampled path until it is decided ([ADR 12](adr/0012-national-classical-model-run-event-based.md)) |
-| 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |
+| 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Done, and decided in [ADR 18](adr/0018-sampled-paths-pooled-as-one-catalogue.md): a run samples twenty paths and pools them as one catalogue of the same thousand simulated years, and an enumerated tree stays refused because its branches carry unequal weights. Measured against the published model's own weighted mean over 12 sites, enumerating all 1,080 realisations: one sampled path landed between 0.84 and 1.24 of it across four draws, five paths at 1.03, and twenty paths at 0.95 and 0.93 — for the same run time, because the work follows the simulated years rather than the number of views they are drawn across. With one path the 1,000-year return period was undefined at up to 15 of 36 site-measures; with twenty, at none or few. CASS now reads the realisations' weights, pools equally weighted paths, counts their years, and refuses a tree whose weights differ. The hazard behind existing Indonesian results is still the one path they were run on |
+| 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Done, and decided in [ADR 19](adr/0019-footprint-stays-a-ktools-binary.md): the ktools binary stays, with compressed binary measured and held in reserve and Parquet rejected. The regional footprint was repeated across Indonesia's 52,831 cells — the same shaking at the size of a country — and the same book run through each format: binary 9,494 MB built in 44s and read in 17s, compressed 2,366 MB in 710s and 18s, Parquet 2,566 MB in 296s and 22s, and all three returned the same loss to the cent. Compression is four times smaller at no read cost, and at a faster setting takes about a minute rather than twelve; it is adopted when a deployment cannot hold a national package, which needs no further study |
 | 24 | Build an area-peril grid on the platform, for any country, from a written specification | §6 | Done: a specification — tiles, a base resolution, named refinements and the reason for each — is posted to `/grids/build/`, generated through the same builder the prototypes use, and registered as a draft with its cells. A specification that would exceed the installation's cell limit is refused with its own count, before anything is generated. The prototypes now go through the same registration, and the Build tab carries the form |
 | 25 | Build a vulnerability set for any country GEM covers | §6, §8 | Done: the catalogue is read from the release on the installation, and the enrichment — the design eras, each with its reason — is posted with it rather than compiled in. The set's version follows the enrichment, because the enrichment is the assumption behind every function. An era table that is out of order, ends before today, or names a design level GEM does not use is refused |
 | 26 | Event representation study: build one calculation both ways, compare each against the OpenQuake reference, and decide | §6, §16 | Done, and decided in [ADR 17](adr/0017-an-oasis-event-is-a-simulated-occurrence.md): an Oasis event is one simulated occurrence, and rupture binning is not built. The catalogue settles most of it — 27,313 occurrences of 26,651 ruptures over 1,000 years, 97.7% of them occurring exactly once, so for those the two representations are the same table. The deployed package was rebuilt with the remaining 617 ruptures' occurrences pooled and the same book run through both: the average annual loss moved 0.04%, the annual-loss spread narrowed 2.1%, the 100-year loss thinned 6.2%, the 500- and 1,000-year losses were identical, and neither footprint size nor run time changed. Pooling also needs an approximation occurrence per event does not, because a footprint cannot say that an occurrence did not reach a cell. The numbers are in [the decision studies](research/decision-studies.md) |
@@ -390,6 +411,17 @@ machinery around one, the decision still has to be taken.
   rule, the footprint storage format and the event representation (items 21,
   22, 23 and 26), measures them on the platform, and decides with the evidence
   written down in plain terms. They are not waiting on a reviewer's judgement.
+- **The realisation-weighting rule.** Decided, on the platform's own
+  measurements ([ADR 18](adr/0018-sampled-paths-pooled-as-one-catalogue.md)): a
+  hazard run samples twenty paths through the logic tree and pools them as one
+  catalogue, and an enumerated tree stays refused. One path was a lottery of
+  roughly ±20% against the model's own weighted mean, and twenty cost the same
+  to run.
+- **The footprint storage format.** Decided
+  ([ADR 19](adr/0019-footprint-stays-a-ktools-binary.md)): the ktools binary
+  stays, compression is measured and held in reserve, and Parquet is rejected.
+  At national scale every format gave the same loss to the cent, so the choice
+  is disk and build time rather than the answer.
 - **The event representation.** Decided, on the platform's own measurements
   ([ADR 17](adr/0017-an-oasis-event-is-a-simulated-occurrence.md)): an Oasis
   event is one simulated occurrence, and rupture binning is not built. In this

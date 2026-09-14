@@ -299,6 +299,52 @@ periods, together with compute time.
 of the weighted mean at the reporting return periods. The converter then accepts
 sampled paths as one equally weighted catalogue.
 
+### Measured 14 September 2026
+
+The published model was run over 12 sites in the Jakarta–Bandung region: once as
+a classical calculation enumerating all 1,080 realisations — the weighted mean
+the model states, 79 seconds — and then event-based, each arm covering the same
+2,000 simulated years.
+
+Median ratio of the sampled hazard to that weighted mean, over 36 site-measures:
+
+| Arm | 100-year | 475-year | 1,000-year | Run |
+| --- | --- | --- | --- | --- |
+| 1 path, seed 23 | 1.198 | 1.193 | 1.156 | 150s |
+| 1 path, seed 101 | 0.836 | 0.826 | 0.844 | 153s |
+| 1 path, seed 202 | 1.237 | 1.158 | 1.069 | 139s |
+| 1 path, seed 303 | 0.988 | 1.008 | 1.042 | 131s |
+| 5 paths | 1.031 | 0.982 | 1.049 | 164s |
+| 20 paths, seed 23 | 0.952 | 0.943 | 0.974 | 167s |
+| 20 paths, seed 101 | 0.927 | 0.895 | 0.908 | 188s |
+
+With one path the 1,000-year return period was undefined at 9 to 15 of the 36
+site-measures, because that one path's catalogue never reached such a loss; with
+twenty paths it was defined at 33 to 36.
+
+### Decision
+
+**Sample twenty paths and pool them as one catalogue**
+([ADR 18](../adr/0018-sampled-paths-pooled-as-one-catalogue.md)).
+
+In plain terms: the hazard model is not one opinion but about a thousand, each
+with a weight, and its published answer is their weighted average. CASS used to
+pick one at random and model that. Which one it picked mattered: across four
+draws the hazard came out between 16% below and 24% above the model's own
+answer. Drawing twenty and using them all landed within 8% both times, filled in
+the rare losses a single draw never produced, and cost the same — the work
+depends on how many years you simulate, not how many views you spread them
+across.
+
+Enumerating every branch stays refused, and for a reason worth stating: the
+branches carry different weights, and an Oasis event set has no way to say one
+event is likelier than another. Sampling sidesteps that, because a path is drawn
+as often as its weight says it should be.
+
+What it does not settle: 12 sites of one region, one source model, one or two
+draws per arm. It says one path is a lottery of roughly ±20% on this model, not
+that twenty paths have converged.
+
 ## 4. How a footprint is stored for the engine (item 23)
 
 **The question, plainly.** A footprint is the table of shaking for every event,
@@ -317,6 +363,44 @@ loss run time and peak memory, and confirm the losses are identical.
 
 **What decides it.** Among the formats that give identical losses, the one with
 the smallest run-time cost at national scale; size breaks a tie.
+
+### Measured 14 September 2026
+
+The same book through each format, at three scales. National scale is the
+regional footprint's rows repeated across Indonesia's 52,831 cells, labelled
+synthetic: the same shaking, the size of a country.
+
+| Scale | Format | Size | Build | Loss run |
+| --- | --- | --- | --- | --- |
+| Region, 858 cells | binary | 154 MB | — | 16s |
+| | compressed | 40 MB | 7s | 16s |
+| | Parquet | 107 MB | 50s | 30s |
+| A third of Indonesia | binary | 3,063 MB | 18s | 14s |
+| | compressed | 765 MB | 283s | 21s |
+| | Parquet | 866 MB | 170s | 23s |
+| Indonesia, 52,831 cells | binary | 9,494 MB | 44s | 17s |
+| | compressed | 2,366 MB | 710s | 18s |
+| | Parquet | 2,566 MB | 296s | 22s |
+
+Every format returned the same loss to the cent, which is what makes this a
+storage choice rather than a modelling one. The build times compress at the
+slowest setting; at a middling one a national footprint compresses in about
+three and a half minutes, and at the fastest in about one, for 27% of the
+binary's size rather than 24.5%.
+
+### Decision
+
+**The binary stays, and compression is the measured reserve**
+([ADR 19](../adr/0019-footprint-stays-a-ktools-binary.md)).
+
+In plain terms: how the footprint is stored changes nothing about the answer —
+all three gave the same loss to the cent. It changes disk and build time. The
+compressed form is four times smaller and just as fast to read, but writing it
+means a second binary format in CASS, and at 9.5 GB for a whole country disk is
+not what CASS is short of. So the decision is to keep the simple format, record
+exactly what compression would buy, and switch when a deployment actually cannot
+hold a national package. Parquet is out: bigger than the compressed form, slower
+to read, and a directory of 27,313 files.
 
 ## Why this order
 
