@@ -343,6 +343,26 @@ def test_a_storey_count_that_is_not_a_number_is_read_as_unstated():
     assert building.vulnerability_id == 1
 
 
+def test_a_storey_count_of_zero_is_read_as_unstated():
+    """OED's default for the field, and what oasislmf writes where CASS left it blank.
+
+    The engine's lookup reads the row after oasislmf has filled its defaults, so
+    reading 0 as a height would fail every risk without one in the engine and
+    answer it in CASS -- two lookups over one book disagreeing about every row.
+    """
+    banded = mapping(
+        entry(1, **band("unstated", None, None)),
+        entry(2, **band("low", 1, 3)),
+    )
+    for stated in ("0", 0):
+        result = lookup(
+            [location(NumberOfStoreys=stated)], grid=GRID, vulnerability=banded
+        )
+        building = next(item for item in result.records if item.coverage_type == 1)
+        assert building.status is KeyStatus.SUCCESS
+        assert building.vulnerability_id == 1
+
+
 def test_the_result_records_which_representation_answered_it():
     """A keys file has to be readable without finding the registry record."""
     result = lookup([location()], grid=GRID, vulnerability=spanning())

@@ -707,13 +707,20 @@ def read_storeys(value: Any) -> int | None:
     that -- and the safe reading of an uninterpretable height is that the
     height is unknown, which widens the mixture rather than narrowing it to
     the wrong band.
+
+    Zero is not stated either. It is OED's default for the field, and oasislmf
+    fills a blank with it before the engine's lookup sees the row, so a schedule
+    CASS wrote blank arrives in the engine as 0. Read as a height, it is one no
+    band covers, and every risk without a storey count fails there while CASS's
+    own keys answer it.
     """
     if value is None or value == "":
         return None
     try:
-        return int(str(value).strip())
+        storeys = int(str(value).strip())
     except (TypeError, ValueError):
         return None
+    return None if storeys == 0 else storeys
 
 
 def lookup(
