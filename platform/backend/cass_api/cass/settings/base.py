@@ -199,6 +199,11 @@ CASS_DEFAULT_EXECUTION_PROFILE = env("CASS_DEFAULT_EXECUTION_PROFILE", "standard
 #: so rather than reporting an empty catalogue.
 CASS_GEM_ROOT = env("CASS_GEM_ROOT", "")
 
+#: Where the folder on the user's device that holds their GEM clones appears
+#: inside the containers. The compose file mounts CASS_MODELS_PATH here, and the
+#: Build tab lists every GEM release it can see beneath it.
+CASS_MODELS_ROOT = env("CASS_MODELS_ROOT", "/models")
+
 #: The largest grid this installation will build from a specification. Cell
 #: count is quadratic in resolution: Indonesia at 0.1 degrees is 52,831 cells
 #: and at 0.01 it is five million, which is a hazard calculation nobody asked

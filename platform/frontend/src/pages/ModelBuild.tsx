@@ -44,6 +44,7 @@ import {
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 
 import { AssembleModelVersion } from "./AssembleModelVersion";
+import { GemReleaseCard } from "./GemReleaseCard";
 import { GridBuilder } from "./GridBuilder";
 import { VulnerabilitySetBuilder } from "./VulnerabilitySetBuilder";
 
@@ -141,6 +142,7 @@ export function ModelBuild({ embedded = false }: { embedded?: boolean } = {}) {
       {session?.user?.capabilities.publish_models ? (
         <>
           <GridBuilder />
+          <GemReleaseCard />
           <VulnerabilitySetBuilder />
           <AssembleModelVersion />
         </>

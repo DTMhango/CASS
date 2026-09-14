@@ -27,6 +27,7 @@ import type {
   GridSpecificationInput,
   VulnerabilityBuildResult,
   GeocodingSensitivity,
+  GemReleaseStatus,
   GeographicSummary,
   ScenarioRange,
   VulnerabilitySetSummary,
@@ -622,6 +623,33 @@ export function useAssembleModelVersion() {
 }
 
 /** Which countries the GEM release on this installation covers. */
+/** The GEM release this installation builds from, and the releases it can see on the device. */
+export function useGemRelease() {
+  return useQuery({
+    queryKey: ["gem-release"] as const,
+    queryFn: () => api.get<GemReleaseStatus>("/vulnerability-sets/gem-release/"),
+    retry: false,
+  });
+}
+
+/**
+ * Choose the folder vulnerability sets are built from.
+ *
+ * The server checks it is a GEM release before keeping it, so the countries it
+ * lists are read again from whatever was chosen.
+ */
+export function useChooseGemRelease() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string) =>
+      api.post<GemReleaseStatus>("/vulnerability-sets/gem-release/choose/", { path }),
+    onSuccess: (status) => {
+      client.setQueryData(["gem-release"], status);
+      client.invalidateQueries({ queryKey: ["gem-countries"] });
+    },
+  });
+}
+
 export function useGemCountries() {
   return useQuery({
     queryKey: ["gem-countries"] as const,

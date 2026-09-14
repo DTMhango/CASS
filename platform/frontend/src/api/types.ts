@@ -809,6 +809,36 @@ export interface VulnerabilitySetSummary {
   publication_state: string;
 }
 
+/** What a folder on the installation holds, read from the folder itself. */
+export interface GemReleaseInspection {
+  path: string;
+  usable: boolean;
+  release: string;
+  matches_validated: boolean;
+  validated_release: string;
+  countries: number;
+  repositories: {
+    name: string;
+    present: boolean;
+    commit: string;
+    tags: string[];
+    matches_validated: boolean;
+  }[];
+  problems: string[];
+  notes: string[];
+}
+
+/** The GEM release builds read from, where it came from, and what else is on the device. */
+export interface GemReleaseStatus {
+  source: "chosen" | "installation setting" | "none";
+  path: string;
+  chosen_at: string | null;
+  current: GemReleaseInspection | null;
+  mount: string;
+  discovered: GemReleaseInspection[];
+  validated_release: string;
+}
+
 /** One country a GEM release publishes vulnerability functions for. */
 export interface GemCountry {
   region: string;

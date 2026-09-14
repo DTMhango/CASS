@@ -826,3 +826,27 @@ class AssumptionSet(BaseModel, FreezableModel):
     @property
     def reference(self) -> str:
         return f"{self.flavour}-{self.version}"
+
+
+class GemReleaseLocation(BaseModel):
+    """Where this installation reads GEM's models from, as somebody chose it.
+
+    CASS does not carry GEM's release: the person running it keeps a clone on
+    their own device and points CASS at it. Each choice is a record rather than
+    an overwrite, so the release a vulnerability set was built from can be
+    traced to when it was chosen and by whom.
+    """
+
+    path = models.CharField(max_length=1024)
+    release = models.CharField(max_length=64, blank=True)
+    matches_validated = models.BooleanField(
+        default=False,
+        help_text="Whether both repositories were at the commits CASS was validated against.",
+    )
+    inspection = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"GEM release {self.release or self.path}"

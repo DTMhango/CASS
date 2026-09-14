@@ -23,12 +23,12 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 2,009 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 2,026 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
   specifications and an OpenQuake datastore the engine wrote.
-  137 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  140 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -77,6 +77,14 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- The live installation had no GEM release configured, so building a
+  vulnerability set from the Build tab was refused there. With the release
+  location now chosen on the platform, the installation found
+  `/models/gem/v2026.0.0` under the folder mounted from the device, read both
+  repositories as tagged v2026.0.0 at exactly the commits CASS was validated
+  against, and reported 215 countries. Choosing it took no environment change
+  and no restart, and the GEM country catalogue that had been refused listed all
+  215.
 - A financial structure was built on the live stack through the builder's API
   and run through the engine. The Jakarta–Bandung book's 64 locations were taken
   into a new portfolio labelled "Structure builder live check", given a policy on
@@ -302,7 +310,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 28 | A run on a country built on the platform is described under the enrichment its vulnerability set was built under | §5, §8 | Done: the enrich stage looked the enrichment up among the compiled-in pilots by country code, so a run on any other country recorded its lineage under an empty enrichment and no year could derive a design level. It now reads the enrichment each assumption set's functions were built under from the set's own provenance dictionary. A set registered before the dictionary recorded it is described as before, and a record that cannot be read stops the run at enrich rather than being passed over |
 | 29 | The OpenQuake reference comparison, for a country built on the platform | WP4, §16 | Done: the comparison found GEM's functions for a run's country through a table of the two pilots, so it refused any other country — and it is the measurement items 21 and 26 rest on. A vulnerability set's dictionary now records where GEM publishes its country, the comparison reads GEM's functions from there, and a set registered before that record is found through the table as before |
 | 32 | Say that the reinsurance perspective is the loss net of reinsurance | §9 | Done: Oasis's `ri` stream is the loss retained after every inuring priority (oasislmf documents it as "reinsurance net loss"), and CASS had labelled it "Reinsurance loss", which reads as the ceded amount. It is now "Loss net of reinsurance" on results, comparisons, the analysis builder, the context bar and the exposure workspace, and the ceded amount is the insured loss less it |
-| 31 | Point CASS at the GEM release on the user's own device, and check it | §6 | Not started. The release is not bundled; the location is set on the platform, validated against GEM's repository layout, and the release it holds is reported |
+| 31 | Point CASS at the GEM release on the user's own device, and check it | §6 | Done: the release is not bundled. The person running CASS keeps GEM's two repositories on their own device, in the models folder the installation mounts (`CASS_MODELS_PATH`), and the Build tab lists every release it finds there and lets one be chosen, with no environment file to edit and no restart. A folder is checked before it is kept — both repositories in GEM's published layout, the world exposure-to-vulnerability mapping, and at least one country's functions — and the commit and tags of each repository are read from its own git metadata, so the card says which release it is and whether it is the v2026.0.0 CASS was validated against. Each choice is kept as a record; `CASS_GEM_ROOT` still applies until anybody chooses |
 | 30 | Remove the Nepal prototype | — | Done: the compiled-in Nepal grid, enrichment and GEM location are gone, now that a grid, a vulnerability set and a model version can be built on the platform for any country. The 30 June book still carries Nepali business, so the tests that map it build Nepal from a written grid specification, and the acceptance tests against GEM's published Nepal data use a written enrichment — the path somebody working on a country now takes. KRE's own Nepal policies are untouched |
 
 ## Needs a decision or outside input

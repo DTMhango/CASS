@@ -6233,6 +6233,59 @@ paths:
               schema:
                 $ref: '#/components/schemas/GemCatalogue'
           description: ''
+  /api/v1/vulnerability-sets/gem-release/:
+    get:
+      operationId: api_v1_vulnerability_sets_gem_release_retrieve
+      description: |-
+        Which GEM release this installation builds from, and which releases it can see.
+
+        The release is not bundled: it is the clone on the user's own device,
+        mounted into the installation. Each folder is read for its repository
+        layout and the commits it is at, so the screen can say which release it
+        is and whether it is the one CASS was validated against.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/vulnerability-sets/gem-release/choose/:
+    post:
+      operationId: api_v1_vulnerability_sets_gem_release_choose_create
+      description: Choose the folder vulnerability sets are built from, refusing one
+        that is not a release.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GemReleaseChoiceRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GemReleaseChoiceRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GemReleaseChoiceRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /health/:
     get:
       operationId: health_retrieve
@@ -7638,6 +7691,14 @@ components:
       required:
       - countries
       - release
+    GemReleaseChoiceRequest:
+      type: object
+      properties:
+        path:
+          type: string
+          minLength: 1
+      required:
+      - path
     GridBuildResult:
       type: object
       properties:

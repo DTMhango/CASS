@@ -9,7 +9,6 @@ may be used for decisions and what is blocking publication.
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
@@ -26,7 +25,7 @@ from apps.modelregistry.assets import ModelAssetError, load_grid
 from apps.runs.models import HazardRun, Run, RunKind
 from cass_converter import gem as gem_release
 
-from . import assembly, grid_build, hazard_models, quality
+from . import assembly, gem_location, grid_build, hazard_models, quality
 from . import gem as gem_registry
 from . import hazard as hazard_registry
 from .models import (
@@ -241,24 +240,16 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
         compiled-in list would be wrong the first time GEM published another
         country, which is exactly when somebody would be looking at it.
         """
-        if not settings.CASS_GEM_ROOT:
+        root = gem_location.current_root()
+        if not root:
             return Response(
-                {
-                    "detail": (
-                        "No GEM release is configured on this installation, so there "
-                        "is nothing to build a vulnerability set from. Set "
-                        "CASS_GEM_ROOT to the release root."
-                    )
-                },
-                status=status.HTTP_409_CONFLICT,
+                {"detail": gem_location.NOT_CONFIGURED}, status=status.HTTP_409_CONFLICT
             )
         try:
-            countries = gem_release.catalogue(settings.CASS_GEM_ROOT)
+            countries = gem_release.catalogue(root)
         except gem_release.GemError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(
-            {"release": str(settings.CASS_GEM_ROOT), "countries": list(countries)}
-        )
+        return Response({"release": root, "countries": list(countries)})
 
     @extend_schema(
         request=inline_serializer(
@@ -287,19 +278,14 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
         is stated here rather than compiled in. The candidate sets and weights
         remain GEM's.
         """
-        if not settings.CASS_GEM_ROOT:
+        root = gem_location.current_root()
+        if not root:
             return Response(
-                {
-                    "detail": (
-                        "No GEM release is configured on this installation. Set "
-                        "CASS_GEM_ROOT to the release root before building."
-                    )
-                },
-                status=status.HTTP_409_CONFLICT,
+                {"detail": gem_location.NOT_CONFIGURED}, status=status.HTTP_409_CONFLICT
             )
         try:
             vulnerability_set, built = gem_registry.register_from_specification(
-                request.data, root=settings.CASS_GEM_ROOT, actor=request.user
+                request.data, root=root, actor=request.user
             )
         except gem_registry.GemRegistrationError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -326,6 +312,53 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"], url_path="gem-release")
+    def gem_release_status(self, request, version=None):
+        """Which GEM release this installation builds from, and which releases it can see.
+
+        The release is not bundled: it is the clone on the user's own device,
+        mounted into the installation. Each folder is read for its repository
+        layout and the commits it is at, so the screen can say which release it
+        is and whether it is the one CASS was validated against.
+        """
+        return Response(gem_location.status())
+
+    @extend_schema(
+        request=inline_serializer(
+            name="GemReleaseChoice", fields={"path": serializers.CharField()}
+        ),
+        responses=OpenApiTypes.OBJECT,
+    )
+    @action(detail=False, methods=["post"], url_path="gem-release/choose")
+    def choose_gem_release(self, request, version=None):
+        """Choose the folder vulnerability sets are built from, refusing one that is not a release."""
+        try:
+            record = gem_location.choose(request.data.get("path"), actor=request.user)
+        except gem_location.GemLocationError as exc:
+            return Response(
+                {
+                    "detail": "That folder is not a GEM release CASS can build from.",
+                    "problems": exc.problems,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit.record(
+            action=AuditAction.UPDATE,
+            subject_type="gem_release",
+            subject_id=record.id,
+            actor=request.user,
+            subject_label=str(record),
+            request=request,
+            after={
+                "path": record.path,
+                "release": record.release,
+                "matches_validated": record.matches_validated,
+            },
+            detail=f"Chose the GEM release at {record.path}.",
+        )
+        return Response(gem_location.status())
 
 
 class AssumptionSetViewSet(viewsets.ModelViewSet):

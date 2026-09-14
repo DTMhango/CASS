@@ -214,6 +214,16 @@ enrichment, because the enrichment is the assumption behind every function in
 it, and an era table that is out of order or ends before today is refused rather
 than applied.
 
+**GEM's release lives on your device, not in CASS.** The 2026 release is too
+large to carry in the codebase, and it is GEM's to publish. Keep GEM's
+`global_exposure_model` and `global_vulnerability_model` repositories side by
+side in the models folder the installation mounts (`CASS_MODELS_PATH`), cloned
+with git, and choose the release on the Build tab. CASS lists the releases it
+finds, checks each has GEM's layout and the files a build reads, and reads the
+commit each repository is at, so it can say which release it is and whether it
+is the one CASS was validated against. Nobody edits an environment file or
+restarts anything.
+
 **The two halves are assembled into the version a run names.** A grid says where
 a loss can be computed and a vulnerability set says how much damage the shaking
 does; the model version is the pair, and until it exists neither half is
