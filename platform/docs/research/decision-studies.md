@@ -224,6 +224,45 @@ for the study to test, not a finding.
 return periods. A tie goes to occurrence per event, which is simpler and keeps
 the pattern across sites.
 
+### Measured 14 September 2026
+
+The catalogue answers most of the question before any loss is run. The live
+PuSGeN 2024 event set for the Jakarta–Bandung region holds 27,313 occurrences of
+26,651 ruptures over 1,000 simulated years, and 97.7% of those ruptures occur
+exactly once. For them a rupture-binned footprint is the occurrence's own
+footprint: the same table. Only 617 ruptures, covering 4.7% of occurrences, have
+anything to pool.
+
+Pooling them and running the Jakarta–Bandung book through both packages, with
+everything else held the same:
+
+| | Occurrence per event | Rupture-binned |
+| --- | --- | --- |
+| Average annual loss, analytical | 570,652 | 570,854 (+0.04%) |
+| Standard deviation of annual loss | 2,840,652 | 2,781,092 (−2.1%) |
+| 100-year occurrence exceedance loss | 23,121,316 | 21,685,938 (−6.2%) |
+| 25-, 200- and 250-year | — | within 1.2% |
+| 500- and 1,000-year | 49,141,712 and 51,811,376 | identical |
+| Footprint | 153.1 MB over 21,772 events | 152.9 MB over 21,274 events |
+| Loss run | 17s | 17s |
+
+### Decision
+
+**Occurrence per event stays, and rupture binning is not built**
+([ADR 17](../adr/0017-an-oasis-event-is-a-simulated-occurrence.md)).
+
+In plain terms: grouping a rupture's repeats would only matter if ruptures
+repeated, and in a thousand years of this catalogue they almost never do. Where
+it could be applied it left the average untouched, thinned the hundred-year loss
+by 6%, and saved neither space nor time. It also needs an approximation
+occurrence per event does not: a footprint has no way of saying that one
+occurrence did not shake a particular cell at all, so pooling has to assume the
+cell was reached every time.
+
+Worth revisiting if CASS ever simulates a catalogue long enough for ruptures to
+recur often — here there are 1.02 occurrences per rupture, and one event per
+rupture only begins to pay well above that.
+
 ## 3. How the branches of a national hazard model are weighted (item 22)
 
 **The question, plainly.** A national hazard model is not one answer but a logic

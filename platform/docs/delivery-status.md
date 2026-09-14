@@ -181,6 +181,16 @@ run. Production items that serve only a governed deployment are not pursued
   withheld (7.2% split) 1.032, and as commercial buildings of unknown height
   (all value split) 0.968. The stated book reproduced its earlier ratio exactly,
   so the change leaves a class of one measure untouched.
+- The event representation was decided on the live event set (item 26,
+  [ADR 17](adr/0017-an-oasis-event-is-a-simulated-occurrence.md)). The deployed
+  package was rebuilt with every rupture's occurrences pooled into one event and
+  the occurrence table pointing each of them at it, and the Jakarta–Bandung book
+  was run through both packages with the same settings. Average annual loss
+  moved 0.04% (570,652 to 570,854), the spread of annual loss narrowed 2.1%, the
+  100-year occurrence loss thinned 6.2%, the 500- and 1,000-year losses were
+  identical, and both footprints were 153 MB and both runs 17 seconds. The event
+  set holds 27,313 occurrences of 26,651 ruptures, 97.7% of which occur once, so
+  there was almost nothing to pool.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
   optional location field (the nine photovoltaic attributes). Nothing is
@@ -319,7 +329,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |
 | 24 | Build an area-peril grid on the platform, for any country, from a written specification | §6 | Done: a specification — tiles, a base resolution, named refinements and the reason for each — is posted to `/grids/build/`, generated through the same builder the prototypes use, and registered as a draft with its cells. A specification that would exceed the installation's cell limit is refused with its own count, before anything is generated. The prototypes now go through the same registration, and the Build tab carries the form |
 | 25 | Build a vulnerability set for any country GEM covers | §6, §8 | Done: the catalogue is read from the release on the installation, and the enrichment — the design eras, each with its reason — is posted with it rather than compiled in. The set's version follows the enrichment, because the enrichment is the assumption behind every function. An era table that is out of order, ends before today, or names a design level GEM does not use is refused |
-| 26 | Event representation study: build one calculation both ways, compare each against the OpenQuake reference, and decide | §6, §16 | Not started. Occurrence per event is in use and rupture-binned is the alternative; item 9 is how either is measured. It ends in a decision record, not an approval |
+| 26 | Event representation study: build one calculation both ways, compare each against the OpenQuake reference, and decide | §6, §16 | Done, and decided in [ADR 17](adr/0017-an-oasis-event-is-a-simulated-occurrence.md): an Oasis event is one simulated occurrence, and rupture binning is not built. The catalogue settles most of it — 27,313 occurrences of 26,651 ruptures over 1,000 years, 97.7% of them occurring exactly once, so for those the two representations are the same table. The deployed package was rebuilt with the remaining 617 ruptures' occurrences pooled and the same book run through both: the average annual loss moved 0.04%, the annual-loss spread narrowed 2.1%, the 100-year loss thinned 6.2%, the 500- and 1,000-year losses were identical, and neither footprint size nor run time changed. Pooling also needs an approximation occurrence per event does not, because a footprint cannot say that an occurrence did not reach a cell. The numbers are in [the decision studies](research/decision-studies.md) |
 | 27 | Assemble a model version for any country from a built grid and a built vulnerability set | §6 | Done: the two halves are paired at `/model-versions/assemble/` into the draft a run names. A pair from two different countries is refused, because such a version would calculate happily and mean nothing. The scope statement and the limitations are written from the halves rather than typed, so a version's caveats cannot drift from its parts |
 | 28 | A run on a country built on the platform is described under the enrichment its vulnerability set was built under | §5, §8 | Done: the enrich stage looked the enrichment up among the compiled-in pilots by country code, so a run on any other country recorded its lineage under an empty enrichment and no year could derive a design level. It now reads the enrichment each assumption set's functions were built under from the set's own provenance dictionary. A set registered before the dictionary recorded it is described as before, and a record that cannot be read stops the run at enrich rather than being passed over |
 | 29 | The OpenQuake reference comparison, for a country built on the platform | WP4, §16 | Done: the comparison found GEM's functions for a run's country through a table of the two pilots, so it refused any other country — and it is the measurement items 21 and 26 rest on. A vulnerability set's dictionary now records where GEM publishes its country, the comparison reads GEM's functions from there, and a set registered before that record is found through the table as before |
@@ -380,6 +390,11 @@ machinery around one, the decision still has to be taken.
   rule, the footprint storage format and the event representation (items 21,
   22, 23 and 26), measures them on the platform, and decides with the evidence
   written down in plain terms. They are not waiting on a reviewer's judgement.
+- **The event representation.** Decided, on the platform's own measurements
+  ([ADR 17](adr/0017-an-oasis-event-is-a-simulated-occurrence.md)): an Oasis
+  event is one simulated occurrence, and rupture binning is not built. In this
+  catalogue ruptures almost never recur, so pooling them changed the average
+  annual loss by 0.04% and saved neither space nor time.
 - **The multi-IMT representation.** Decided, on the platform's own measurements
   ([ADR 16](adr/0016-multi-measure-classes-as-sub-peril-channels.md)): a class
   spanning intensity measures is carried as one earthquake sub-peril item per
