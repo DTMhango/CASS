@@ -7,8 +7,14 @@ placeholder financial files will not be generated to imply a perspective the
 source data does not support.
 
 This module turns that rule into a decision the analysis builder can enforce,
-so a user cannot request a ceded result from a portfolio that has no treaty
-data and receive a silently zero answer.
+so a user cannot request a result after reinsurance from a portfolio that has
+no treaty data and receive a silently unchanged answer.
+
+The reinsurance perspective is the loss net of reinsurance: Oasis's ``ri``
+stream is what is retained after every inuring priority has applied, not what
+was ceded. The ceded amount is the insured loss less it. The label says so,
+because "reinsurance loss" reads as the ceded amount, and a reader who took the
+net figure for the ceded one would have the treaty backwards.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ class Perspective(enum.StrEnum):
         return {
             Perspective.GROUND_UP: "Ground-up loss",
             Perspective.INSURED: "Insured loss",
-            Perspective.REINSURANCE: "Reinsurance loss",
+            Perspective.REINSURANCE: "Loss net of reinsurance",
         }[self]
 
 

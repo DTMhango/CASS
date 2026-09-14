@@ -339,7 +339,7 @@ def test_requesting_an_unsupported_perspective_raises(make_location):
     files = make_location("1,A1,L1,1,ID,-6.2,106.8,1050,CR,QEQ,100,0,IDR")
     with pytest.raises(UnsupportedPerspective) as excinfo:
         require(files, [Perspective.GROUND_UP, Perspective.REINSURANCE])
-    assert "Reinsurance loss" in str(excinfo.value)
+    assert "Loss net of reinsurance" in str(excinfo.value)
 
 
 def test_contracts_without_scope_do_not_enable_reinsurance(piwind_files):

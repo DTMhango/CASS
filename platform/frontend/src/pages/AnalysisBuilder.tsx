@@ -464,7 +464,7 @@ const DEFAULT_PERSPECTIVES = [
   { perspective: "insured" as PerspectiveKey, label: "Insured loss", available: true, reason: "" },
   {
     perspective: "reinsurance" as PerspectiveKey,
-    label: "Reinsurance loss",
+    label: "Loss net of reinsurance",
     available: true,
     reason: "",
   },

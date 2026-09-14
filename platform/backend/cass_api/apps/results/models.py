@@ -39,7 +39,9 @@ class ResultSet(BaseModel, FreezableModel):
         choices=[
             ("ground_up", "Ground-up loss"),
             ("insured", "Insured loss"),
-            ("reinsurance", "Reinsurance loss"),
+            # Oasis's reinsurance stream is what is retained after the treaties,
+            # not what they ceded.
+            ("reinsurance", "Loss net of reinsurance"),
         ],
     )
     state = models.CharField(

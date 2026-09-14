@@ -5208,7 +5208,7 @@ paths:
         description: |-
           * `ground_up` - Ground-up loss
           * `insured` - Insured loss
-          * `reinsurance` - Reinsurance loss
+          * `reinsurance` - Loss net of reinsurance
       - in: query
         name: project
         schema:
@@ -9695,7 +9695,7 @@ components:
       description: |-
         * `ground_up` - Ground-up loss
         * `insured` - Insured loss
-        * `reinsurance` - Reinsurance loss
+        * `reinsurance` - Loss net of reinsurance
     PlatformInfo:
       type: object
       properties:

@@ -70,12 +70,12 @@ const FILE_KINDS: { kind: OEDFileKind; label: string; requirement: string }[] = 
   {
     kind: "reins_info",
     label: "Reinsurance Info file",
-    requirement: "Required for reinsurance loss: one record per contract.",
+    requirement: "Required for loss net of reinsurance: one record per contract.",
   },
   {
     kind: "reins_scope",
     label: "Reinsurance Scope file",
-    requirement: "Required for reinsurance loss: which risks each contract covers.",
+    requirement: "Required for loss net of reinsurance: which risks each contract covers.",
   },
 ];
 

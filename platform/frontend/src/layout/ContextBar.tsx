@@ -20,7 +20,7 @@ import "./ContextBar.css";
 const PERSPECTIVE_LABEL: Record<string, string> = {
   ground_up: "Ground-up loss",
   insured: "Insured loss",
-  reinsurance: "Reinsurance loss",
+  reinsurance: "Loss net of reinsurance",
 };
 
 export function ContextBar() {

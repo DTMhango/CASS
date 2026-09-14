@@ -65,7 +65,7 @@ const EXPOSURE: ExposureVersion = {
     },
     {
       perspective: "reinsurance",
-      label: "Reinsurance loss",
+      label: "Loss net of reinsurance",
       available: false,
       reason: "No reinsurance contracts were supplied.",
     },
