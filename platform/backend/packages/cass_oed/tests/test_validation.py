@@ -172,23 +172,41 @@ def test_unsupported_financial_term_blocks_publication():
 # -- peril scope ------------------------------------------------------------
 
 def test_peril_group_expands_to_subperils():
-    assert expand_perils("QQ") == ("QEQ", "QFF", "QTS", "QSL", "QLS")
+    """OED's own group codes: QQ1 for every earthquake peril, AA1 for every peril."""
+    assert expand_perils("QQ1") == ("QEQ", "QFF", "QTS", "QSL", "QLS", "QLF")
+    assert expand_perils("AA1") == ("QEQ", "QFF", "QTS", "QSL", "QLS", "QLF")
     assert expand_perils("QEQ;QTS") == ("QEQ", "QTS")
     assert expand_perils("") == ()
 
 
+def test_a_code_oed_does_not_define_is_not_expanded():
+    """CASS wrote QQ before this was checked, and OED has no such code.
+
+    Read as a group it would quietly cover shake; left alone it reaches the
+    finding that says no sub-peril on the location is modelled.
+    """
+    assert expand_perils("QQ") == ("QQ",)
+
+
 def test_unmodelled_subperils_are_named():
-    assert unmodelled_subperils(expand_perils("QQ")) == ("QFF", "QTS", "QSL", "QLS")
+    assert unmodelled_subperils(expand_perils("QQ1")) == ("QFF", "QTS", "QSL", "QLS", "QLF")
     assert unmodelled_subperils(expand_perils("QEQ")) == ()
 
 
 def test_covered_but_unmodelled_subperil_is_disclosed(make_location):
     """Section 9: output may not be labelled earthquake loss silently."""
-    files = make_location("1,A1,L1,1,ID,-6.2,106.8,1050,CR,QQ,100,0,IDR")
+    files = make_location("1,A1,L1,1,ID,-6.2,106.8,1050,CR,QQ1,100,0,IDR")
     report = validate(files)
     assert any(f.code == "unmodelled_subperil" for f in report.findings)
-    assert set(report.unmodelled_subperils) == {"QFF", "QTS", "QSL", "QLS"}
+    assert set(report.unmodelled_subperils) == {"QFF", "QTS", "QSL", "QLS", "QLF"}
     assert report.modelled_subperils == ("QEQ",)
+
+
+def test_a_book_covered_for_the_whole_earthquake_group_is_covered_for_shake(make_location):
+    """A schedule written the way OED writes it must not read as covering nothing."""
+    files = make_location("1,A1,L1,1,ID,-6.2,106.8,1050,CR,QQ1,100,0,IDR")
+    report = validate(files)
+    assert not any(f.code == "no_modelled_peril" for f in report.findings)
 
 
 # -- hierarchy and reinsurance ---------------------------------------------

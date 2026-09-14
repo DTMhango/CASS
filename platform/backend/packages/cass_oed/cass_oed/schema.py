@@ -286,12 +286,24 @@ COVERAGE_TYPES: Mapping[str, int] = {
 #: release to state whether secondary perils are modelled; codes appearing here
 #: are recognised by the parser, not automatically modelled.
 EARTHQUAKE_PERILS: Mapping[str, str] = {
-    "QQ": "Earthquake, all sub-perils",
     "QEQ": "Earthquake shake",
     "QFF": "Fire following earthquake",
     "QTS": "Tsunami",
-    "QSL": "Liquefaction",
+    "QSL": "Sprinkler leakage",
     "QLS": "Earthquake landslide",
+    "QLF": "Liquefaction",
+}
+
+#: OED's grouped peril codes, and the earthquake sub-perils each stands for.
+#:
+#: ``QQ1`` is OED's code for the whole earthquake group and ``AA1`` for every
+#: peril there is; only their earthquake members are listed, because those are
+#: the ones CASS can say anything about. A book covering either is covering
+#: shake, and reading the code as a sub-peril of its own would report a
+#: perfectly ordinary schedule as covering nothing this release models.
+PERIL_GROUPS: Mapping[str, tuple[str, ...]] = {
+    "QQ1": tuple(EARTHQUAKE_PERILS),
+    "AA1": tuple(EARTHQUAKE_PERILS),
 }
 
 #: Sub-perils CASS can currently model. Everything else in a covered peril
@@ -320,18 +332,20 @@ def financial_term_columns(kind: FileKind) -> tuple[str, ...]:
 
 
 def expand_perils(value: str) -> tuple[str, ...]:
-    """Split an OED peril list and expand recognised earthquake groups.
+    """Split an OED peril list and expand its group codes.
 
-    ``QQ`` denotes the whole earthquake group. Expanding it here means the
-    coverage report can state plainly which sub-perils a policy covers and
-    which of those CASS actually models.
+    ``QQ1`` is the whole earthquake group and ``AA1`` is every peril. Expanding
+    them here means the coverage report can state plainly which sub-perils a
+    policy covers and which of those CASS actually models -- and that a book
+    written with a group code is not read as covering nothing.
     """
     codes: list[str] = []
     for token in str(value or "").replace(" ", "").split(";"):
         if not token:
             continue
-        if token.upper() == "QQ":
-            codes.extend(["QEQ", "QFF", "QTS", "QSL", "QLS"])
+        group = PERIL_GROUPS.get(token.upper())
+        if group is not None:
+            codes.extend(group)
         else:
             codes.append(token.upper())
     seen: list[str] = []

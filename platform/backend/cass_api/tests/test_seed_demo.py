@@ -112,7 +112,7 @@ def test_seeded_portfolio_is_validated_and_publishable(seeded):
 def test_seeded_portfolio_discloses_unmodelled_subperils(seeded):
     """One seeded location is covered for the whole earthquake group."""
     exposure = ExposureVersion.objects.get(name="Indonesia pilot portfolio")
-    assert set(exposure.unmodelled_subperils) == {"QFF", "QTS", "QSL", "QLS"}
+    assert set(exposure.unmodelled_subperils) == {"QFF", "QTS", "QSL", "QLS", "QLF"}
 
 
 def test_piwind_baseline_is_seeded_from_the_real_fixtures(seeded):

@@ -116,9 +116,9 @@ def test_the_scope_statement_names_every_excluded_sub_peril(pilot_model):
     """Section 9 forbids calling a shake-only result earthquake loss."""
     scope = pilot_model.peril_scope
     assert scope["QEQ"]["treatment"] == "included"
-    assert {scope[code]["treatment"] for code in ("QFF", "QTS", "QSL", "QLS")} == {
-        "excluded"
-    }
+    assert {
+        scope[code]["treatment"] for code in ("QFF", "QTS", "QLF", "QLS", "QSL")
+    } == {"excluded"}
     assert scope["site_response"]["treatment"] == "excluded"
 
 

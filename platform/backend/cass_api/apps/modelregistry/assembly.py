@@ -55,7 +55,7 @@ def peril_scope() -> dict[str, Any]:
         },
         "QFF": {"treatment": "excluded", "rationale": "No fire-following module."},
         "QTS": {"treatment": "excluded", "rationale": "No tsunami module."},
-        "QSL": {
+        "QLF": {
             "treatment": "excluded",
             "rationale": (
                 "No liquefaction module, and no cell carries the site parameters "
@@ -63,6 +63,10 @@ def peril_scope() -> dict[str, Any]:
             ),
         },
         "QLS": {"treatment": "excluded", "rationale": "No landslide module."},
+        "QSL": {
+            "treatment": "excluded",
+            "rationale": "Sprinkler leakage following a shake is not modelled.",
+        },
         "site_response": {
             "treatment": "excluded",
             "rationale": (

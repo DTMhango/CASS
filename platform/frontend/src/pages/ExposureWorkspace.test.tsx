@@ -122,7 +122,7 @@ const FINDINGS = {
       file_kind: "location",
       row_number: 3,
       field: "LocPerilsCovered",
-      value: "QQ",
+      value: "QQ1",
       record_key: "PortNumber=1; AccNumber=ACC-1; LocNumber=LOC-2",
     },
   ],
