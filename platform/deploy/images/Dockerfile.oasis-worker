@@ -9,7 +9,7 @@
 # The patch asserts the source it replaces, so raising OASIS_WORKER_IMAGE to a
 # release that has moved on fails this build rather than quietly carrying a
 # patch for a defect that is no longer there.
-ARG OASIS_WORKER_IMAGE=coreoasis/model_worker:2.5.7
+ARG OASIS_WORKER_IMAGE=coreoasis/model_worker:2.5.7@sha256:75295e2f1def361460dc06d9b7db00f39d47d99bb8f3448db2eb998677cecbf5
 FROM ${OASIS_WORKER_IMAGE}
 
 # Applied as the image's own user: oasislmf is installed into that user's

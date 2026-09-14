@@ -84,9 +84,14 @@ x-django-env: &django-env
   CASS_METRICS_TOKEN: ${CASS_METRICS_TOKEN:-}
 
 services:
+  # Every image pulled from a registry is pinned by digest as well as tag, so the
+  # same file starts the same engines whenever a run is repeated. To move one,
+  # pull the new tag, read its digest with `docker image inspect`, and replace
+  # both halves together; test_deployment.py refuses an unpinned image.
+  #
   # -- control plane -------------------------------------------------------
   postgres:
-    image: postgres:16.6-alpine
+    image: postgres:16.6-alpine@sha256:1d04b9ba1d4996401f2552b51beda8187f175c0645c091e4781134fc9c9a3eef
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cass}
       POSTGRES_USER: ${POSTGRES_USER:-cass}
@@ -109,7 +114,7 @@ services:
       - "5432"
 
   redis:
-    image: redis:7.4-alpine
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
@@ -122,7 +127,7 @@ services:
       - "6379"
 
   minio:
-    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-cass-local}
@@ -140,7 +145,7 @@ services:
   # Creates the buckets section 5 separates by purpose and retention, then
   # exits. Bucket creation is idempotent, so a restart is harmless.
   minio-init:
-    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112
     depends_on:
       minio:
         condition: service_healthy
@@ -309,7 +314,7 @@ services:
     # pull found it inaccessible without credentials. The 3.23 tag currently
     # resolves to 3.23.4; the engine version is recorded on every hazard set,
     # so a conversion always names the build that produced it.
-    image: openquake/engine:3.23
+    image: openquake/engine:3.23@sha256:258afe0e536c43f06dd9e24013dd8a6bcfb80e3424035c1ef03b8d3bc29b886c
     # One string, not a list. The image's entrypoint is ``/bin/bash -c``, which
     # takes only its first argument as the script: the list form ran ``oq``
     # with no subcommand, printed its usage and exited 0 -- a container that
@@ -322,7 +327,7 @@ services:
     profiles: ["engines"]
 
   oasis-api:
-    image: coreoasis/api_server:2.5.7
+    image: coreoasis/api_server:2.5.7@sha256:0a1258352f185c7dc229cef740da17129123a44536de88586370cc2182ce2229
     environment:
       <<: [*oasis-celery-env, *oasis-server-env]
       OASIS_ADMIN_USER: ${OASIS_ADMIN_USER:-admin}
@@ -401,7 +406,7 @@ services:
   # It reuses the API image so the startup script's database waits apply, with
   # migrations left to the API server so two processes do not race one schema.
   oasis-celery:
-    image: coreoasis/api_server:2.5.7
+    image: coreoasis/api_server:2.5.7@sha256:0a1258352f185c7dc229cef740da17129123a44536de88586370cc2182ce2229
     environment:
       <<: [*oasis-celery-env, *oasis-server-env]
     command:

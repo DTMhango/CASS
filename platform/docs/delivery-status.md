@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,969 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 1,971 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
@@ -259,7 +259,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 17 | Multi-factor authentication and single sign-on configuration | §10 | Not pursued: a research tool with local accounts ([ADR 15](adr/0015-research-tool-and-gem-permission.md)) |
 | 18 | Backup and restore of research work: the database and the artifact store | §11 | Not started. Re-scoped from a production restore drill to a procedure that keeps research work from being lost |
 | 19 | CI: Oasis worker image build and the integration workflow | §17 | Not started. Re-scoped: SBOMs for releases dropped |
-| 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Not started. Re-scoped: the signed release bundle for approved local installations dropped |
+| 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Done: every image the compose file pulls from a registry is pinned by digest as well as tag — `openquake/engine:3.23` among them, a minor-version tag that would otherwise move — and each pinned reference resolves to the image the installation already runs. Every base a CASS build starts from is pinned the same way, the patched Oasis worker's included; those digests were read from the registry, and no image has been rebuilt from them yet. The images this repository builds are not pinned, because their digest changes with every build: a run records the engine version and, where the deployment exposes it, the image digest it ran on. A deployment test refuses an unpinned image. The signed release bundle stays dropped |
 | 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Not started. Item 9 is the measurement, and its first run puts the channel representation 10% below the engine on the pilot book. The decision needs the candidates measured against each other, and classes whose taxonomies span measures stay refused until it is taken ([ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md)) |
 | 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Not started. The hazard behind every Indonesian loss is one sampled path until it is decided ([ADR 12](adr/0012-national-classical-model-run-event-based.md)) |
 | 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |

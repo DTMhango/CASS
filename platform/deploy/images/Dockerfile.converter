@@ -5,7 +5,7 @@
 # invocations. That is what lets a long conversion restart from a checkpoint
 # without a partially published model package.
 
-FROM python:3.11.11-slim-bookworm
+FROM python:3.11.11-slim-bookworm@sha256:081075da77b2b55c23c088251026fb69a7b2bf92471e491ff5fd75c192fd38e5
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
