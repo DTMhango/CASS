@@ -424,7 +424,13 @@ def test_settings_ask_only_for_the_perspectives_that_were_requested(analysis_run
 def test_a_requested_perspective_gets_a_summary_block_and_not_just_a_flag(analysis_run):
     """A bare flag is accepted by Oasis and produces an empty result package."""
     document = build_analysis_settings(analysis_run)
-    assert document["gul_summaries"] == [{"id": 1, "ord_output": DEFAULT_ORD_OUTPUT}]
+    assert document["gul_summaries"][0] == {"id": 1, "ord_output": DEFAULT_ORD_OUTPUT}
+    # And the level that says where the loss is, which the map is drawn from.
+    assert document["gul_summaries"][1] == {
+        "id": 2,
+        "oed_fields": ["AccNumber", "LocNumber"],
+        "ord_output": {"alt_period": True},
+    }
 
 
 def test_each_requested_perspective_is_carried_into_the_settings(analysis_run):
@@ -1257,6 +1263,124 @@ def ord_package(
                 info.size = len(payload)
                 archive.addfile(info, io.BytesIO(payload))
     return buffer.getvalue()
+
+
+def located_ord_package(locations) -> bytes:
+    """The fixture package, with a location summary level beside the portfolio one.
+
+    ``locations`` is (LocNumber, tiv, average annual loss) for each location that
+    produced a loss, in the shape Oasis writes the two tables.
+    """
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=io.BytesIO(ord_package()), mode="r:gz") as source, tarfile.open(
+        fileobj=buffer, mode="w:gz"
+    ) as archive:
+        for member in source.getmembers():
+            archive.addfile(member, source.extractfile(member))
+        tables = {
+            "summary-info": ["summary_id,AccNumber,LocNumber,tiv"]
+            + [
+                f"{index},ACC-1,{number},{tiv}"
+                for index, (number, tiv, _) in enumerate(locations, start=1)
+            ],
+            "palt": ["SummaryId,SampleType,MeanLoss,SDLoss"]
+            + [
+                f"{index},2,{loss},1.00"
+                for index, (_, _, loss) in enumerate(locations, start=1)
+            ],
+        }
+        for table, rows in tables.items():
+            payload = ("\n".join(rows) + "\n").encode("utf-8")
+            info = tarfile.TarInfo(f"output/gul_S2_{table}.csv")
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def geographic_summary_of(result):
+    import json
+
+    from apps.common.storage import get_store
+
+    link = ArtifactLink.objects.get(
+        subject_type="result_set", subject_id=result.id, role="geographic_summary"
+    )
+    with get_store().open(link.artifact.uri) as handle:
+        return json.load(handle)
+
+
+def test_a_published_result_says_where_its_loss_is(analysis_run, oasis_is, api):
+    """Each location's loss goes in the cell its keys mapped it to, and cells are summed."""
+    from apps.results.models import ResultSet
+
+    oasis_is(
+        oasis_server(
+            output=located_ord_package(
+                [("LOC-1", "5400000", "200000.00"), ("LOC-3", "1350000", "32122.90")]
+            )
+        )
+    )
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    summary = geographic_summary_of(result)
+    # Jakarta sits in the fixture grid's western cell and Surabaya in its eastern one.
+    assert len(summary["cells"]) == 2
+    assert summary["cells"][0]["average_annual_loss"] == "200000.00"
+    assert Decimal(summary["cells"][0]["min_longitude"]) == Decimal("106")
+    assert summary["unplaced_locations"] == 0
+    # The location losses are the portfolio's, split by place.
+    assert summary["difference"] == "0.00"
+
+
+def test_a_package_without_the_location_level_still_publishes(analysis_run, oasis_is, api):
+    """A run from before the level was asked for keeps its portfolio number."""
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    assert result.average_annual_loss == Decimal("232122.90")
+    assert not ArtifactLink.objects.filter(
+        subject_type="result_set", subject_id=result.id, role="geographic_summary"
+    ).exists()
+
+
+def test_the_results_api_serves_where_the_loss_is(analysis_run, oasis_is, api):
+    from apps.results.models import ResultSet
+
+    oasis_is(
+        oasis_server(
+            output=located_ord_package(
+                [("LOC-1", "5400000", "200000.00"), ("LOC-3", "1350000", "32122.90")]
+            )
+        )
+    )
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+
+    served = api.get(f"{API}/results/{result.id}/geographic/")
+
+    assert served.status_code == 200
+    assert served.data["basis"]["placed_by"] == "the run's keys"
+    assert [cell["locations"] for cell in served.data["cells"]] == [1, 1]
+
+
+def test_a_result_without_a_geographic_summary_says_why(analysis_run, oasis_is, api):
+    from apps.results.models import ResultSet
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+
+    missing = api.get(f"{API}/results/{result.id}/geographic/")
+
+    assert missing.status_code == 404
+    assert "location summary" in missing.data["detail"]
 
 
 def test_a_completed_analysis_publishes_a_result_set(analysis_run, oasis_is, api):

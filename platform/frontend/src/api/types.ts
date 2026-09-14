@@ -679,6 +679,38 @@ export interface GridSpecificationInput {
   notes: string;
 }
 
+/** One area-peril cell's share of a result's average annual loss. */
+export interface GeographicCell {
+  area_peril_id: number;
+  min_latitude: string;
+  max_latitude: string;
+  min_longitude: string;
+  max_longitude: string;
+  locations: number;
+  average_annual_loss: string;
+  tiv: string;
+}
+
+/** Where a result's loss is, placed by the run's keys. */
+export interface GeographicSummary {
+  perspective: string;
+  grid: string;
+  currency: string;
+  basis: {
+    average_loss: string;
+    summary_level: number;
+    grouped_by: string[];
+    placed_by: string;
+  };
+  cells: GeographicCell[];
+  locations_with_loss: number;
+  unplaced_locations: number;
+  unplaced_loss: string;
+  location_total: string;
+  portfolio_average_annual_loss: string | null;
+  difference: string | null;
+}
+
 /** One Cohort B location, tried across the area its geocode stands for. */
 export interface GeocodingLocation {
   location: string;

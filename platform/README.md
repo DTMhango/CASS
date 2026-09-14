@@ -226,6 +226,16 @@ blocks it, usually a hazard set and the multi-IMT decision. With this in place a
 country CASS ships nothing for can be built on the platform from end to end,
 which is why the pilot countries' test data is no longer load-bearing.
 
+**A result says where its loss is.** Every analysis asks the engine for a
+location-level summary beside the portfolio one, carrying only each location's
+average annual loss — the output that decides a national run's size is the
+per-location event table, and a map needs none of it. At publication each
+location's loss is placed in the cell the run's own keys mapped it to, so a
+cell's loss is the loss calculated against that cell's hazard, and the cells are
+summed. The results workspace draws them as a grid plot with the exact table
+beside it, and says how much loss could not be placed and how far the locations
+add back to the portfolio number.
+
 **A coarse geocode is tested against the cell it was given.** Cohort B rows need
 no review and sit in the right country, but their geocodes resolve only to a
 locality, a postcode or an administrative area, and a grid fine enough to

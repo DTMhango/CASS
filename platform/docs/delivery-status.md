@@ -23,12 +23,12 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,974 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 1,982 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
   specifications and an OpenQuake datastore the engine wrote.
-  127 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  128 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -77,6 +77,14 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- A ground-up analysis of the Jakarta–Bandung book was run on the live stack
+  with the location summary level asked for, and the patched Oasis worker wrote
+  it beside the portfolio level. At publication the 64 locations with a loss
+  were all placed through the run's keys, into 33 cells of the Indonesian pilot
+  grid; the largest cell carries 21% of the average annual loss, and the
+  locations add back to the portfolio figure within 0.002 — the rounding of the
+  engine's table. The run took 61 seconds, where an otherwise identical run
+  without the location level took 42.
 - The Cohort B geocoding sensitivity was run on the 30 June book, against the
   Indonesian pilot grid and a Nepal grid written on the platform. Every one of
   the 44 Cohort B locations — 29 in Indonesia (25 locality, 3 postcode, 1
@@ -207,7 +215,7 @@ reviewed research result, not a basis for pricing or reserving.
 | Financial structure workspace | Built, Exposure tab: accounts and layers, contracts in inuring order, scope preview, reconciliation, and which contracts the engine will not apply | Building or editing a structure on the platform; guided contract forms |
 | Analysis builder | Built, including the assumption set, the run mode and what each resource profile has room for | Output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
-| Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, caveats, approval, export, comparison | Maps, geographic summaries, scenario ranges |
+| Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, loss by area-peril cell with its map, caveats, approval, export, comparison | Scenario ranges |
 | Model build workspace | Built, Hazard and Build tabs: a country's grid from a written specification, its vulnerability set from GEM under a written enrichment, and the two assembled into the model version a run names | Benchmark and QA evidence views |
 | Administration | Built: installation facts, compatibility, profiles, engine health, data standards, users with role and access changes, queues, storage, retention, support bundle, audit search | — |
 
@@ -243,7 +251,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 1b | `enrich`: applying an assumption set within a run, with reconciliation | §8, M5 | Done; two sets compared live on one book |
 | 2 | Run modes: geometry-only, technical loss, research, decision use | Brief §5.2 | Done |
 | 3 | Currency conversion evidence captured and applied before generation | §8 | Done |
-| 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Partly done: event loss table and EP curve chart built. Geographic summaries, the map and scenario ranges need loss at a summary level below the portfolio, which is an engine settings change |
+| 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Partly done: event loss table, EP curve chart, geographic summary and map built. Every analysis now asks the engine for a location summary level beside the portfolio one, carrying only the period average loss; at publication each location's average annual loss is placed in the cell the run's own keys mapped it to, the cells are summed, and the result says how much could not be placed and how far the locations add back to the portfolio number. The results workspace draws the cells as a grid plot rather than on a basemap, with the exact table beside it. Scenario ranges are not built |
 | 5 | Financial structure workspace | §3, M5 | Partly done: accounts and layers, contracts, inuring order, scope preview and reconciliation are read from the published portfolio and checked. Building a structure on the platform, rather than importing one, is not built |
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Done |
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Done |

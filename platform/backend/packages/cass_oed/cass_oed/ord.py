@@ -317,6 +317,106 @@ def event_losses(
     return found[:limit] if limit else found
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class LocationLoss:
+    """One summary id's average annual loss, named by the fields it was grouped on."""
+
+    summary_id: int
+    fields: dict[str, str]
+    tiv: Decimal | None
+    average_annual_loss: Decimal
+    standard_deviation: Decimal | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "summary_id": self.summary_id,
+            "fields": dict(self.fields),
+            "tiv": str(self.tiv) if self.tiv is not None else None,
+            "average_annual_loss": str(self.average_annual_loss),
+            "standard_deviation": (
+                str(self.standard_deviation) if self.standard_deviation is not None else None
+            ),
+        }
+
+
+def location_losses(
+    package: OrdPackage,
+    *,
+    perspective: str,
+    summary_level: int,
+    fields: tuple[str, ...],
+    sample_type: int = 2,
+) -> list[LocationLoss]:
+    """Average annual loss for each summary id at a level grouped by OED fields.
+
+    A portfolio summary has one id and ``metrics_for`` reads its single row. A
+    level grouped by location has one id per location, and the ids mean nothing
+    on their own: the level's ``summary-info`` table says which location each
+    is. So both are read, and a level that is not grouped by the fields asked
+    for is refused rather than read as though it were -- its ids would name
+    something else.
+
+    Locations that produced no loss may be absent from the average loss table;
+    they are left out here too rather than invented as zeroes.
+    """
+    info = package.rows(perspective, summary_level, "summary-info")
+    if not info:
+        raise OrdError(
+            f"The output package holds no {perspective.replace('_', '-')} summary-info "
+            f"at summary level {summary_level}, so its summary ids cannot be named."
+        )
+    missing = [name for name in fields if name not in info[0]]
+    if missing:
+        raise OrdError(
+            f"Summary level {summary_level} is not grouped by {', '.join(missing)}, so "
+            "its ids do not name what was asked for."
+        )
+    described: dict[int, tuple[dict[str, str], Decimal | None]] = {}
+    for row in info:
+        summary_id = _int(row.get("summary_id"))
+        if summary_id is None:
+            continue
+        described[summary_id] = (
+            {name: str(row.get(name) or "").strip() for name in fields},
+            _decimal(row.get("tiv")),
+        )
+
+    rows = package.rows(perspective, summary_level, "palt") or package.rows(
+        perspective, summary_level, "alt"
+    )
+    if not rows:
+        raise OrdError(
+            f"Summary level {summary_level} carries no period average loss table, so "
+            "there is no average annual loss to read for it."
+        )
+
+    found: list[LocationLoss] = []
+    for row in rows:
+        if _int(row.get("SampleType")) != sample_type:
+            continue
+        summary_id = _int(row.get("SummaryId"))
+        mean = _decimal(row.get("MeanLoss"))
+        if summary_id is None or mean is None:
+            continue
+        if summary_id not in described:
+            raise OrdError(
+                f"Summary id {summary_id} has a loss at level {summary_level} and no "
+                "entry in summary-info, so the loss cannot be placed."
+            )
+        named, tiv = described[summary_id]
+        found.append(
+            LocationLoss(
+                summary_id=summary_id,
+                fields=named,
+                tiv=tiv,
+                average_annual_loss=mean,
+                standard_deviation=_decimal(row.get("SDLoss")),
+            )
+        )
+    found.sort(key=lambda item: item.average_annual_loss, reverse=True)
+    return found
+
+
 # -- the tables -------------------------------------------------------------
 
 def _average_loss(

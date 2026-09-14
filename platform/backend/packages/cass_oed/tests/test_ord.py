@@ -64,6 +64,74 @@ def package(members: dict[str, str] | None = None, *, as_zip: bool = False) -> b
     return buffer.getvalue()
 
 
+# -- a level grouped by location ----------------------------------------------
+
+SUMMARY_INFO = """summary_id,AccNumber,LocNumber,tiv
+1,ACC-1,LOC-1,5400000
+2,ACC-1,LOC-2,3150000
+"""
+
+LOCATION_PALT = """SummaryId,SampleType,MeanLoss,SDLoss
+1,1,900.00,10.00
+1,2,1200.50,30.00
+2,1,50.00,5.00
+2,2,4800.25,90.00
+"""
+
+
+def located(**overrides: str) -> ord_results.OrdPackage:
+    members = {
+        "output/gul_S1_palt.csv": PALT,
+        "output/gul_S2_summary-info.csv": SUMMARY_INFO,
+        "output/gul_S2_palt.csv": LOCATION_PALT,
+        **overrides,
+    }
+    return ord_results.open_package(package(members))
+
+
+def test_each_location_loss_is_named_by_the_fields_it_was_grouped_on():
+    losses = ord_results.location_losses(
+        located(), perspective="ground_up", summary_level=2, fields=("AccNumber", "LocNumber")
+    )
+
+    assert [item.fields["LocNumber"] for item in losses] == ["LOC-2", "LOC-1"]
+    assert losses[0].average_annual_loss == Decimal("4800.25")
+    assert losses[0].tiv == Decimal("3150000")
+    # The sample basis the headline number is quoted on, not the analytical one.
+    assert losses[1].average_annual_loss == Decimal("1200.50")
+
+
+def test_a_level_without_summary_info_cannot_name_its_ids():
+    packaged = ord_results.open_package(
+        package({"output/gul_S2_palt.csv": LOCATION_PALT})
+    )
+    with pytest.raises(ord_results.OrdError, match="summary-info"):
+        ord_results.location_losses(
+            packaged, perspective="ground_up", summary_level=2, fields=("LocNumber",)
+        )
+
+
+def test_a_level_grouped_by_something_else_is_refused():
+    """The portfolio level's ids name nothing, and must not be read as locations."""
+    with pytest.raises(ord_results.OrdError, match="not grouped by LocNumber"):
+        ord_results.location_losses(
+            located(**{"output/gul_S2_summary-info.csv": "summary_id,_not_set_,tiv\n1,,5\n"}),
+            perspective="ground_up",
+            summary_level=2,
+            fields=("LocNumber",),
+        )
+
+
+def test_a_loss_whose_id_summary_info_does_not_know_is_refused():
+    with pytest.raises(ord_results.OrdError, match="cannot be placed"):
+        ord_results.location_losses(
+            located(**{"output/gul_S2_summary-info.csv": "summary_id,AccNumber,LocNumber,tiv\n1,A,L,1\n"}),
+            perspective="ground_up",
+            summary_level=2,
+            fields=("AccNumber", "LocNumber"),
+        )
+
+
 # -- containers -------------------------------------------------------------
 
 def test_a_gzipped_tar_is_read():

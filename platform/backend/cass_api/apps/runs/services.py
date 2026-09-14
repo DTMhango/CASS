@@ -217,6 +217,15 @@ _PERSPECTIVE_KEYS: dict[str, tuple[str, str]] = {
     str(Perspective.REINSURANCE): ("ri_output", "ri_summaries"),
 }
 
+#: The summary set that says where a loss is. The portfolio summary answers how
+#: much; this one groups by location so each location's average annual loss can
+#: be placed in the cell its keys mapped it to. Only the period average loss is
+#: asked for at this level: an event table per location is the output that
+#: drives a national run's size, and a map needs none of it.
+LOCATION_SUMMARY_ID = 2
+LOCATION_FIELDS: tuple[str, ...] = ("AccNumber", "LocNumber")
+LOCATION_ORD_OUTPUT: dict[str, bool] = {"alt_period": True}
+
 
 def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
     """The analysis settings document Oasis is given.
@@ -268,7 +277,12 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
         settings_document[flag] = wanted
         if wanted:
             settings_document[summaries] = [
-                {"id": 1, "ord_output": dict(DEFAULT_ORD_OUTPUT)}
+                {"id": 1, "ord_output": dict(DEFAULT_ORD_OUTPUT)},
+                {
+                    "id": LOCATION_SUMMARY_ID,
+                    "oed_fields": list(LOCATION_FIELDS),
+                    "ord_output": dict(LOCATION_ORD_OUTPUT),
+                },
             ]
     return settings_document
 
@@ -1539,12 +1553,16 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
             },
         )
         events = _store_event_losses(run, result, package, perspective, actor)
+        geography = _store_geographic_summary(
+            run, result, package, perspective, analysis_run, actor
+        )
         published.append(
             {
                 "perspective": perspective,
                 "result_set": str(result.id),
                 "basis": metrics.basis,
                 "events_with_loss": events,
+                "geographic_summary": geography,
             }
         )
 
@@ -1615,6 +1633,160 @@ def _store_event_losses(run, result, package, perspective: str, actor) -> int:
         defaults={"created_by": actor},
     )
     return len(rows)
+
+
+def _store_geographic_summary(
+    run, result, package, perspective: str, analysis_run, actor
+) -> dict:
+    """Where the loss is: average annual loss by area-peril cell, beside the result.
+
+    Section 3 asks the results workspace for geographic summaries and a map. The
+    engine reports each location's average annual loss at the location summary
+    level; each is placed in the cell the run's own keys mapped that location to,
+    and the cells are summed. The keys rather than the coordinates decide the
+    cell, so the map shows the hazard each dollar was calculated against.
+
+    Not having one is recorded rather than failing the publication: a run from
+    before the location summary was asked for, or a package without it, still
+    has a portfolio number worth keeping.
+    """
+    try:
+        losses = ord_results.location_losses(
+            package,
+            perspective=perspective,
+            summary_level=LOCATION_SUMMARY_ID,
+            fields=LOCATION_FIELDS,
+        )
+    except ord_results.OrdError as exc:
+        return {"available": False, "reason": str(exc)}
+
+    keys_link = (
+        ArtifactLink.objects.filter(
+            subject_type="analysis_run",
+            subject_id__in=[run.id, analysis_run.id],
+            role="cass_keys",
+        )
+        .select_related("artifact")
+        .order_by("-created_at")
+        .first()
+    )
+    if keys_link is None or not keys_link.artifact.is_readable:
+        return {
+            "available": False,
+            "reason": "The run's keys are not stored, so no location's loss can be placed in a cell.",
+        }
+    with get_store().open(keys_link.artifact.uri) as handle:
+        keys = list(csv.DictReader(io.StringIO(handle.read().decode("utf-8-sig"))))
+    cell_of: dict[tuple[str, str], int] = {}
+    for row in keys:
+        try:
+            area_peril = int(str(row.get("AreaPerilID") or "").strip())
+        except ValueError:
+            continue
+        location = (
+            str(row.get("AccNumber") or "").strip(),
+            str(row.get("LocNumber") or "").strip(),
+        )
+        cell_of.setdefault(location, area_peril)
+
+    try:
+        grid = load_grid(analysis_run.model_version.grid)
+    except ModelAssetError as exc:
+        return {"available": False, "reason": str(exc)}
+    bounds = {cell.area_peril_id: cell for cell in grid.cells}
+
+    cells: dict[int, dict[str, Any]] = {}
+    unplaced, unplaced_loss = 0, Decimal("0")
+    for item in losses:
+        area_peril = cell_of.get((item.fields["AccNumber"], item.fields["LocNumber"]))
+        if area_peril is None or area_peril not in bounds:
+            unplaced += 1
+            unplaced_loss += item.average_annual_loss
+            continue
+        entry = cells.setdefault(
+            area_peril,
+            {"locations": 0, "average_annual_loss": Decimal("0"), "tiv": Decimal("0")},
+        )
+        entry["locations"] += 1
+        entry["average_annual_loss"] += item.average_annual_loss
+        entry["tiv"] += item.tiv or Decimal("0")
+
+    location_total = sum((item.average_annual_loss for item in losses), Decimal("0"))
+    portfolio = result.average_annual_loss
+    document = {
+        "perspective": perspective,
+        "grid": grid.reference,
+        "currency": result.currency,
+        "basis": {
+            "average_loss": "sample",
+            "summary_level": LOCATION_SUMMARY_ID,
+            "grouped_by": list(LOCATION_FIELDS),
+            "placed_by": "the run's keys",
+        },
+        "cells": [
+            {
+                "area_peril_id": area_peril,
+                "min_latitude": str(bounds[area_peril].min_latitude),
+                "max_latitude": str(bounds[area_peril].max_latitude),
+                "min_longitude": str(bounds[area_peril].min_longitude),
+                "max_longitude": str(bounds[area_peril].max_longitude),
+                "locations": entry["locations"],
+                "average_annual_loss": str(entry["average_annual_loss"]),
+                "tiv": str(entry["tiv"]),
+            }
+            for area_peril, entry in sorted(
+                cells.items(), key=lambda pair: pair[1]["average_annual_loss"], reverse=True
+            )
+        ],
+        "locations_with_loss": len(losses),
+        "unplaced_locations": unplaced,
+        "unplaced_loss": str(unplaced_loss),
+        "location_total": str(location_total),
+        "portfolio_average_annual_loss": str(portfolio) if portfolio is not None else None,
+        # The location losses are the portfolio's split by place, so they should
+        # add back to it; the table rounds each row, so a few cents is the table
+        # and anything more is worth somebody's attention.
+        "difference": str(location_total - portfolio) if portfolio is not None else None,
+    }
+
+    ref = get_store().put_bytes(
+        bucket("result"),
+        f"analysis/{run.id}/{perspective}_geographic_summary.json",
+        json.dumps(document, indent=2).encode("utf-8"),
+        content_type="application/json",
+        retention=RetentionClass.RESULT,
+        access=AccessPolicy.PROJECT,
+    )
+    artifact, _ = Artifact.objects.update_or_create(
+        uri=ref.uri,
+        defaults={
+            "checksum": ref.checksum,
+            "size_bytes": ref.size_bytes,
+            "content_type": ref.content_type,
+            "retention": str(ref.retention),
+            "access": str(ref.access),
+            "state": ArtifactState.REGISTERED,
+            "project": run.project,
+            "role": "geographic_summary",
+            "original_filename": f"{perspective}_geographic_summary.json",
+            "created_by": actor,
+            "updated_by": actor,
+        },
+    )
+    ArtifactLink.objects.update_or_create(
+        artifact=artifact,
+        subject_type="result_set",
+        subject_id=result.id,
+        role="geographic_summary",
+        direction="output",
+        defaults={"created_by": actor},
+    )
+    return {
+        "available": True,
+        "cells": len(cells),
+        "locations_with_loss": len(losses),
+        "unplaced_locations": unplaced,
+    }
 
 
 def _assumption_is_unapproved(analysis_run) -> bool:

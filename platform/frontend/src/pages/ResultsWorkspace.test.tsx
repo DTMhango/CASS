@@ -154,6 +154,47 @@ const COMPARISON: ResultComparison = {
   },
 };
 
+/** Where the loss is, as the server placed it by the run's keys. */
+const GEOGRAPHIC = {
+  perspective: "ground_up",
+  grid: "id-grid-0.1.0",
+  currency: "USD",
+  basis: {
+    average_loss: "sample",
+    summary_level: 2,
+    grouped_by: ["AccNumber", "LocNumber"],
+    placed_by: "the run's keys",
+  },
+  cells: [
+    {
+      area_peril_id: 7,
+      min_latitude: "-7",
+      max_latitude: "-6",
+      min_longitude: "106",
+      max_longitude: "108",
+      locations: 2,
+      average_annual_loss: "800000.00",
+      tiv: "9000000.00",
+    },
+    {
+      area_peril_id: 9,
+      min_latitude: "-8",
+      max_latitude: "-7",
+      min_longitude: "112",
+      max_longitude: "113",
+      locations: 1,
+      average_annual_loss: "200000.00",
+      tiv: "1500000.00",
+    },
+  ],
+  locations_with_loss: 3,
+  unplaced_locations: 0,
+  unplaced_loss: "0",
+  location_total: "1000000.00",
+  portfolio_average_annual_loss: "1000000.00",
+  difference: "0.00",
+};
+
 let comparisons: ResultComparison[] = [];
 let results: ResultSet[] = [];
 let eventLosses: Record<string, unknown> = {
@@ -191,6 +232,9 @@ function routeFor(url: string): unknown {
   }
   if (url.includes("/event-losses/")) {
     return eventLosses;
+  }
+  if (url.includes("/geographic/")) {
+    return GEOGRAPHIC;
   }
   if (url.includes("/results/")) {
     return { count: results.length, next: null, previous: null, results };
@@ -256,6 +300,25 @@ describe("ResultsWorkspace", () => {
     // cannot be interpreted. The screen must not let it be selected at all.
     expect(options).not.toContain(OTHER_PERSPECTIVE.label);
     expect(options).not.toContain(OTHER_CURRENCY.label);
+  });
+
+  it("shows where a result's loss is, from the cells the server placed", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    const [summary] = await screen.findAllByText("Where the loss is (2 cells)");
+    expect(summary).toBeDefined();
+    await user.click(summary!);
+
+    const panel = summary!.closest("details") as HTMLElement;
+    expect(
+      within(panel).getByRole("img", {
+        name: /Average annual loss by area-peril cell on id-grid-0\.1\.0: 2 cells/,
+      }),
+    ).toBeInTheDocument();
+    // The table is the exact reading of the same cells, largest first.
+    const rows = within(panel).getAllByRole("row");
+    expect(rows[1]?.textContent).toContain("7");
   });
 
   it("says so when nothing shares the baseline's basis", async () => {

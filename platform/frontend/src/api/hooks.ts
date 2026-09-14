@@ -27,6 +27,7 @@ import type {
   GridSpecificationInput,
   VulnerabilityBuildResult,
   GeocodingSensitivity,
+  GeographicSummary,
   VulnerabilitySetSummary,
   VulnerabilitySpecificationInput,
   AuditEvent,
@@ -1124,6 +1125,21 @@ export function useCreateComparison() {
  * Without a grid there is nothing to answer it against, so the query stays
  * disabled until one is chosen rather than guessing at a default.
  */
+/**
+ * Where a result's loss is, by area-peril cell.
+ *
+ * Not retried: a result from a run that predates the location summary has
+ * none, and the 404 says so rather than being a failure worth repeating.
+ */
+export function useGeographicSummary(resultId: UUID | undefined) {
+  return useQuery({
+    queryKey: ["results", resultId ?? "", "geographic"] as const,
+    queryFn: () => api.get<GeographicSummary>(`/results/${resultId}/geographic/`),
+    enabled: Boolean(resultId),
+    retry: false,
+  });
+}
+
 /**
  * Whether each Cohort B geocode supports the cell a model version's grid gives it.
  *

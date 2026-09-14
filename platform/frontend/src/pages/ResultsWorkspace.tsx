@@ -26,6 +26,7 @@ import {
   useCreateComparison,
   useExportResult,
   useEventLosses,
+  useGeographicSummary,
   useResults,
   useSession,
 } from "@/api/hooks";
@@ -529,6 +530,8 @@ function ResultCard({ result }: { result: ResultSet }) {
 
       <EventLossTable result={result} />
 
+      <GeographicPanel result={result} />
+
       <CaveatBlock result={result} />
     </Card>
   );
@@ -695,6 +698,118 @@ function EventLossTable({ result }: { result: ResultSet }) {
       {data.count > data.results.length ? (
         <p className="muted">
           The {formatCount(data.results.length)} largest of {formatCount(data.count)}.
+        </p>
+      ) : null}
+    </Disclosure>
+  );
+}
+
+/**
+ * Where the loss is, by area-peril cell.
+ *
+ * Drawn from what the server placed: each location's average annual loss in
+ * the cell the run's keys mapped it to, summed per cell. Longitude runs across
+ * and latitude up, and each cell is shaded by its share of the largest cell's
+ * loss. It is a plot of the grid rather than a basemap: the cells are what the
+ * number was calculated against, and a map service would need a network the
+ * platform does not assume. The table under it carries the numbers exactly.
+ */
+function GeographicPanel({ result }: { result: ResultSet }) {
+  const { data, error, isPending } = useGeographicSummary(result.id);
+
+  if (isPending || error || !data?.cells?.length) return null;
+
+  const cells = data.cells.map((cell) => ({
+    ...cell,
+    west: Number(cell.min_longitude),
+    east: Number(cell.max_longitude),
+    south: Number(cell.min_latitude),
+    north: Number(cell.max_latitude),
+    loss: Number(cell.average_annual_loss),
+  }));
+  const west = Math.min(...cells.map((cell) => cell.west));
+  const east = Math.max(...cells.map((cell) => cell.east));
+  const south = Math.min(...cells.map((cell) => cell.south));
+  const north = Math.max(...cells.map((cell) => cell.north));
+  const largest = Math.max(...cells.map((cell) => cell.loss)) || 1;
+
+  const width = 640;
+  const spanX = east - west || 1;
+  const spanY = north - south || 1;
+  const height = Math.max(160, Math.min(480, (width * spanY) / spanX));
+  const x = (longitude: number) => ((longitude - west) / spanX) * width;
+  const y = (latitude: number) => ((north - latitude) / spanY) * height;
+
+  return (
+    <Disclosure summary={`Where the loss is (${formatCount(cells.length)} cells)`}>
+      <figure className="ep-chart">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="ep-chart__plot"
+          role="img"
+          aria-label={`Average annual loss by area-peril cell on ${data.grid}: ${cells.length} cells, the largest ${formatMoney(largest)} ${data.currency}.`}
+        >
+          {cells.map((cell) => (
+            <rect
+              key={cell.area_peril_id}
+              x={x(cell.west)}
+              y={y(cell.north)}
+              width={Math.max(x(cell.east) - x(cell.west), 1)}
+              height={Math.max(y(cell.south) - y(cell.north), 1)}
+              style={{ fill: "currentColor", fillOpacity: 0.15 + 0.85 * (cell.loss / largest) }}
+            >
+              <title>
+                Cell {cell.area_peril_id}: {formatMoneyExact(cell.average_annual_loss)}{" "}
+                {data.currency} across {cell.locations} location(s)
+              </title>
+            </rect>
+          ))}
+        </svg>
+        <figcaption className="muted">
+          Average annual loss by cell on {data.grid}, placed by the run&apos;s keys. Darker
+          cells carry more of it; the table below carries the same numbers exactly.
+        </figcaption>
+      </figure>
+
+      {data.unplaced_locations > 0 ? (
+        <Notice tone="warning" title="Some loss could not be placed">
+          {formatCount(data.unplaced_locations)} location(s) carrying{" "}
+          {formatMoney(data.unplaced_loss)} {data.currency} have no cell in the run&apos;s
+          keys, so they are missing from the map.
+        </Notice>
+      ) : null}
+
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Cell</th>
+            <th scope="col" className="numeric">
+              Locations
+            </th>
+            <th scope="col" className="numeric">
+              Average annual loss ({data.currency})
+            </th>
+            <th scope="col" className="numeric">
+              Insured value
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.cells.slice(0, 10).map((cell) => (
+            <tr key={cell.area_peril_id}>
+              <th scope="row" className="mono">
+                {cell.area_peril_id}
+              </th>
+              <td className="numeric">{formatCount(cell.locations)}</td>
+              <td className="numeric">{formatMoneyExact(cell.average_annual_loss)}</td>
+              <td className="numeric">{formatMoney(cell.tiv)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data.cells.length > 10 ? (
+        <p className="muted">
+          The 10 largest of {formatCount(data.cells.length)} cells.
         </p>
       ) : null}
     </Disclosure>

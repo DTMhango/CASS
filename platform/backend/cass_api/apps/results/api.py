@@ -220,6 +220,36 @@ class ResultSetViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=["get"])
+    def geographic(self, request, pk=None, version=None):
+        """Where this result's loss is: average annual loss by area-peril cell.
+
+        Placed by the run's own keys, so a cell's loss is the loss calculated
+        against that cell's hazard. Served as it was stored at publication.
+        """
+        import json
+
+        result = self.get_object()
+        link = (
+            ArtifactLink.objects.filter(
+                subject_type="result_set", subject_id=result.id, role="geographic_summary"
+            )
+            .select_related("artifact")
+            .first()
+        )
+        if link is None or not link.artifact.is_readable:
+            return Response(
+                {
+                    "detail": (
+                        "No geographic summary was collected for this result. The run may "
+                        "predate the location summary, or the package carried none."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        with get_store().open(link.artifact.uri) as handle:
+            return Response(json.loads(handle.read().decode("utf-8")))
+
+    @action(detail=True, methods=["get"])
     def export(self, request, pk=None, version=None):
         """The auditable result package header.
 
