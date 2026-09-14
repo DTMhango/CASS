@@ -236,6 +236,17 @@ summed. The results workspace draws them as a grid plot with the exact table
 beside it, and says how much loss could not be placed and how far the locations
 add back to the portfolio number.
 
+**A result reports its range across assumption scenarios.** The same book on the
+same model, run under each assumption set, is a scenario range: the baseline is
+the central estimate, every metric names the scenario at each end of its range,
+and the assumptions are ranked by how far they move any number. Everything else
+is held still — the model version, perspective, currency, run mode and ORD basis
+must all match, and so must a digest of every setting that decides the losses
+apart from the assumption set — so the spread can be put down to the assumption.
+A result calculated otherwise, or published before that digest was recorded, is
+left out and counted, and the range says what it does not vary, so it is not
+read as the whole uncertainty.
+
 **A coarse geocode is tested against the cell it was given.** Cohort B rows need
 no review and sit in the right country, but their geocodes resolve only to a
 locality, a postcode or an administrative area, and a grid fine enough to

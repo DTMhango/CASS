@@ -1336,6 +1336,45 @@ def test_a_published_result_says_where_its_loss_is(analysis_run, oasis_is, api):
     assert summary["difference"] == "0.00"
 
 
+def test_the_calculation_digest_ignores_only_what_does_not_decide_the_losses():
+    """The assumption set, the run's tag and its outputs; never samples or events."""
+    from apps.runs.services import calculation_digest
+
+    document = {
+        "analysis_tag": "run-1",
+        "model_settings": {"vulnerability_set": "baseline", "event_set": "p"},
+        "number_of_samples": 10,
+        "gul_output": True,
+        "gul_summaries": [{"id": 1}],
+    }
+    reweighted = {
+        **document,
+        "analysis_tag": "run-2",
+        "model_settings": {"vulnerability_set": "more_vulnerable", "event_set": "p"},
+        "il_output": False,
+        "gul_summaries": [{"id": 1}, {"id": 2}],
+    }
+    resampled = {**document, "number_of_samples": 100}
+    other_events = {**document, "model_settings": {"vulnerability_set": "baseline", "event_set": "h"}}
+
+    assert calculation_digest(document) == calculation_digest(reweighted)
+    assert calculation_digest(document) != calculation_digest(resampled)
+    assert calculation_digest(document) != calculation_digest(other_events)
+
+
+def test_a_published_result_records_how_its_losses_were_calculated(analysis_run, oasis_is, api):
+    from apps.results.models import ResultSet
+    from apps.runs.services import build_analysis_settings, calculation_digest
+
+    oasis_is(oasis_server(output=ord_package()))
+    api.post(f"{API}/analysis-runs/{analysis_run.id}/submit/")
+
+    result = ResultSet.objects.get(run=analysis_run.run_id)
+    analysis_run.refresh_from_db()
+    assert result.calculation_digest
+    assert result.calculation_digest == calculation_digest(build_analysis_settings(analysis_run))
+
+
 def test_a_package_without_the_location_level_still_publishes(analysis_run, oasis_is, api):
     """A run from before the level was asked for keeps its portfolio number."""
     from apps.results.models import ResultSet

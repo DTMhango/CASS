@@ -329,6 +329,30 @@ def settings_digest(document: dict) -> str:
     return hash_bytes(canonical)
 
 
+#: Settings that say what a run reports, or which run it is, rather than how its
+#: losses are calculated.
+_NOT_CALCULATION = frozenset(
+    {"analysis_tag", "gul_output", "il_output", "ri_output",
+     "gul_summaries", "il_summaries", "ri_summaries"}
+)
+
+
+def calculation_digest(document: Mapping[str, Any]) -> str:
+    """A digest of how a run's losses were calculated, apart from its assumption set.
+
+    Two runs of one book on one model differ by design in the vulnerability set
+    their assumption set names, in their tag and in the outputs they ask for.
+    Everything else in the settings -- samples, events, thresholds, the model's
+    own settings -- decides the numbers, so results are comparable across
+    assumption sets only where this digest agrees.
+    """
+    trimmed = {key: value for key, value in document.items() if key not in _NOT_CALCULATION}
+    model_settings = dict(trimmed.get("model_settings") or {})
+    model_settings.pop("vulnerability_set", None)
+    trimmed["model_settings"] = model_settings
+    return settings_digest(trimmed)
+
+
 # -- reading the published OED ----------------------------------------------
 
 def oed_payloads(analysis_run: AnalysisRun) -> list[tuple[str, str, bytes]]:
@@ -1502,6 +1526,17 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
     published: list[dict] = []
     requested = [str(item) for item in (analysis_run.perspectives or [])]
 
+    # How the losses were calculated, apart from the assumption set. Recorded
+    # only where the settings rebuilt here are exactly the ones the run hashed
+    # when its inputs were generated; a digest of anything else would claim a
+    # match nobody could check.
+    document = build_analysis_settings(analysis_run)
+    calculation = (
+        calculation_digest(document)
+        if run.settings_hash and settings_digest(document) == run.settings_hash
+        else ""
+    )
+
     for perspective in requested:
         try:
             metrics = ord_results.metrics_for(package, perspective=perspective)
@@ -1534,6 +1569,7 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
                     else ResultState.DRAFT
                 ),
                 "run_mode": analysis_run.mode,
+                "calculation_digest": calculation,
                 "average_annual_loss": metrics.average_annual_loss,
                 "standard_deviation": metrics.standard_deviation,
                 "currency": analysis_run.run_currency

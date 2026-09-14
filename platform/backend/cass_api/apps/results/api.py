@@ -18,6 +18,7 @@ from apps.common.queries import visible_projects
 from apps.common.storage import get_store
 
 from . import comparison as comparison_service
+from . import ranges
 from .models import ResultComparison, ResultSet, ResultState
 
 
@@ -31,14 +32,14 @@ class ResultSetSerializer(serializers.ModelSerializer):
             "id", "run", "project", "label", "perspective", "state",
             "average_annual_loss", "standard_deviation", "currency",
             "return_period_losses", "model_version_reference",
-            "assumption_set_reference", "run_mode", "valuation_date", "exposure_quality",
-            "peril_scope", "material_exclusions", "uncertainty_attribution",
+            "assumption_set_reference", "run_mode", "calculation_digest", "valuation_date",
+            "exposure_quality", "peril_scope", "material_exclusions", "uncertainty_attribution",
             "usable_for_decisions", "caveats", "approved_at", "is_frozen",
             "created_at",
         ]
         read_only_fields = [
-            "id", "usable_for_decisions", "caveats", "run_mode", "approved_at",
-            "is_frozen", "created_at",
+            "id", "usable_for_decisions", "caveats", "run_mode", "calculation_digest",
+            "approved_at", "is_frozen", "created_at",
         ]
 
     def get_caveats(self, obj) -> dict:
@@ -248,6 +249,16 @@ class ResultSetViewSet(viewsets.ModelViewSet):
             )
         with get_store().open(link.artifact.uri) as handle:
             return Response(json.loads(handle.read().decode("utf-8")))
+
+    @action(detail=True, methods=["get"], url_path="scenario-range")
+    def scenario_range(self, request, pk=None, version=None):
+        """The range this result spans across the assumption scenarios run for it.
+
+        The same book on the same model, run under each assumption set; the
+        baseline is the central estimate, and each metric names the scenario at
+        each end of its range and the assumption that moves it most.
+        """
+        return Response(ranges.scenario_range(self.get_object()))
 
     @action(detail=True, methods=["get"])
     def export(self, request, pk=None, version=None):

@@ -5346,6 +5346,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ResultSet'
           description: ''
+  /api/v1/results/{id}/scenario-range/:
+    get:
+      operationId: api_v1_results_scenario_range_retrieve
+      description: |-
+        The range this result spans across the assumption scenarios run for it.
+
+        The same book on the same model, run under each assumption set; the
+        baseline is the central estimate, and each metric names the scenario at
+        each end of its range and the assumption that moves it most.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this result set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSet'
+          description: ''
   /api/v1/runs/:
     get:
       operationId: api_v1_runs_list
@@ -9769,6 +9798,11 @@ components:
           readOnly: true
           description: What the run that produced this was for, and so what it may
             claim.
+        calculation_digest:
+          type: string
+          readOnly: true
+          description: Digest of the settings that decided the losses, apart from
+            the assumption set.
         valuation_date:
           type: string
           format: date
@@ -9806,6 +9840,7 @@ components:
           readOnly: true
       required:
       - approved_at
+      - calculation_digest
       - caveats
       - created_at
       - id

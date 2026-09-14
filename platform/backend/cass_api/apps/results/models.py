@@ -70,6 +70,17 @@ class ResultSet(BaseModel, FreezableModel):
         blank=True,
         help_text="What the run that produced this was for, and so what it may claim.",
     )
+    #: How the losses were calculated, apart from the assumption set. Two runs
+    #: of one book on one model differ by design in the vulnerability set their
+    #: assumption set names and in the outputs they ask for; everything else in
+    #: the settings decides the numbers. A scenario range only brings together
+    #: results whose digests agree, and a result from before the digest was
+    #: recorded carries none and cannot be shown to match anything.
+    calculation_digest = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Digest of the settings that decided the losses, apart from the assumption set.",
+    )
     valuation_date = models.DateField(null=True, blank=True)
     exposure_quality = models.JSONField(
         default=dict,

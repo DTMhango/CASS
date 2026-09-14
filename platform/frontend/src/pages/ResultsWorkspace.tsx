@@ -28,6 +28,7 @@ import {
   useEventLosses,
   useGeographicSummary,
   useResults,
+  useScenarioRange,
   useSession,
 } from "@/api/hooks";
 import type {
@@ -530,6 +531,8 @@ function ResultCard({ result }: { result: ResultSet }) {
 
       <EventLossTable result={result} />
 
+      <ScenarioRangePanel result={result} />
+
       <GeographicPanel result={result} />
 
       <CaveatBlock result={result} />
@@ -700,6 +703,100 @@ function EventLossTable({ result }: { result: ResultSet }) {
           The {formatCount(data.results.length)} largest of {formatCount(data.count)}.
         </p>
       ) : null}
+    </Disclosure>
+  );
+}
+
+/**
+ * How far this number moves across the assumption scenarios run for it.
+ *
+ * The server holds the book and the model still and varies only the assumption
+ * set, so the spread can be put down to it, and the sources of uncertainty the
+ * range does not vary are listed with it. Nothing is computed here: every value,
+ * spread and ranking is the server's. A result with one scenario has no range and
+ * shows nothing, rather than a panel on every card saying so.
+ */
+function ScenarioRangePanel({ result }: { result: ResultSet }) {
+  const { data, error, isPending } = useScenarioRange(result.id);
+
+  if (isPending || error || !data || data.scenarios.length < 2) return null;
+
+  return (
+    <Disclosure
+      summary={`Scenario range across ${formatCount(data.scenarios.length)} assumption sets`}
+    >
+      {data.note ? (
+        <Notice tone="info" title="Not centred on the baseline">
+          {data.note}
+        </Notice>
+      ) : null}
+
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Metric</th>
+            <th scope="col" className="numeric">
+              {data.central.label} ({data.currency})
+            </th>
+            <th scope="col" className="numeric">
+              Low
+            </th>
+            <th scope="col" className="numeric">
+              High
+            </th>
+            <th scope="col" className="numeric">
+              Spread
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.metrics.map((item) => (
+            <tr key={item.metric}>
+              <th scope="row">{item.label}</th>
+              <td className="numeric">{formatMoney(item.central)}</td>
+              <td className="numeric">
+                {formatMoney(item.low.value)} <span className="muted">{item.low.label}</span>
+              </td>
+              <td className="numeric">
+                {formatMoney(item.high.value)} <span className="muted">{item.high.label}</span>
+              </td>
+              <td className="numeric">
+                {formatMoney(item.spread)}
+                {item.relative_spread
+                  ? ` (${formatPercent(Number(item.relative_spread))})`
+                  : ""}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {data.influence.length ? (
+        <p>
+          Moves the numbers most:{" "}
+          {data.influence
+            .map(
+              (item) =>
+                `${item.label}, by up to ${formatPercent(Number(item.largest_relative_change))}`,
+            )
+            .join("; ")}
+          .
+        </p>
+      ) : null}
+      {data.left_out.calculated_differently + data.left_out.calculation_not_recorded > 0 ? (
+        <p className="muted">
+          Left out:{" "}
+          {formatCount(
+            data.left_out.calculated_differently + data.left_out.calculation_not_recorded,
+          )}{" "}
+          other result(s) for this book and model, calculated under different settings or
+          before CASS recorded how they were calculated.
+        </p>
+      ) : null}
+      <p className="muted">
+        Only the {data.varies} varies in this range. Not in it:{" "}
+        {data.not_varied.join("; ").toLowerCase()}.
+      </p>
     </Disclosure>
   );
 }

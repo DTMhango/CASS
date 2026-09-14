@@ -28,6 +28,7 @@ import type {
   VulnerabilityBuildResult,
   GeocodingSensitivity,
   GeographicSummary,
+  ScenarioRange,
   VulnerabilitySetSummary,
   VulnerabilitySpecificationInput,
   AuditEvent,
@@ -1125,6 +1126,20 @@ export function useCreateComparison() {
  * Without a grid there is nothing to answer it against, so the query stays
  * disabled until one is chosen rather than guessing at a default.
  */
+/**
+ * How far a result moves across the assumption scenarios run for its book and model.
+ *
+ * Every value, spread and ranking is the server's; the screen formats them.
+ */
+export function useScenarioRange(resultId: UUID | undefined) {
+  return useQuery({
+    queryKey: ["results", resultId ?? "", "scenario-range"] as const,
+    queryFn: () => api.get<ScenarioRange>(`/results/${resultId}/scenario-range/`),
+    enabled: Boolean(resultId),
+    retry: false,
+  });
+}
+
 /**
  * Where a result's loss is, by area-peril cell.
  *

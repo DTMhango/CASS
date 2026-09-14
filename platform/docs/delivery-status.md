@@ -23,12 +23,12 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,982 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 1,995 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
   specifications and an OpenQuake datastore the engine wrote.
-  128 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  129 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -77,6 +77,15 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- The Jakarta–Bandung book was run twice more on the live stack, under baseline
+  weights and under the more vulnerable assumption set, and the two results
+  recorded the same calculation digest, so the scenario range brought them
+  together; seven older results for the book were left out and counted, because
+  they were published before the digest was recorded. Across the two, the
+  average annual loss spans 0.20% (565,610.88 to 566,728.13), and the 250-year
+  loss is where the assumption bites hardest, 3.99% lower under more vulnerable
+  while the 200-year loss is 1.19% higher — the same reshaping of the curve,
+  rather than a uniform scaling, that the assumption set was built to test.
 - A ground-up analysis of the Jakarta–Bandung book was run on the live stack
   with the location summary level asked for, and the patched Oasis worker wrote
   it beside the portfolio level. At publication the 64 locations with a loss
@@ -151,7 +160,7 @@ run. Production items that serve only a governed deployment are not pursued
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; a full-country run; a realisation-weighting rule (item 22). Nepal acquires no hazard: it was a test country and Indonesia is covered |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
-| M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table, loss by area-peril cell with its map, and the financial structure workspace | Scenario ranges |
+| M6 Product | Met | Result approval, export, two-result comparison, EP curve chart, event loss table, loss by area-peril cell with its map, scenario ranges across assumption sets, and the financial structure workspace | — |
 | M7 Production | Not pursued | CI builds the CASS images and the patched Oasis worker and scans the CASS ones; an integration workflow runs on demand against the pinned GEM release; every pulled image is pinned by digest | Nothing as a milestone: CASS is a research tool, so no production release gate applies ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Backing up research work stays in the backlog as item 18 |
 
 ## Pipelines
@@ -215,7 +224,7 @@ reviewed research result, not a basis for pricing or reserving.
 | Financial structure workspace | Built, Exposure tab: accounts and layers, contracts in inuring order, scope preview, reconciliation, and which contracts the engine will not apply | Building or editing a structure on the platform; guided contract forms |
 | Analysis builder | Built, including the assumption set, the run mode and what each resource profile has room for | Output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
-| Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, loss by area-peril cell with its map, caveats, approval, export, comparison | Scenario ranges |
+| Results workspace | Built: AAL, return-period table, EP curve chart, event loss table, loss by area-peril cell with its map, scenario ranges across assumption sets, caveats, approval, export, comparison | — |
 | Model build workspace | Built, Hazard and Build tabs: a country's grid from a written specification, its vulnerability set from GEM under a written enrichment, and the two assembled into the model version a run names | Benchmark and QA evidence views |
 | Administration | Built: installation facts, compatibility, profiles, engine health, data standards, users with role and access changes, queues, storage, retention, support bundle, audit search | — |
 
@@ -251,7 +260,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 1b | `enrich`: applying an assumption set within a run, with reconciliation | §8, M5 | Done; two sets compared live on one book |
 | 2 | Run modes: geometry-only, technical loss, research, decision use | Brief §5.2 | Done |
 | 3 | Currency conversion evidence captured and applied before generation | §8 | Done |
-| 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Partly done: event loss table, EP curve chart, geographic summary and map built. Every analysis now asks the engine for a location summary level beside the portfolio one, carrying only the period average loss; at publication each location's average annual loss is placed in the cell the run's own keys mapped it to, the cells are summed, and the result says how much could not be placed and how far the locations add back to the portfolio number. The results workspace draws the cells as a grid plot rather than on a basemap, with the exact table beside it. Scenario ranges are not built |
+| 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Done: event loss table, EP curve chart, geographic summary and map, and scenario ranges built. Every analysis now asks the engine for a location summary level beside the portfolio one, carrying only the period average loss; at publication each location's average annual loss is placed in the cell the run's own keys mapped it to, the cells are summed, and the result says how much could not be placed and how far the locations add back to the portfolio number. The results workspace draws the cells as a grid plot rather than on a basemap, with the exact table beside it. A scenario range takes the same book on the same model version, perspective, currency, run mode and ORD basis, calculated under the same settings apart from the assumption set, run under each assumption set, and reports every metric's central estimate (the baseline), its low and high and the scenario behind each, and ranks the assumptions by how far they move any number; it lists what does not vary — the hazard realisation, the allocation of value between sites, where a coarse geocode places a location — so a range across one assumption is not read as the whole uncertainty |
 | 5 | Financial structure workspace | §3, M5 | Partly done: accounts and layers, contracts, inuring order, scope preview and reconciliation are read from the published portfolio and checked. Building a structure on the platform, rather than importing one, is not built |
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Done |
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Done |

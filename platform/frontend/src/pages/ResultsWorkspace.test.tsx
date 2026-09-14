@@ -154,6 +154,43 @@ const COMPARISON: ResultComparison = {
   },
 };
 
+/** The range across assumption scenarios, as the server computed it. */
+const SCENARIO_RANGE = {
+  varies: "assumption set",
+  not_varied: [
+    "The hazard realisation and event set",
+    "How a business's value is allocated between its sites",
+  ],
+  currency: "USD",
+  central: {
+    scenario: "baseline",
+    label: "Baseline weights",
+    result: "aaaaaaaa-0000-0000-0000-000000000001",
+    is_baseline: true,
+  },
+  scenarios: [
+    { scenario: "baseline", label: "Baseline weights", result: "r1", created_at: "", average_annual_loss: "1000.00" },
+    { scenario: "more_robust", label: "More robust (more_robust-0.1.0)", result: "r2", created_at: "", average_annual_loss: "850.00" },
+    { scenario: "more_vulnerable", label: "More vulnerable (more_vulnerable-0.1.0)", result: "r3", created_at: "", average_annual_loss: "1300.00" },
+  ],
+  metrics: [
+    {
+      metric: "average_annual_loss",
+      label: "Average annual loss",
+      central: "1000.00",
+      low: { scenario: "more_robust", label: "More robust (more_robust-0.1.0)", value: "850.00" },
+      high: { scenario: "more_vulnerable", label: "More vulnerable (more_vulnerable-0.1.0)", value: "1300.00" },
+      spread: "450.00",
+      relative_spread: "0.450000",
+    },
+  ],
+  influence: [
+    { scenario: "more_vulnerable", label: "More vulnerable (more_vulnerable-0.1.0)", largest_relative_change: "0.400000" },
+    { scenario: "more_robust", label: "More robust (more_robust-0.1.0)", largest_relative_change: "0.150000" },
+  ],
+  left_out: { calculated_differently: 2, calculation_not_recorded: 3 },
+};
+
 /** Where the loss is, as the server placed it by the run's keys. */
 const GEOGRAPHIC = {
   perspective: "ground_up",
@@ -235,6 +272,9 @@ function routeFor(url: string): unknown {
   }
   if (url.includes("/geographic/")) {
     return GEOGRAPHIC;
+  }
+  if (url.includes("/scenario-range/")) {
+    return SCENARIO_RANGE;
   }
   if (url.includes("/results/")) {
     return { count: results.length, next: null, previous: null, results };
@@ -319,6 +359,22 @@ describe("ResultsWorkspace", () => {
     // The table is the exact reading of the same cells, largest first.
     const rows = within(panel).getAllByRole("row");
     expect(rows[1]?.textContent).toContain("7");
+  });
+
+  it("shows how far a number moves across assumption scenarios, and what does not vary", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    const [summary] = await screen.findAllByText("Scenario range across 3 assumption sets");
+    await user.click(summary!);
+
+    const panel = summary!.closest("details") as HTMLElement;
+    expect(within(panel).getByText("Average annual loss")).toBeInTheDocument();
+    expect(within(panel).getByText(/Moves the numbers most: More vulnerable/)).toBeInTheDocument();
+    // A range across one assumption must not read as the whole uncertainty.
+    expect(within(panel).getByText(/Only the assumption set varies in this range/)).toBeInTheDocument();
+    // What could not be shown to be calculated alike is counted, not dropped silently.
+    expect(within(panel).getByText(/Left out: 5 other result/)).toBeInTheDocument();
   });
 
   it("says so when nothing shares the baseline's basis", async () => {

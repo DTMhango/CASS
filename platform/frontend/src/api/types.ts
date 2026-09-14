@@ -679,6 +679,47 @@ export interface GridSpecificationInput {
   notes: string;
 }
 
+/** One end of a metric's range, and the scenario that sets it. */
+export interface ScenarioRangeEnd {
+  scenario: string;
+  label: string;
+  value: string;
+}
+
+/** How far a result moves across the assumption scenarios run for its book and model. */
+export interface ScenarioRange {
+  varies: string;
+  not_varied: string[];
+  currency: string;
+  central: { scenario: string; label: string; result: UUID; is_baseline: boolean };
+  scenarios: {
+    scenario: string;
+    label: string;
+    result: UUID;
+    created_at: string;
+    average_annual_loss: string | null;
+  }[];
+  metrics: {
+    metric: string;
+    label: string;
+    central: string | null;
+    low: ScenarioRangeEnd;
+    high: ScenarioRangeEnd;
+    spread: string;
+    relative_spread: string | null;
+    most_influential?: {
+      scenario: string;
+      label: string;
+      change: string;
+      relative_change: string | null;
+    };
+  }[];
+  influence: { scenario: string; label: string; largest_relative_change: string }[];
+  /** Results for the same book and model that could not be shown to be calculated alike. */
+  left_out: { calculated_differently: number; calculation_not_recorded: number };
+  note?: string;
+}
+
 /** One area-peril cell's share of a result's average annual loss. */
 export interface GeographicCell {
   area_peril_id: number;
