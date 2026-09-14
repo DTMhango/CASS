@@ -151,8 +151,8 @@ run. Production items that serve only a governed deployment are not pursued
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; a full-country run; a realisation-weighting rule (item 22). Nepal acquires no hazard: it was a test country and Indonesia is covered |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances |
 | M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
-| M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table and the financial structure workspace | Maps, geographic summaries, scenario ranges |
-| M7 Production | Not pursued | CI builds and scans the CASS images | Nothing as a milestone: CASS is a research tool, so no production release gate applies ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Backing up research work stays in the backlog as item 18 |
+| M6 Product | Partly met | Result approval, export, two-result comparison, EP curve chart, event loss table, loss by area-peril cell with its map, and the financial structure workspace | Scenario ranges |
+| M7 Production | Not pursued | CI builds the CASS images and the patched Oasis worker and scans the CASS ones; an integration workflow runs on demand against the pinned GEM release; every pulled image is pinned by digest | Nothing as a milestone: CASS is a research tool, so no production release gate applies ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Backing up research work stays in the backlog as item 18 |
 
 ## Pipelines
 
