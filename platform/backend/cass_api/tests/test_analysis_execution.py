@@ -2722,6 +2722,36 @@ def test_the_exposure_sent_carries_the_value_the_run_mapped(
     assert report["exposure"]["taxonomies"] == 2
 
 
+def test_the_functions_are_read_from_where_the_set_records_gem_publishes_them(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    """A country built on the platform sits in no table CASS was compiled with."""
+    import json
+
+    from apps.modelregistry.assets import attach_vulnerability_dictionary
+
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+    elsewhere = gem_root / "global_vulnerability_model" / "Oceania" / "Atlantis"
+    elsewhere.mkdir(parents=True)
+    for name in ("structural", "contents"):
+        (elsewhere / f"vulnerability_{name}.xml").write_bytes(b"<nrml>atlantis</nrml>")
+    attach_vulnerability_dictionary(
+        analysis_run.model_version.vulnerability_set,
+        json.dumps(
+            {**REFERENCE_DICTIONARY, "gem": {"region": "Oceania", "country": "Atlantis"}}
+        ).encode(),
+        actor=modeller,
+    )
+    engine = ReferenceEngine()
+
+    compare_run(analysis_run, gem_root, engine, monkeypatch)
+
+    assert engine.files["vulnerability_structural.xml"] == b"<nrml>atlantis</nrml>"
+    assert engine.files["vulnerability_contents.xml"] == b"<nrml>atlantis</nrml>"
+
+
 def test_the_assets_sit_on_the_cells_the_keys_mapped_them_to(
     analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
 ):

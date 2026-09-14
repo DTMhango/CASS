@@ -386,6 +386,15 @@ def register_vulnerability(
         actor=actor,
     )
     provenance = dictionary(built)
+    # Where GEM publishes the country, so whatever reads the functions back from
+    # the release -- the OpenQuake reference comparison -- finds them without a
+    # table of the countries CASS was compiled with.
+    located = pilot_enrichment.GEM_LAYOUT.get(code, ("", ""))
+    provenance["gem"] = {
+        "release": GEM_RELEASE,
+        "region": region or located[0],
+        "country": folder or located[1],
+    }
     # What each set's weights were, so a loss under one can be traced to the
     # tilt that produced it.
     provenance["assumption_sets"] = {

@@ -112,7 +112,8 @@ class Command(BaseCommand):
                 "nothing to compare."
             )
 
-        exposure = self._exposure(analysis_run)
+        dictionary = self._dictionary(analysis_run)
+        exposure = self._exposure(analysis_run, dictionary)
         self.stdout.write(
             f"{len(exposure.assets)} assets over {len({a.location_id for a in exposure.assets})} "
             f"locations, carrying {exposure.written_value}"
@@ -130,6 +131,7 @@ class Command(BaseCommand):
                 pathlib.Path(options["gem_root"]).expanduser(),
                 model_version.country_code,
                 exposure.loss_types,
+                dictionary,
             ),
             description=f"CASS reference comparison for run {run.id}",
             ignore_covs=options["ignore_covs"],
@@ -176,7 +178,19 @@ class Command(BaseCommand):
             )
         return found[0]
 
-    def _exposure(self, analysis_run: AnalysisRun) -> reference.ReferenceExposure:
+    def _dictionary(self, analysis_run: AnalysisRun) -> dict[str, Any]:
+        """The vulnerability dictionary behind the run's identifiers."""
+        return json.loads(
+            self._artifact(
+                "vulnerability_set",
+                [analysis_run.model_version.vulnerability_set_id],
+                VULNERABILITY_DICTIONARY_ROLE,
+            )
+        )
+
+    def _exposure(
+        self, analysis_run: AnalysisRun, dictionary: dict[str, Any]
+    ) -> reference.ReferenceExposure:
         keys = self._artifact(
             "analysis_run", [analysis_run.run_id, analysis_run.id], "cass_keys"
         )
@@ -192,13 +206,6 @@ class Command(BaseCommand):
             number = str(raw.get("LocNumber") or raw.get("LocID") or "").strip()
             locations[f"{account}/{number}" if account else number] = raw
 
-        dictionary = json.loads(
-            self._artifact(
-                "vulnerability_set",
-                [analysis_run.model_version.vulnerability_set_id],
-                VULNERABILITY_DICTIONARY_ROLE,
-            )
-        )
         try:
             return reference.build_exposure(
                 rows,
@@ -240,16 +247,30 @@ class Command(BaseCommand):
             return handle.read()
 
     def _vulnerability(
-        self, root: pathlib.Path, country_code: str, loss_types: tuple[str, ...]
+        self,
+        root: pathlib.Path,
+        country_code: str,
+        loss_types: tuple[str, ...],
+        dictionary: dict[str, Any],
     ) -> dict[str, bytes]:
-        try:
-            region, name = GEM_LAYOUT[country_code.upper()]
-        except KeyError:
-            raise CommandError(
-                f"No GEM layout is recorded for {country_code}. Known: "
-                + ", ".join(sorted(GEM_LAYOUT))
-                + "."
-            ) from None
+        """GEM's own functions for the country, from where the set says it read them.
+
+        A set built on the platform records its place in the release, because the
+        country need not be one CASS was compiled with. Older sets predate that
+        record and are found through the pilot table.
+        """
+        recorded = dictionary.get("gem") or {}
+        region = str(recorded.get("region") or "")
+        name = str(recorded.get("country") or "")
+        if not (region and name):
+            try:
+                region, name = GEM_LAYOUT[country_code.upper()]
+            except KeyError:
+                raise CommandError(
+                    "The vulnerability set does not record where GEM publishes "
+                    f"{country_code}, and it is not a pilot country. Register the set "
+                    "again so its dictionary records its place in the release."
+                ) from None
         directory = root / "global_vulnerability_model" / region / name
         found: dict[str, bytes] = {}
         for loss_type in loss_types:
