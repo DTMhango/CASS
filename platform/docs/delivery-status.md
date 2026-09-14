@@ -194,10 +194,14 @@ run. Production items that serve only a governed deployment are not pursued
   (no split value) 0.904 of the engine's average annual loss, with heights
   withheld (7.2% split) 1.032, and as commercial buildings of unknown height
   (all value split) 0.968. The stated book reproduced its earlier ratio exactly,
-  so the change leaves a class of one measure untouched. The study's model
-  version, `id-qeq-0.1.0-study21`, is what the worker now serves: one package is
-  served at a time ([ADR 9](adr/0009-cass-writes-the-oasis-package.md)), so a run
-  against the earlier Indonesian version needs its package built again.
+  so the change leaves a class of one measure untouched. One package is served
+  at a time ([ADR 9](adr/0009-cass-writes-the-oasis-package.md)), so a run
+  against a version whose package is no longer the one deployed needs it built
+  again. The worker now serves `id-qeq-0.1.0-paths20`, and the guard was
+  confirmed on the live stack in exactly that situation: a run submitted against
+  the superseded `id-qeq-0.1.0-study21` failed at `publish_oed` before anything
+  reached the engine, naming both versions and what to do — which is the case
+  that would otherwise have published one version's losses under another's name.
 - The realisation-weighting rule was decided against the published model's own
   answer (item 22, [ADR 18](adr/0018-sampled-paths-pooled-as-one-catalogue.md)).
   PuSGeN 2024 was run over 12 sites of the pilot region as a classical
