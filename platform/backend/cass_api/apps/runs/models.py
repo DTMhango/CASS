@@ -317,6 +317,10 @@ class HazardRun(BaseModel):
     imts = models.JSONField(default=list, blank=True)
     investigation_time = models.FloatField(null=True, blank=True)
     stochastic_event_sets = models.IntegerField(null=True, blank=True)
+    #: Paths sampled through the logic tree (ADR 18). Recorded beside the seed,
+    #: because between them they are what makes this run's catalogue the one it
+    #: was rather than another draw of the same configuration.
+    logic_tree_paths = models.IntegerField(null=True, blank=True)
     random_seed = models.BigIntegerField(
         null=True, blank=True,
         help_text="Recorded so a reproducible run can be repeated exactly.",

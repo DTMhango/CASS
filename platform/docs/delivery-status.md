@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 2,061 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 2,062 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
@@ -358,6 +358,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 31 | Point CASS at the GEM release on the user's own device, and check it | §6 | Done: the release is not bundled. The person running CASS keeps GEM's two repositories on their own device, in the models folder the installation mounts (`CASS_MODELS_PATH`), and the Build tab lists every release it finds there and lets one be chosen, with no environment file to edit and no restart. A folder is checked before it is kept — both repositories in GEM's published layout, the world exposure-to-vulnerability mapping, and at least one country's functions — and the commit and tags of each repository are read from its own git metadata, so the card says which release it is and whether it is the v2026.0.0 CASS was validated against. Each choice is kept as a record; `CASS_GEM_ROOT` still applies until anybody chooses |
 | 33 | A schedule without storey counts is keyed the same way in the engine as in CASS | §5, §6 | Done: found while testing item 21 on the live engine. CASS writes a blank storey count where a schedule gives none, and oasislmf fills a blank `NumberOfStoreys` with OED's default of 0 before the engine's lookup reads the row. The lookup read 0 as a height no storey band covers, so in the engine every such risk failed with no vulnerability function while CASS's own keys answered it as unstated — which no live run had shown, because every live book states its storeys. 0 now reads as not stated, in both lookups |
 | 34 | Read OED's peril codes as OED defines them | §5, §9 | Done: found while deciding item 21. CASS expanded `QQ`, which OED does not define, and did not recognise `QQ1` — OED's code for the whole earthquake group — or `AA1` for every peril, so a schedule written the ordinary way was read as covering no sub-peril CASS models and refused at validation. It also called `QSL` liquefaction, where OED uses `QSL` for sprinkler leakage and `QLF` for liquefaction, so a model version's scope statement excluded the wrong thing by name. The group codes now expand, the labels follow OED, the scope statement names both, and CASS's own demonstration book uses `QQ1` |
+| 35 | Count the sampled logic-tree paths in a hazard set's effective time | §5, §7 | Done: found while preparing the rebuild ADR 18 calls for. The converter's effective time was corrected to investigation time × event sets × paths, but the registry's own `HazardSet.effective_time` still multiplied the first two — and the new default samples twenty paths of one event set each, where the old one ran twenty event sets along one path. The same thousand years would have been recorded as fifty, dividing every annual rate, every AAL and every return period's frequency by twenty, in a record that still read as complete. A hazard set now stores the paths it pools, as ADR 18 requires of it, and the package builder reads the set's effective time rather than multiplying a second time in a second place. A test registers a twenty-path catalogue and fails at 50 against 1,000 without the fix. Sets registered before this pooled one path, so their recorded span is unchanged |
 | 30 | Remove the Nepal prototype | — | Done: the compiled-in Nepal grid, enrichment and GEM location are gone, now that a grid, a vulnerability set and a model version can be built on the platform for any country. The 30 June book still carries Nepali business, so the tests that map it build Nepal from a written grid specification, and the acceptance tests against GEM's published Nepal data use a written enrichment — the path somebody working on a country now takes. KRE's own Nepal policies are untouched |
 
 ## Needs a decision or outside input
@@ -416,7 +417,10 @@ machinery around one, the decision still has to be taken.
   hazard run samples twenty paths through the logic tree and pools them as one
   catalogue, and an enumerated tree stays refused. One path was a lottery of
   roughly ±20% against the model's own weighted mean, and twenty cost the same
-  to run.
+  to run. A hazard set now records how many paths it pools, and its effective
+  time counts them: without that, the twenty-path default would have divided
+  every annual rate and every AAL by twenty while the record still read as
+  complete (item 35).
 - **The footprint storage format.** Decided
   ([ADR 19](adr/0019-footprint-stays-a-ktools-binary.md)): the ktools binary
   stays, compression is measured and held in reserve, and Parquet is rejected.

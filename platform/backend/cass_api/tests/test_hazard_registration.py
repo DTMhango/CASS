@@ -55,6 +55,43 @@ def export(tmp_path):
     return directory
 
 
+#: The same calculation sampled the way ADR 18 runs one: one fifty-year event
+#: set along each of twenty logic-tree paths, pooled into a single catalogue.
+POOLED_RUPTURE_HEADER = (
+    "#,,\"generated_by='OpenQuake engine 3.23.4', checksum=556311143, "
+    "investigation_time=50.0, ses_per_logic_tree_path=1\""
+)
+
+
+@pytest.fixture()
+def pooled_export(tmp_path):
+    """A calculation pooled across twenty equally weighted sampled paths."""
+    directory = tmp_path / "pooled"
+    directory.mkdir()
+    weights = "\n".join(f"{index},A~A,0.05" for index in range(20))
+    files = {
+        "gmf-data": (
+            f"{HEADER}\nevent_id,gmv_PGA,gmv_SA(0.3),gmv_SA(0.6),gmv_SA(1.0),"
+            "custom_site_id\n"
+            "0,2.0E-01,4.0E-01,3.0E-01,1.0E-01,8055\n"
+            "1,1.0E-01,2.0E-01,1.5E-01,8.0E-02,8056\n"
+        ),
+        # Years run across the pooled catalogue: the first path's fifty, then
+        # the next path's, which is what makes the span a thousand years.
+        "events": (
+            f"{HEADER}\nevent_id,rup_id,rlz_id,year,ses_id\n"
+            "0,2,0,37,1\n1,7,19,962,1\n"
+        ),
+        "ruptures": (
+            f"{POOLED_RUPTURE_HEADER}\nrup_id,source_id,mag\n2,1,5.1\n7,1,6.4\n"
+        ),
+        "realizations": f"{HEADER}\nrlz_id,branch_path,weight\n{weights}\n",
+    }
+    for stem, payload in files.items():
+        (directory / f"{stem}_1.csv").write_text(payload, encoding="utf-8")
+    return directory
+
+
 @pytest.fixture()
 def source():
     return hazard.SourceStatement(
@@ -96,8 +133,33 @@ def test_the_timing_that_decides_annual_frequency_is_stored(registered):
     hazard_set, _ = registered
     assert hazard_set.investigation_time == 50.0
     assert hazard_set.stochastic_event_sets == 20
+    assert hazard_set.logic_tree_paths == 1
     assert hazard_set.effective_time == 1000.0
     assert hazard_set.annual_event_rate == pytest.approx(0.002)
+
+
+def test_the_paths_a_pooled_catalogue_spans_count_towards_its_years(
+    pooled_export, source, grid, modeller
+):
+    """Twenty paths of one fifty-year set span a thousand years, not fifty.
+
+    The engine numbers years across the whole pooled catalogue (ADR 18), so the
+    path count is a factor of the effective time exactly as the event set count
+    is. Leaving it out would divide every annual rate by twenty while the record
+    still looked complete.
+    """
+    hazard_set, _ = hazard.register(
+        pooled_export,
+        country_code="ID",
+        version="0.1.0-pooled",
+        source=source,
+        grid=grid,
+        actor=modeller,
+    )
+    assert hazard_set.investigation_time == 50.0
+    assert hazard_set.stochastic_event_sets == 1
+    assert hazard_set.logic_tree_paths == 20
+    assert hazard_set.effective_time == 1000.0
 
 
 def test_the_engine_and_the_calculation_are_identified(registered):

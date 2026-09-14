@@ -81,6 +81,7 @@ class HazardRunSerializer(serializers.ModelSerializer):
             "id", "run", "run_detail", "model_version", "grid",
             "openquake_calculation_id", "openquake_version", "image_digest",
             "job_settings", "imts", "investigation_time", "stochastic_event_sets",
+            "logic_tree_paths",
             "random_seed", "event_count", "site_count", "gmf_bytes", "created_at",
         ]
         read_only_fields = ["id", "run_detail", "created_at"]

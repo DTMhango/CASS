@@ -317,7 +317,13 @@ class HazardModel(BaseModel, FreezableModel):
 
     @property
     def needs_sampling(self) -> bool:
-        """Whether the logic tree has to be sampled down to one realisation."""
+        """Whether the logic tree has to be sampled rather than enumerated.
+
+        Sampled, not sampled down to one: a run draws several paths and pools
+        them (ADR 18). What makes sampling necessary is that an enumerated tree
+        hands over branches of unequal weight, which an occurrence table cannot
+        express.
+        """
         return self.estimated_realizations > 1
 
 
@@ -384,11 +390,17 @@ class HazardSet(BaseModel, FreezableModel):
     a release that could only bump both together would force a scientifically
     unnecessary revision of one every time the other moved.
 
-    The fields that carry weight are the timing ones. ``investigation_time`` and
-    ``stochastic_event_sets`` multiply to the effective time, which is the
-    denominator of every annual rate computed from this set. Stored rather than
-    recomputed, because an AAL derived from the wrong denominator is wrong by
-    exactly that ratio and nothing downstream would notice.
+    The fields that carry weight are the timing ones. ``investigation_time``,
+    ``stochastic_event_sets`` and ``logic_tree_paths`` multiply to the effective
+    time, which is the denominator of every annual rate computed from this set.
+    Stored rather than recomputed, because an AAL derived from the wrong
+    denominator is wrong by exactly that ratio and nothing downstream would
+    notice.
+
+    The third of those is why the set records how many logic-tree paths it was
+    sampled along (ADR 18). The engine numbers years across the whole pooled
+    catalogue -- the first path's years, then the second's -- so twenty paths of
+    one fifty-year set span a thousand years, not fifty.
     """
 
     country_code = models.CharField(max_length=2, db_index=True)
@@ -421,6 +433,16 @@ class HazardSet(BaseModel, FreezableModel):
 
     investigation_time = models.FloatField(default=0.0)
     stochastic_event_sets = models.IntegerField(default=0)
+    #: Paths sampled through the model's logic tree, pooled into this one
+    #: catalogue (ADR 18). One is a single view of the hazard; the default is
+    #: one because a set registered before ADR 18 was sampled along exactly one.
+    logic_tree_paths = models.IntegerField(
+        default=1,
+        help_text=(
+            "Logic-tree paths this event set pools. Each is an alternative "
+            "scientific view of the hazard, and the years run across all of them."
+        ),
+    )
     event_count = models.IntegerField(default=0)
     cell_count = models.IntegerField(default=0)
     footprint_row_count = models.BigIntegerField(default=0)
@@ -457,8 +479,17 @@ class HazardSet(BaseModel, FreezableModel):
 
     @property
     def effective_time(self) -> float:
-        """Years the event set represents, and so the number of Oasis periods."""
-        return self.investigation_time * self.stochastic_event_sets
+        """Years the event set represents, and so the number of Oasis periods.
+
+        All three factors, because a pooled catalogue's years run across every
+        path it sampled: dropping the path count would divide every annual rate
+        by a twentieth of the span the events actually cover.
+        """
+        return (
+            self.investigation_time
+            * self.stochastic_event_sets
+            * max(1, self.logic_tree_paths)
+        )
 
     @property
     def annual_event_rate(self) -> float:

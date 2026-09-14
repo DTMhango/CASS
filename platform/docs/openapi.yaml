@@ -8025,6 +8025,12 @@ components:
           minimum: -9223372036854775808
           format: int64
           nullable: true
+        logic_tree_paths:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
         random_seed:
           type: integer
           maximum: 9223372036854775807
@@ -8089,6 +8095,12 @@ components:
           format: double
           nullable: true
         stochastic_event_sets:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        logic_tree_paths:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
@@ -8166,6 +8178,15 @@ components:
         stochastic_event_sets:
           type: integer
           readOnly: true
+        logic_tree_paths:
+          type: integer
+          readOnly: true
+          description: Logic-tree paths this event set pools. Each is an alternative
+            scientific view of the hazard, and the years run across all of them.
+        effective_time:
+          type: number
+          format: double
+          readOnly: true
         event_count:
           type: integer
           readOnly: true
@@ -8196,6 +8217,7 @@ components:
       - cell_count
       - country_code
       - created_at
+      - effective_time
       - engine_version
       - event_count
       - footprint_row_count
@@ -8206,6 +8228,7 @@ components:
       - label
       - licence
       - licence_cleared
+      - logic_tree_paths
       - notes
       - publication_state
       - reference
@@ -9468,6 +9491,12 @@ components:
           format: double
           nullable: true
         stochastic_event_sets:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+        logic_tree_paths:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808

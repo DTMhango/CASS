@@ -1243,6 +1243,10 @@ export interface HazardSet {
   engine_version: string;
   investigation_time: number;
   stochastic_event_sets: number;
+  /** Logic-tree paths pooled into this catalogue (ADR 18). */
+  logic_tree_paths: number;
+  /** Years the catalogue covers: the three factors above multiplied. */
+  effective_time: number;
   event_count: number;
   cell_count: number;
   footprint_row_count: number;

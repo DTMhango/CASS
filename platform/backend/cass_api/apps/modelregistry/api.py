@@ -715,13 +715,18 @@ class HazardModelSerializer(serializers.ModelSerializer):
 
 class HazardSetSerializer(serializers.ModelSerializer):
     reference = serializers.CharField(read_only=True)
+    #: The span the catalogue covers, served rather than left to be recomputed:
+    #: it is investigation time by event sets by logic-tree paths, and a reader
+    #: multiplying the first two alone gets every annual rate wrong (ADR 18).
+    effective_time = serializers.FloatField(read_only=True)
 
     class Meta:
         model = HazardSet
         fields = [
             "id", "reference", "country_code", "version", "label", "source_model",
             "licence", "licence_cleared", "grid", "engine_version",
-            "investigation_time", "stochastic_event_sets", "event_count",
+            "investigation_time", "stochastic_event_sets", "logic_tree_paths",
+            "effective_time", "event_count",
             "cell_count", "footprint_row_count", "imts", "samples_above_range",
             "publication_state", "notes", "created_at",
         ]
@@ -1216,6 +1221,7 @@ class HazardModelViewSet(viewsets.ReadOnlyModelViewSet):
             imts=list(spec.resolved_configuration.get("intensity_measures") or []),
             investigation_time=spec.overrides.get("investigation_time"),
             stochastic_event_sets=spec.overrides.get("ses_per_logic_tree_path"),
+            logic_tree_paths=spec.overrides.get("number_of_logic_tree_samples"),
             random_seed=spec.overrides.get("random_seed"),
             created_by=request.user,
             updated_by=request.user,

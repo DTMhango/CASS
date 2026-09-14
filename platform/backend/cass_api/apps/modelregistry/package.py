@@ -95,11 +95,15 @@ def gather(model_version: ModelVersion) -> oasis_package.PackageInputs:
         )
         for imt in hazard_set.imts
     }
-    period_count = hazard_set.investigation_time * hazard_set.stochastic_event_sets
+    # The hazard set's own effective time, not a second multiplication here: two
+    # places computing the span of the same catalogue is two places to forget a
+    # factor, and the factor this one forgot was the logic-tree paths (ADR 18).
+    period_count = hazard_set.effective_time
     if period_count <= 0 or period_count != int(period_count):
         raise PackageBuildError(
             f"{hazard_set.reference} records {hazard_set.investigation_time} years over "
-            f"{hazard_set.stochastic_event_sets} event sets, which is not a whole "
+            f"{hazard_set.stochastic_event_sets} event sets and "
+            f"{hazard_set.logic_tree_paths} logic-tree paths, which is not a whole "
             "number of periods. Annual frequency could not be preserved."
         )
 
