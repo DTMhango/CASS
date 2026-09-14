@@ -278,15 +278,19 @@ def build_all(
 
 
 def default_policy(
-    imt_representation: IMTRepresentation = IMTRepresentation.UNDECIDED,
+    imt_representation: IMTRepresentation = IMTRepresentation.CORRELATED_CHANNELS,
 ) -> ConversionPolicy:
-    """The policy a pilot vulnerability build runs under.
+    """The policy a vulnerability build runs under where the build names none.
 
-    Undecided on both open questions unless the build names a representation,
-    which is what the record should say. It declares the four measures GEM's
-    pilot-country functions actually demand -- not the three the SA-first
-    sequencing prefers -- because a function built for PGA is not made an SA
-    function by leaving PGA off a list.
+    Correlated channels, which is the representation ADR 16 decided: a class
+    spanning measures is carried as one engine item per measure, so the build
+    writes each channel's pre-weighted function. Undecided can still be asked
+    for, and then such a class is refused as before. Event identity stays
+    undecided either way, because a damage table does not depend on it.
+
+    It declares the four measures GEM's pilot-country functions actually demand
+    -- not the three the SA-first sequencing prefers -- because a function built
+    for PGA is not made an SA function by leaving PGA off a list.
     """
     return ConversionPolicy(
         imt_representation=imt_representation,
@@ -452,8 +456,10 @@ def register_from_specification(
             "a table, and a wrong one would read another country's mapping."
         )
 
-    stated = str(document.get("imt_representation") or "").strip()
-    if stated and policy is None:
+    stated = str(
+        document.get("imt_representation") or IMTRepresentation.CORRELATED_CHANNELS
+    ).strip()
+    if policy is None:
         try:
             representation = IMTRepresentation(stated)
         except ValueError:

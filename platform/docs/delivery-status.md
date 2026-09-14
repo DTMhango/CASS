@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 2,052 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 2,053 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
@@ -167,6 +167,20 @@ run. Production items that serve only a governed deployment are not pursued
   against 626,732, a ratio of 0.904 — and between 0.70 and 1.26 at the reported
   return periods, with the 500- and 1,000-year ranks resting on two events and
   one. No tolerance is approved, so nothing passed or failed.
+- The multi-IMT representation was decided on the live stack (item 21,
+  [ADR 16](adr/0016-multi-measure-classes-as-sub-peril-channels.md)). A building
+  of unknown height was run through the live model package over all 27,313
+  events at 20 samples, split into one item per shaking measure and unsplit: the
+  split items' mean loss matched the weighted sum of the single-measure items to
+  under a cent per event, and the insured loss matched the location deductible
+  and limit in every event-sample — while the control, with the terms left
+  scoped to shake, was wrong in 89 of 114 and 40% too high. Three books derived
+  from the Jakarta–Bandung test book were then run ground-up against the
+  OpenQuake reference on one set of ground-motion fields: with heights stated
+  (no split value) 0.904 of the engine's average annual loss, with heights
+  withheld (7.2% split) 1.032, and as commercial buildings of unknown height
+  (all value split) 0.968. The stated book reproduced its earlier ratio exactly,
+  so the change leaves a class of one measure untouched.
 - The OED 4.0.0 and 5.0.0 specifications ODS Tools 5.0.8 ships were compared
   field by field: 565 fields become 574, and every change is an addition of an
   optional location field (the nine photovoltaic attributes). Nothing is
@@ -267,7 +281,7 @@ reviewed research result, not a basis for pricing or reserving.
 | --- | --- | --- | --- |
 | Purpose | A governed platform whose results support pricing, reserving and capital decisions | A research tool. Built governance kept as it is and not extended; production-only items not pursued | [ADR 15](adr/0015-research-tool-and-gem-permission.md) |
 | Model data rights | Research only until GEM confirms commercial use in writing | Everything GEM makes publicly available, its exposure and vulnerability models and PuSGeN 2024 among them, used under GEM Foundation's explicit permission and credited; data GEM does not publish under the internal-use basis | [ADR 7](adr/0007-internal-use-licence-basis.md), [ADR 15](adr/0015-research-tool-and-gem-permission.md) |
-| Intensity measures | SA only, PGA deferred | All four measures as correlated area-peril channels; multi-measure classes refused | [ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md) |
+| Intensity measures | SA only, PGA deferred | All four measures as correlated area-peril channels; a class spanning measures carried as one earthquake sub-peril item per measure, on pre-weighted functions | [ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md), [ADR 16](adr/0016-multi-measure-classes-as-sub-peril-channels.md) |
 | Model package | Binaries compiled with Oasis tools | Written by CASS, byte-checked against PiWind, CASS lookup inside | [ADR 9](adr/0009-cass-writes-the-oasis-package.md) |
 | Engine images | Unmodified upstream | Oasis worker patched at build time; OpenQuake unmodified | [ADR 10](adr/0010-patched-oasis-worker.md) |
 | Portfolio intake | Two-sheet extract; role-gated names; cedant segmentation | Intake template joined on Policy ID; no role gate; no cedant | [ADR 11](adr/0011-intake-template-and-policy-id.md) |
@@ -300,7 +314,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 18 | Backup and restore of research work: the database and the artifact store | §11 | Postponed on 14 September 2026: not yet necessary. Re-scoped earlier from a production restore drill to a procedure that keeps research work from being lost |
 | 19 | CI: Oasis worker image build and the integration workflow | §17 | Done: CI builds the patched Oasis worker beside the other images, so raising the upstream version past the patched defect fails the build; it is the one image not scanned, because its findings are the upstream image's. A separate integration workflow runs on demand and weekly: it fetches GEM's exposure and vulnerability models at the commits the model manifest pins, runs the integration suite, and lists what it skipped for data CI cannot have — the national hazard package, an OpenQuake datastore, a live Oasis. The portfolio workbook never enters CI, and a deployment test refuses a workflow that names it. Neither workflow has run on GitHub yet: both parse, and reading the pinned commits from the manifest was run locally. SBOMs for releases stay dropped |
 | 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Done: every image the compose file pulls from a registry is pinned by digest as well as tag — `openquake/engine:3.23` among them, a minor-version tag that would otherwise move — and each pinned reference resolves to the image the installation already runs. Every base a CASS build starts from is pinned the same way, the patched Oasis worker's included; those digests were read from the registry, and no image has been rebuilt from them yet. The images this repository builds are not pinned, because their digest changes with every build: a run records the engine version and, where the deployment exposes it, the image digest it ran on. A deployment test refuses an unpinned image. The signed release bundle stays dropped |
-| 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | In progress. Measured so far: under today's refusal the 30 June benchmark book cannot be modelled at all, because it states no storey counts and every class it reaches spans all four measures. On the live engine, splitting such a class into one item per measure — each under its own earthquake sub-peril and answered by its channel's function scaled by the channel's share — added back to the class to under a cent per event, and kept the location terms exact once the terms sent to the engine named every earthquake peril; without that the insured loss was 40% too high. That candidate is now built: a vulnerability set built as correlated channels writes each channel's pre-weighted function, the package keys such a class as one sub-peril item per measure and refuses a set without those functions, and a run against it scopes the terms it sends to all earthquake perils while the published files keep what was reported. Undecided stays the default until the candidate is measured against the OpenQuake reference on the live stack. The plan and the numbers are in [the decision studies](research/decision-studies.md) |
+| 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Done, and decided in [ADR 16](adr/0016-multi-measure-classes-as-sub-peril-channels.md): a class spanning measures is carried as one earthquake sub-peril item per measure, each answered by its channel's function scaled by the channel's share, with the terms the engine receives scoped to all earthquake perils. Under the old refusal the 30 June benchmark book could not be modelled at all — it states no storey counts, so every class it reaches spans all four measures. On the live engine the split items add back to the class to under a cent per event and honour the location terms exactly; without the wider peril scope the insured loss was 40% too high, silently. Against the OpenQuake reference the book carried entirely this way is at 0.968 of the engine's average annual loss, inside the spread the book of stated heights shows (0.904, and 0.70–1.26 across return periods), and the stated book reproduced its earlier ratio exactly. A set is now built this way unless its specification asks for undecided. The plan, the numbers and what they do not settle are in [the decision studies](research/decision-studies.md) |
 | 22 | Realisation weighting: measure what one sampled logic-tree path costs against weighted realisations, and decide the rule | §7, M3 | Not started. The hazard behind every Indonesian loss is one sampled path until it is decided ([ADR 12](adr/0012-national-classical-model-run-event-based.md)) |
 | 23 | Footprint storage: measure a national footprint as ktools binary and as Parquet, and decide the runtime format | §7, §18 | Not started. Needs a national-scale footprint, which the full-country run would produce |
 | 24 | Build an area-peril grid on the platform, for any country, from a written specification | §6 | Done: a specification — tiles, a base resolution, named refinements and the reason for each — is posted to `/grids/build/`, generated through the same builder the prototypes use, and registered as a draft with its cells. A specification that would exceed the installation's cell limit is refused with its own count, before anything is generated. The prototypes now go through the same registration, and the Build tab carries the form |
@@ -365,6 +379,13 @@ machinery around one, the decision still has to be taken.
   rule, the footprint storage format and the event representation (items 21,
   22, 23 and 26), measures them on the platform, and decides with the evidence
   written down in plain terms. They are not waiting on a reviewer's judgement.
+- **The multi-IMT representation.** Decided, on the platform's own measurements
+  ([ADR 16](adr/0016-multi-measure-classes-as-sub-peril-channels.md)): a class
+  spanning intensity measures is carried as one earthquake sub-peril item per
+  measure, on functions pre-weighted by each measure's share of the class, with
+  the financial terms the engine receives scoped to all earthquake perils. The
+  alternative was to keep refusing such a class, which left a book with no
+  storey counts unmodelled.
 - **Backup and restore of research work.** Postponed: not yet necessary
   (item 18).
 - **Where the GEM release comes from.** Not bundled: the 2026 release is too

@@ -103,7 +103,7 @@ const RESULTS: ImportResults = {
       value_established_in_review: 0,
       value_unstated: 822_817_000,
       value_stated_share: 0,
-      note: "A risk with no storey count reaches vulnerability candidates across several intensity measures and cannot become one Oasis function.",
+      note: "A risk with no storey count reaches vulnerability candidates across several intensity measures and cannot become one Oasis function. It is modelled as the blend of every height those candidates have, one engine item per measure.",
     },
   },
   missing_model_inputs: [

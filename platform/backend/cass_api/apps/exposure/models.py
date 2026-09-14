@@ -518,9 +518,10 @@ class SourceRiskLocation(BaseModel):
     #: responds at, so a risk that states it reaches GEM candidates at one
     #: measure and a risk that does not reaches them across four -- which no
     #: choice of damage bins can make into a single Oasis function. On this
-    #: book a commercial reinforced-concrete risk with no storey count cannot
-    #: be answered at all until the multi-IMT representation is approved; the
-    #: same risk at two storeys resolves to PGA alone.
+    #: book a commercial reinforced-concrete risk with no storey count is
+    #: modelled as the blend of every height GEM's candidates have, one engine
+    #: item per measure (ADR 16); the same risk at two storeys resolves to PGA
+    #: alone, which is the building the schedule actually describes.
     storeys = models.IntegerField(null=True, blank=True)
 
     precision = models.CharField(max_length=32, blank=True)

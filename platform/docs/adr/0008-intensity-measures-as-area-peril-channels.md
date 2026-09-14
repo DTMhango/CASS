@@ -3,6 +3,9 @@
 Status: Accepted
 Date: 2026-09-13
 Amends: [ADR 4](0004-converter-refuses-unapproved-policy.md)
+Amended by: [ADR 16](0016-multi-measure-classes-as-sub-peril-channels.md), which
+carries a class spanning measures as one earthquake sub-peril item per measure
+rather than refusing it
 
 ## Context
 

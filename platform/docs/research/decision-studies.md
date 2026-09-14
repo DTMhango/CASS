@@ -155,8 +155,46 @@ built as correlated channels:
   financial terms are scoped to all earthquake perils (`QQ1`), keeps that copy
   with the run, and leaves the published files as reported.
 
-A set built without naming a representation stays undecided, and refuses these
-classes as before, until the live measurement below decides the question.
+A set built without naming a representation stayed undecided, and refused these
+classes as before, until the live measurement below decided the question.
+
+### Step 4, measured 14 September 2026: against the OpenQuake reference
+
+A set was built for Indonesia as correlated channels under its own version, so
+the Indonesian set in use was left alone, and assembled with the grid and
+PuSGeN 2024 hazard already on the live stack. Three books were derived from the
+synthetic Jakarta–Bandung test book, each run ground-up and each compared with
+OpenQuake on the same ground-motion fields:
+
+| Book | Value through split items | Average annual loss ratio | Return-period ratios |
+| --- | --- | --- | --- |
+| Storeys stated, as published | 0% | 0.904 | 0.70–1.26 |
+| Storeys withheld | 7.2% | 1.032 | 0.91–1.30 |
+| Commercial, construction and height unknown — the benchmark's default | 100% | 0.968 | 0.75–1.38 |
+
+On every book CASS's keys and the engine's lookup agreed on all 64 locations,
+and all of each book's value was mapped. The storeys-stated book reproduced its
+earlier ratio exactly, so the new package changes nothing for a class of one
+measure.
+
+### Decision
+
+**Adopted: candidate B** ([ADR 16](../adr/0016-multi-measure-classes-as-sub-peril-channels.md)).
+
+In plain terms: when CASS cannot tell how tall a building is, it now models it
+as the blend of every building GEM thinks it could be, sending the engine one
+piece per shaking measure, each carrying its share of the damage. On the real
+engine the pieces add back to the blend exactly, and the insurance terms apply
+to their total. Against OpenQuake's own calculation, a book modelled entirely
+this way is as close as a book of known heights is — and the book of known
+heights was already 10% low, which is a property of the conversion as a whole
+(binning the shaking and the damage), not of this choice.
+
+What it does not settle: the ratios rest on one hazard realisation and 64
+locations, and the tail ratios on few events. A single building's damage is the
+weighted sum of its candidates' damage rather than a draw from one of them, so
+its mean is right and its spread narrower; the OpenQuake reference splits value
+the same way and cannot see that.
 
 ## 2. Whether a simulated occurrence or a rupture is the Oasis event (item 26)
 

@@ -294,9 +294,10 @@ def storey_coverage(
 
     The number this exists to make visible: value on risks with no storey count
     is value that reaches vulnerability classes spanning several intensity
-    measures, and those cannot be answered until the multi-IMT representation
-    is approved. Counting the risks understates it, because the large ones are
-    the ones with the schedules -- so value is reported alongside.
+    measures, which are modelled as a blend of every height GEM's candidates
+    have (ADR 16) rather than as the building the schedule describes. Counting
+    the risks understates it, because the large ones are the ones with the
+    schedules -- so value is reported alongside.
     """
     applied = resolved if resolved is not None else overlays(locations)
 
@@ -331,10 +332,11 @@ def storey_coverage(
         ),
         "note": (
             "A risk with no storey count reaches vulnerability candidates across "
-            "several intensity measures and cannot become one Oasis function. "
-            "Until the multi-IMT representation is approved, that value is "
-            "refused rather than approximated -- so this share is the cheapest "
-            "lever on how much of the book can be modelled at all."
+            "several intensity measures and cannot become one Oasis function. It "
+            "is modelled as the blend of every height those candidates have, one "
+            "engine item per measure (ADR 16) -- so this share is the cheapest "
+            "lever on how much of the book is modelled as the building the "
+            "schedule describes rather than as an average of the ones it could be."
         ),
     }
 

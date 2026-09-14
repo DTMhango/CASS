@@ -185,15 +185,16 @@ class VulnerabilitySet(BaseModel, FreezableModel):
         default=IMTRepresentation.UNDECIDED,
         help_text=(
             "Which section 6 multi-IMT representation this set was built under. "
-            "A class spanning intensity measures is refused under 'undecided', "
-            "so this is a gate rather than a label."
+            "A class spanning intensity measures is carried as one sub-peril item "
+            "per measure under 'correlated_channels' (ADR 16) and refused under "
+            "'undecided', so this is a gate rather than a label."
         ),
     )
     multi_channel_class_count = models.IntegerField(
         default=0,
         help_text=(
             "Classes that reach more than one intensity measure. Unroutable "
-            "while the representation is undecided."
+            "where the set was built undecided."
         ),
     )
     coverage_components = models.JSONField(
@@ -726,9 +727,10 @@ class ModelVersion(BaseModel, FreezableModel):
         if self.vulnerability_set.awaits_imt_representation:
             blockers.append(
                 f"{self.vulnerability_set.multi_channel_class_count} vulnerability "
-                "classes respond at more than one intensity measure, and no "
-                "multi-IMT representation has been approved. Risks reaching them "
-                "are refused rather than approximated."
+                "classes respond at more than one intensity measure, and this set "
+                "was built under an undecided representation. Risks reaching them "
+                "are refused rather than approximated; build the set as correlated "
+                "channels to carry them (ADR 16)."
             )
         if self.grid.publication_state != PublicationState.PUBLISHED:
             blockers.append("The area-peril grid version is not published.")
