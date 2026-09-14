@@ -1,0 +1,71 @@
+# Integration tests for the CASS platform, against the data they read.
+#
+# The unit suite runs on every change, in platform.yml. These need published
+# model data, so they run on demand and weekly instead. What CI can fetch, it
+# fetches: GEM's global exposure and vulnerability models, at the commits
+# models/gem/v2026.0.0/MODEL_MANIFEST.md pins. What it cannot -- the portfolio
+# workbook, the national hazard package, an OpenQuake datastore, a live Oasis --
+# is not fetched, and the tests that need it skip and are listed, so a green run
+# still says which suites it did not cover.
+#
+# The portfolio workbook is confidential and never enters CI. Its variable is
+# deliberately absent, and test_deployment.py refuses a workflow that names it.
+
+name: platform-integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: platform
+
+jobs:
+  integration:
+    name: Integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: platform/backend/requirements-dev.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-dev.txt
+          pip install -e backend/packages/cass_core \
+                      -e backend/packages/cass_oed \
+                      -e backend/packages/cass_extract \
+                      -e backend/services/keys \
+                      -e "backend/services/converter[hdf5]"
+
+      # Fetched at the commits the manifest records rather than at the tag, so a
+      # tag pointed somewhere else cannot change what the tests read.
+      - name: Fetch the pinned GEM release
+        working-directory: .
+        run: |
+          manifest=models/gem/v2026.0.0/MODEL_MANIFEST.md
+          root="$RUNNER_TEMP/gem/v2026.0.0"
+          for repo in global_exposure_model global_vulnerability_model; do
+            commit=$(grep -A3 "github.com/gem/${repo}.git" "$manifest" | grep -oE '[0-9a-f]{40}' | head -1)
+            test -n "$commit" || { echo "No commit is pinned for ${repo} in ${manifest}."; exit 1; }
+            git init --quiet "$root/$repo"
+            git -C "$root/$repo" fetch --quiet --depth 1 "https://github.com/gem/${repo}.git" "$commit"
+            git -C "$root/$repo" checkout --quiet FETCH_HEAD
+            test "$(git -C "$root/$repo" rev-parse HEAD)" = "$commit"
+          done
+          echo "CASS_GEM_PATH=$root" >> "$GITHUB_ENV"
+
+      - name: Test
+        working-directory: platform/backend
+        run: pytest -m integration -rs

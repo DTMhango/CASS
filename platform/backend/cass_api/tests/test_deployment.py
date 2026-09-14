@@ -13,12 +13,17 @@ did not run.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
 
 COMPOSE = Path(__file__).resolve().parents[3] / "deploy" / "docker-compose.yml"
 IMAGES = Path(__file__).resolve().parents[3] / "deploy" / "images"
+WORKFLOWS = Path(__file__).resolve().parents[4] / ".github" / "workflows"
+GEM_MANIFEST = (
+    Path(__file__).resolve().parents[4] / "models" / "gem" / "v2026.0.0" / "MODEL_MANIFEST.md"
+)
 
 #: Services that run the control plane's own code, and so must run the same build.
 CONTROL_PLANE = ("api", "worker", "beat")
@@ -101,3 +106,36 @@ def test_every_image_a_build_starts_from_is_pinned_by_digest():
                 unpinned.append(f"{dockerfile.name}: {reference}")
 
     assert not unpinned, f"pin these by digest: {unpinned}"
+
+
+def test_ci_builds_every_image_the_repository_defines():
+    """An image CI never builds is one whose Dockerfile can rot unnoticed.
+
+    The patched Oasis worker is the case that matters: its patch asserts the
+    source it replaces, so building it is how a raised upstream version that
+    has moved past the defect gets caught.
+    """
+    workflow = yaml.safe_load((WORKFLOWS / "platform.yml").read_text(encoding="utf-8"))
+    built = set(workflow["jobs"]["images"]["strategy"]["matrix"]["image"])
+    defined = {path.name.removeprefix("Dockerfile.") for path in IMAGES.glob("Dockerfile.*")}
+
+    assert defined <= built, f"CI does not build: {sorted(defined - built)}"
+
+
+def test_the_integration_workflow_reads_the_gem_release_the_manifest_pins():
+    """One place says which GEM commits CASS was validated against, and CI reads it."""
+    workflow = (WORKFLOWS / "platform-integration.yml").read_text(encoding="utf-8")
+    manifest = GEM_MANIFEST.read_text(encoding="utf-8")
+
+    assert "MODEL_MANIFEST.md" in workflow
+    assert "CASS_GEM_PATH" in workflow
+    assert "-m integration" in workflow
+    for repository in ("global_exposure_model", "global_vulnerability_model"):
+        section = manifest.split(f"github.com/gem/{repository}.git", 1)[1][:200]
+        assert re.search(r"\b[0-9a-f]{40}\b", section), f"no commit pinned for {repository}"
+
+
+def test_no_workflow_names_the_confidential_portfolio():
+    """The workbook is KRE's own book. CI is not somewhere it may be read."""
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        assert "CASS_EXTRACT_PATH" not in path.read_text(encoding="utf-8"), path.name
