@@ -42,6 +42,7 @@ from cass_converter.model_build import (
     vulnerability_csv,
 )
 from cass_converter.policy import ConversionPolicy, EventIdentity, IMTRepresentation
+from cass_core.policy import WEIGHTED_CHANNEL_OFFSET
 
 IMTS = ("PGA", "SA(0.3)", "SA(1.0)")
 
@@ -456,7 +457,75 @@ def test_a_class_reaching_an_undeclared_measure_is_refused(
 def test_the_vulnerability_table_covers_every_channel(build):
     rows = list(csv.DictReader(io.StringIO(vulnerability_csv(build).decode())))
     identifiers = {int(row["vulnerability_id"]) for row in rows}
-    assert identifiers == {item.vulnerability_id for item in build.functions}
+    assert identifiers == {
+        item.vulnerability_id for item in (*build.functions, *build.weighted_functions)
+    }
+
+
+def test_each_channel_of_a_class_spanning_measures_has_a_weighted_twin(build):
+    """The engine prices each measure's item at the whole coverage, so the share
+    has to be in the item's damage for the items to add back to the class."""
+    assert build.weighted_functions
+    for item in build.classes:
+        for channel in item.channels:
+            if not item.needs_multi_imt:
+                assert channel.weighted is None
+                continue
+            assert channel.weighted.vulnerability_id == (
+                channel.vulnerability_id + WEIGHTED_CHANNEL_OFFSET
+            )
+            assert channel.weighted.scaled_by == channel.weight
+            for source, scaled in zip(
+                channel.function.reconstruction, channel.weighted.reconstruction, strict=True
+            ):
+                # To the probability floor the table keeps, 1e-09.
+                assert scaled.table_mean == pytest.approx(
+                    channel.weight * source.table_mean, abs=1e-08
+                )
+
+
+def test_an_undecided_build_writes_no_twins(enrichment, models, prior, bins):
+    """Under refusal nothing answers such a class, so nothing is written for it."""
+    built = build_country(
+        enrichment=enrichment,
+        models=models,
+        prior=prior,
+        intensity_bins=bins["intensity"],
+        damage_bins=bins["damage"],
+        policy=ConversionPolicy(imts=IMTS),
+        coverage_types=(1,),
+    )
+
+    assert built.multi_imt_classes
+    assert built.weighted_functions == ()
+    rows = list(csv.DictReader(io.StringIO(vulnerability_csv(built).decode())))
+    assert max(int(row["vulnerability_id"]) for row in rows) < WEIGHTED_CHANNEL_OFFSET
+
+
+def test_every_assumption_set_scales_its_twins_by_its_own_shares(
+    enrichment, models, prior, bins, policy
+):
+    """A set re-weighs the candidates, which can move a channel's share of its class."""
+    builds = variant_builds(
+        enrichment, models, prior, bins, policy,
+        {"baseline": {}, "more_vulnerable": MORE_VULNERABLE},
+    )
+
+    assert structure(builds["baseline"]) == structure(builds["more_vulnerable"])
+    for built in builds.values():
+        for item in built.multi_imt_classes:
+            for channel in item.channels:
+                assert channel.weighted.scaled_by == channel.weight
+
+
+def test_the_dictionary_names_each_channel_s_twin(build):
+    entries = dictionary(build)["entries"]
+    spanning = [item for item in entries if item["weighted_vulnerability_id"] is not None]
+    assert spanning
+    assert all(
+        item["weighted_vulnerability_id"] == item["vulnerability_id"] + WEIGHTED_CHANNEL_OFFSET
+        for item in spanning
+    )
 
 
 def test_the_mapping_has_a_row_per_channel(build):

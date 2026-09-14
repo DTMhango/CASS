@@ -37,6 +37,7 @@ from cass_converter.vulnerability import (
     sample,
     table_report,
     to_csv,
+    weighted,
 )
 
 
@@ -165,6 +166,74 @@ def test_mean_preservation_holds_however_coarse_the_bins_are():
     masses = bin_probabilities(0.37, 0.8, coarse)
     mean, _ = reconstruct(masses, coarse)
     assert mean == pytest.approx(0.37, abs=1e-09)
+
+
+# -- a channel's share of its class --------------------------------------------------
+
+def test_a_weighted_twin_carries_its_share_of_the_expected_damage(damage, intensity):
+    """The engine prices every item at the whole coverage, so the share is in the damage."""
+    channel = discretise(
+        curve(), vulnerability_id=7, intensity_bins=intensity, damage_bins=damage
+    )
+
+    twin = weighted(channel, 0.3, vulnerability_id=1_000_007, damage_bins=damage)
+
+    assert {row.vulnerability_id for row in twin.rows} == {1_000_007}
+    assert twin.scaled_by == 0.3
+    # To the probability floor: the twin is scaled from the table the engine reads,
+    # which drops probabilities below 1e-09.
+    for source, scaled in zip(channel.reconstruction, twin.reconstruction, strict=True):
+        assert scaled.table_mean == pytest.approx(0.3 * source.table_mean, abs=1e-08)
+        assert scaled.source_mean == pytest.approx(0.3 * source.source_mean)
+        assert scaled.source_cov == source.source_cov
+    assert twin.worst_mean_error < 1e-07
+
+
+def test_a_weighted_twin_moves_probability_without_creating_or_losing_any(damage, intensity):
+    channel = discretise(
+        curve(), vulnerability_id=7, intensity_bins=intensity, damage_bins=damage
+    )
+
+    twin = weighted(channel, 0.55, vulnerability_id=9, damage_bins=damage)
+
+    totals: dict[int, float] = {}
+    for row in twin.rows:
+        totals[row.intensity_bin_id] = totals.get(row.intensity_bin_id, 0.0) + row.probability
+    assert set(totals) == {item.bin_index for item in intensity.bins}
+    assert all(total == pytest.approx(1.0, abs=1e-06) for total in totals.values())
+
+
+def test_a_share_of_one_is_the_channel_itself(damage, intensity):
+    channel = discretise(
+        curve(), vulnerability_id=7, intensity_bins=intensity, damage_bins=damage
+    )
+
+    twin = weighted(channel, 1.0, vulnerability_id=7, damage_bins=damage)
+
+    assert [(row.intensity_bin_id, row.damage_bin_id) for row in twin.rows] == [
+        (row.intensity_bin_id, row.damage_bin_id) for row in channel.rows
+    ]
+    for scaled, source in zip(twin.rows, channel.rows, strict=True):
+        assert scaled.probability == pytest.approx(source.probability, abs=1e-12)
+
+
+@pytest.mark.parametrize("share", [0.0, -0.2, 1.2])
+def test_a_share_outside_the_class_is_refused(damage, intensity, share):
+    channel = discretise(
+        curve(), vulnerability_id=7, intensity_bins=intensity, damage_bins=damage
+    )
+    with pytest.raises(DiscretisationError, match="share of its class"):
+        weighted(channel, share, vulnerability_id=2, damage_bins=damage)
+
+
+def test_a_twin_is_scaled_on_the_grid_its_channel_was_built_on(damage, intensity):
+    """A probability read against another dictionary describes another damage ratio."""
+    channel = discretise(
+        curve(), vulnerability_id=7, intensity_bins=intensity, damage_bins=damage
+    )
+    coarse = DamageBinSet(version="2.0.0", bins=oasis_damage_bins(5))
+    with pytest.raises(DiscretisationError, match="another dictionary"):
+        weighted(channel, 0.5, vulnerability_id=2, damage_bins=coarse)
 
 
 # -- one function -------------------------------------------------------------------

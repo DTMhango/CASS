@@ -33,6 +33,8 @@ import io
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+from cass_core.policy import MULTI_CHANNEL_REPRESENTATIONS, WEIGHTED_CHANNEL_OFFSET
+
 from .bins import DamageBinSet, IntensityBinSet
 from .enrichment import (
     OED_CONSTRUCTION,
@@ -55,6 +57,7 @@ from .vulnerability import (
     blend,
     table_report,
     to_csv,
+    weighted,
 )
 
 #: Bumped when the class enumeration or the identifier ordering changes.
@@ -146,12 +149,20 @@ class Channel:
     weight: float
     vulnerability_id: int
     function: DiscretisedFunction
+    #: The function with its damage scaled by ``weight``, under
+    #: ``vulnerability_id + WEIGHTED_CHANNEL_OFFSET``. Only a channel of a class
+    #: spanning measures has one, and only under a representation that carries
+    #: such a class as one item per measure.
+    weighted: DiscretisedFunction | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "imt": self.imt,
             "weight": self.weight,
             "vulnerability_id": self.vulnerability_id,
+            "weighted_vulnerability_id": (
+                self.weighted.vulnerability_id if self.weighted is not None else None
+            ),
             "taxonomies": [
                 {"taxonomy": name, "weight": share}
                 for name, share in self.function.components
@@ -221,6 +232,16 @@ class CountryBuild:
     def multi_imt_classes(self) -> tuple[ClassBuild, ...]:
         return tuple(item for item in self.classes if item.needs_multi_imt)
 
+    @property
+    def weighted_functions(self) -> tuple[DiscretisedFunction, ...]:
+        """The channels' pre-weighted twins, for classes carried one item per measure."""
+        return tuple(
+            channel.weighted
+            for item in self.classes
+            for channel in item.channels
+            if channel.weighted is not None
+        )
+
     def as_dict(self) -> dict[str, Any]:
         functions = self.functions
         measures = sorted({item.imt for item in functions})
@@ -232,6 +253,7 @@ class CountryBuild:
             "sources": dict(self.sources),
             "classes": len(self.classes),
             "functions": len(functions),
+            "weighted_channel_functions": len(self.weighted_functions),
             "intensity_measures": measures,
             "classes_needing_multi_imt": len(self.multi_imt_classes),
             "single_channel_classes": len(self.classes) - len(self.multi_imt_classes),
@@ -342,6 +364,11 @@ def build_country(
                     )
 
                 identifier += 1
+                if identifier >= WEIGHTED_CHANNEL_OFFSET:
+                    raise BuildError(
+                        f"The {enrichment.country_code} build reached identifier "
+                        f"{identifier}, where channels' pre-weighted twins begin."
+                    )
                 components = [
                     Component(model.by_taxonomy[item.taxonomy], item.weight)
                     for item in candidates
@@ -361,6 +388,23 @@ def build_country(
                         ),
                     )
                 )
+
+            if len(channels) > 1 and policy.imt_representation in MULTI_CHANNEL_REPRESENTATIONS:
+                # Carried as one item per measure, and the engine prices each
+                # item at the whole coverage, so each channel also gets its
+                # function with the damage scaled by its share of the class.
+                channels = [
+                    dataclasses.replace(
+                        channel,
+                        weighted=weighted(
+                            channel.function,
+                            channel.weight,
+                            vulnerability_id=channel.vulnerability_id + WEIGHTED_CHANNEL_OFFSET,
+                            damage_bins=damage_bins,
+                        ),
+                    )
+                    for channel in channels
+                ]
 
             built.append(
                 ClassBuild(
@@ -415,7 +459,10 @@ def structure(build: CountryBuild) -> tuple[tuple[Any, ...], ...]:
             item.occupancy_code,
             item.construction_code,
             item.storey_band,
-            tuple((channel.imt, channel.vulnerability_id) for channel in item.channels),
+            tuple(
+                (channel.imt, channel.vulnerability_id, channel.weighted is not None)
+                for channel in item.channels
+            ),
         )
         for item in build.classes
     )
@@ -470,8 +517,12 @@ def build_variants(
 # -- what the build produces ----------------------------------------------------------
 
 def vulnerability_csv(build: CountryBuild) -> bytes:
-    """The Oasis ``vulnerability.csv`` for every channel of every class."""
-    return to_csv(build.functions)
+    """The Oasis ``vulnerability.csv`` for every channel of every class.
+
+    Channels carried one item per measure bring their pre-weighted twins into
+    the same table, under their own identifiers, because the engine reads one.
+    """
+    return to_csv((*build.functions, *build.weighted_functions))
 
 
 def mapping_csv(build: CountryBuild) -> bytes:
@@ -537,6 +588,11 @@ def dictionary(build: CountryBuild) -> dict[str, Any]:
                 "loss_category": str(item.loss_category),
                 "required_imt": channel.imt,
                 "channel_weight": channel.weight,
+                # The identifier the engine is keyed to for this channel where
+                # its class is carried one item per measure.
+                "weighted_vulnerability_id": (
+                    channel.weighted.vulnerability_id if channel.weighted is not None else None
+                ),
                 "occupancy_code": item.occupancy_code,
                 "construction_code": item.construction_code,
                 "storey_band": item.storey_band,

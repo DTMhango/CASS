@@ -82,3 +82,15 @@ class IMTRepresentation(enum.StrEnum):
 MULTI_CHANNEL_REPRESENTATIONS: frozenset[IMTRepresentation] = frozenset(
     {IMTRepresentation.CORRELATED_CHANNELS}
 )
+
+#: How far a channel's pre-weighted twin sits from the channel's own identifier.
+#:
+#: Under correlated channels a class spanning several measures reaches the
+#: engine as one item per measure, and the engine prices every item at its
+#: coverage's whole value. Each item's function therefore carries its measure's
+#: share of the class in its damage -- a different function from the channel's
+#: own blend, which is kept because it is what the dictionary and the reference
+#: comparison trace back to GEM. The build writes the twin here and the lookup
+#: inside the engine answers with it, so neither may keep its own copy of the
+#: rule.
+WEIGHTED_CHANNEL_OFFSET = 1_000_000

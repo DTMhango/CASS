@@ -28,6 +28,7 @@ from cass_converter.oasis_package import (
     PackageInputs,
     channel_area_peril,
 )
+from cass_core.policy import WEIGHTED_CHANNEL_OFFSET
 
 PIWIND = (
     pathlib.Path(__file__).resolve().parents[5]
@@ -386,6 +387,142 @@ def test_the_lookup_keys_a_location_however_the_engine_spells_its_columns(
     assert building[0]["vulnerability_id"] == 1
     # Area peril 7, PGA: the channel encoding the footprint is written under.
     assert building[0]["area_peril_id"] == channel_area_peril(7, "PGA")
+
+
+# -- classes spanning measures ------------------------------------------------------
+
+#: The fixture mapping plus a commercial class of unstated height and construction
+#: that responds at two measures, and its channels' pre-weighted twins.
+SPANNING_MAPPING = MAPPING + (
+    b"3,1,PGA,0.600000,1100,,unstated,,,com unstated coverage 1\n"
+    b"4,1,SA(0.3),0.400000,1100,,unstated,,,com unstated coverage 1\n"
+)
+SPANNING_VULNERABILITY = VULNERABILITY + (
+    b"3,1,1,1.0\n4,1,2,1.0\n1000003,1,1,1.0\n1000004,1,2,1.0\n"
+)
+SPANNING_LOCATION = {**LOCATION, "OccupancyCode": "1100", "ConstructionCode": "5050"}
+
+
+def spanning_inputs(**overrides) -> PackageInputs:
+    values = {
+        "imt_representation": "correlated_channels",
+        "mapping_csv": SPANNING_MAPPING,
+        "vulnerability_csv": SPANNING_VULNERABILITY,
+    }
+    values.update(overrides)
+    return inputs(**values)
+
+
+def test_a_class_spanning_measures_is_keyed_as_one_sub_peril_item_per_measure(tmp_path):
+    """oasislmf keeps one of two items sharing a location, peril and coverage, so
+    each measure is its own earthquake sub-peril; and it prices every item at the
+    whole coverage, so each is answered by its channel's pre-weighted function.
+
+    The storey count arrives as 0 because that is what oasislmf fills a blank
+    with, and it has to read as unstated for the class to be reached at all.
+    """
+    oasis_package.build(spanning_inputs(), tmp_path)
+    engine, Frame = load_lookup(tmp_path)
+
+    keys = engine.process_locations(Frame([{**SPANNING_LOCATION, "NumberOfStoreys": 0}]))
+
+    building = [key for key in keys if key["coverage_type"] == 1]
+    assert [(key["peril_id"], key["status"]) for key in building] == [
+        ("QEQ", "success"),
+        ("QFF", "success"),
+    ]
+    assert [key["vulnerability_id"] for key in building] == [
+        3 + WEIGHTED_CHANNEL_OFFSET,
+        4 + WEIGHTED_CHANNEL_OFFSET,
+    ]
+    assert [key["area_peril_id"] for key in building] == [
+        channel_area_peril(7, "PGA"),
+        channel_area_peril(7, "SA(0.3)"),
+    ]
+
+
+def test_a_class_spanning_measures_is_still_refused_where_the_set_is_undecided(tmp_path):
+    oasis_package.build(
+        inputs(mapping_csv=SPANNING_MAPPING, vulnerability_csv=VULNERABILITY), tmp_path
+    )
+    engine, Frame = load_lookup(tmp_path)
+
+    keys = engine.process_locations(Frame([{**SPANNING_LOCATION, "NumberOfStoreys": ""}]))
+
+    building = [key for key in keys if key["coverage_type"] == 1]
+    assert [(key["peril_id"], key["status"]) for key in building] == [("QEQ", "fail_v")]
+
+
+def test_a_set_built_before_its_twins_existed_is_refused(tmp_path):
+    """Answered by the unweighted functions, each measure would be priced as the
+    whole building, and the loss would look entirely plausible."""
+    with pytest.raises(PackageError, match="no pre-weighted function for 2 channels"):
+        oasis_package.build(
+            spanning_inputs(vulnerability_csv=VULNERABILITY + b"3,1,1,1.0\n4,1,2,1.0\n"),
+            tmp_path,
+        )
+
+
+def test_the_package_records_the_sub_peril_each_measure_is_carried_under(tmp_path):
+    manifest = oasis_package.build(spanning_inputs(), tmp_path)
+
+    channels = json.loads((tmp_path / "keys_data/channels.json").read_text())
+    settings = json.loads((tmp_path / "meta-data/model_settings.json").read_text())
+    assert manifest["sub_peril_channels"] is True
+    assert manifest["channel_perils"]["SA(0.3)"] == "QFF"
+    assert channels["channel_perils"]["SA(0.3)"] == "QFF"
+    assert channels["weighted_channel_offset"] == WEIGHTED_CHANNEL_OFFSET
+    assert [item["id"] for item in settings["lookup_settings"]["supported_perils"]] == [
+        "QEQ",
+        "QFF",
+        "QLS",
+        "QTS",
+    ]
+
+
+def test_a_package_with_nothing_to_split_keeps_every_item_under_shake(tmp_path):
+    manifest = oasis_package.build(inputs(imt_representation="correlated_channels"), tmp_path)
+
+    settings = json.loads((tmp_path / "meta-data/model_settings.json").read_text())
+    assert manifest["sub_peril_channels"] is False
+    assert [item["id"] for item in settings["lookup_settings"]["supported_perils"]] == ["QEQ"]
+
+
+def test_terms_scoped_to_shake_are_widened_to_every_earthquake_peril():
+    location = (
+        b"PortNumber,AccNumber,LocNumber,LocPerilsCovered,LocDed6All,LocPeril\n"
+        b"P1,A1,L1,QEQ,1000,QEQ\n"
+        b"P1,A1,L2,QEQ,1000,QEQ;WTC\n"
+        b"P1,A1,L3,QEQ,0,\n"
+        b"P1,A1,L4,QEQ,0,AA1\n"
+    )
+
+    widened, changed = oasis_package.widen_peril_scope(location)
+
+    rows = list(csv.DictReader(io.StringIO(widened.decode())))
+    assert changed == 2
+    assert [row["LocPeril"] for row in rows] == ["QQ1", "QQ1;WTC", "", "AA1"]
+    # What the book covers is what it reported; only the terms' scope moves.
+    assert {row["LocPerilsCovered"] for row in rows} == {"QEQ"}
+
+
+def test_policy_condition_and_reinsurance_terms_are_widened_too():
+    account = (
+        b"PortNumber,AccNumber,PolNumber,PolPerilsCovered,PolPeril,CondPeril\n"
+        b"P1,A1,POL1,QEQ,QEQ,qeq\n"
+    )
+    widened, changed = oasis_package.widen_peril_scope(account)
+    row = next(csv.DictReader(io.StringIO(widened.decode())))
+    assert changed == 2
+    assert (row["PolPeril"], row["CondPeril"], row["PolPerilsCovered"]) == ("QQ1", "QQ1", "QEQ")
+
+    info = b"ReinsNumber,ReinsPeril,CededPercent\n1,QEQ,0.5\n"
+    assert oasis_package.widen_peril_scope(info)[0] == b"ReinsNumber,ReinsPeril,CededPercent\n1,QQ1,0.5\n"
+
+
+def test_a_file_with_no_terms_to_widen_is_returned_as_it_was():
+    scope = b"ReinsNumber,PortNumber,RiskLevel\n1,P1,SEL\n"
+    assert oasis_package.widen_peril_scope(scope) == (scope, 0)
 
 
 # -- event identifiers ---------------------------------------------------------------

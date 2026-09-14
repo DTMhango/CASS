@@ -10602,6 +10602,9 @@ components:
         enrichment:
           type: object
           additionalProperties: {}
+        imt_representation:
+          type: string
+          minLength: 1
       required:
       - enrichment
       - gem

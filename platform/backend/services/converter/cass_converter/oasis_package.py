@@ -51,22 +51,35 @@ import struct
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, BinaryIO
 
+from cass_core.policy import (
+    MULTI_CHANNEL_REPRESENTATIONS,
+    WEIGHTED_CHANNEL_OFFSET,
+    IMTRepresentation,
+)
+
 __all__ = [
     "CHANNEL_BASE",
+    "CHANNEL_PERILS",
     "DEFAULT_RETURN_PERIODS",
+    "FM_PERIL_COLUMNS",
     "IMT_CHANNEL_CODES",
+    "MODELLED_PERIL",
     "PACKAGE_VERSION",
+    "PERIL_SCOPE",
     "ModelIdentity",
     "PackageError",
     "PackageInputs",
     "build",
+    "carries_sub_peril_channels",
     "channel_area_peril",
     "damage_bins_bin",
     "events_bin",
     "merged_footprint_events",
+    "multi_channel_identifiers",
     "occurrence_bin",
     "return_periods_bin",
     "vulnerability_bin",
+    "widen_peril_scope",
     "write_footprint",
 ]
 
@@ -86,6 +99,32 @@ IMT_CHANNEL_CODES: Mapping[str, int] = {
 #: The multiplier that makes room for the channels. Ten rather than four so a
 #: measure added later does not renumber every area peril already published.
 CHANNEL_BASE = 10
+
+#: The earthquake sub-peril each measure's item is carried under, where a class
+#: spanning measures is split into one item per measure. oasislmf identifies an
+#: item by location, peril, coverage and building, and of two rows sharing all
+#: four it silently keeps one, so each measure needs a peril of its own. The
+#: codes are OED's earthquake sub-perils and here they name shaking channels:
+#: CASS models no fire following, landslide or tsunami.
+CHANNEL_PERILS: Mapping[str, str] = {
+    "PGA": "QEQ",
+    "SA(0.3)": "QFF",
+    "SA(0.6)": "QLS",
+    "SA(1.0)": "QTS",
+}
+
+#: The peril CASS models and writes on the financial terms it produces.
+MODELLED_PERIL = "QEQ"
+
+#: What those terms are scoped to on their way to an engine that carries
+#: sub-peril channels. A term applies only to items whose peril its filter
+#: names, so a deductible scoped to shake alone would leave three measures'
+#: damage with no deductible or limit at all -- measured on the live engine as
+#: an insured loss 40% too high, with nothing reporting it.
+PERIL_SCOPE = "QQ1"
+
+#: The OED columns oasislmf filters financial terms by.
+FM_PERIL_COLUMNS: tuple[str, ...] = ("LocPeril", "CondPeril", "PolPeril", "AccPeril", "ReinsPeril")
 
 #: Reporting return periods, in years. Oasis interpolates an EP curve at these,
 #: so they are what a result's exceedance table is read at.
@@ -455,6 +494,115 @@ def return_periods_bin(periods: Sequence[int]) -> bytes:
     return struct.pack(f"<{len(ordered)}i", *ordered)
 
 
+# -- classes spanning measures -------------------------------------------------------
+
+_CLASS_COLUMNS = (
+    "CoverageTypeID",
+    "OccupancyCodes",
+    "ConstructionCodes",
+    "StoreyBand",
+    "MinStoreys",
+    "MaxStoreys",
+)
+
+
+def multi_channel_identifiers(mapping_csv: bytes) -> set[int]:
+    """The identifier of every channel that belongs to a class spanning measures."""
+    classes: dict[tuple[str, ...], list[int]] = {}
+    for row in csv.DictReader(io.StringIO(mapping_csv.decode("utf-8-sig"))):
+        key = tuple((row.get(name) or "").strip() for name in _CLASS_COLUMNS)
+        classes.setdefault(key, []).append(int(row["VulnerabilityID"]))
+    return {
+        identifier
+        for members in classes.values()
+        if len(members) > 1
+        for identifier in members
+    }
+
+
+def carries_sub_peril_channels(imt_representation: str, mapping_csv: bytes) -> bool:
+    """Whether a package splits a class spanning measures into one item per measure.
+
+    Under correlated channels, and only where the mapping has such a class: a
+    package whose every class resolves to one measure has nothing to split and
+    keeps every item under shake.
+    """
+    try:
+        representation = IMTRepresentation(imt_representation or IMTRepresentation.UNDECIDED)
+    except ValueError:
+        return False
+    return representation in MULTI_CHANNEL_REPRESENTATIONS and bool(
+        multi_channel_identifiers(mapping_csv)
+    )
+
+
+def widen_peril_scope(payload: bytes) -> tuple[bytes, int]:
+    """An OED file with its financial terms scoped to every earthquake peril.
+
+    The copy an engine carrying sub-peril channels is given, and never the
+    published file. Only the columns oasislmf filters terms by change, and only
+    where they name shake: a term scoped to shake becomes one scoped to all
+    earthquake perils, which in a package whose only earthquake items are shaking
+    channels is the same term applied to all of them. Cover, not-at-risk and
+    everything else stay as reported. Returns the file and how many values moved,
+    and the file's own bytes where nothing did.
+    """
+    reader = csv.DictReader(io.StringIO(payload.decode("utf-8-sig"), newline=""))
+    fieldnames = list(reader.fieldnames or [])
+    wanted = {name.lower() for name in FM_PERIL_COLUMNS}
+    columns = [name for name in fieldnames if name.lower() in wanted]
+    if not columns:
+        return payload, 0
+
+    rows = list(reader)
+    changed = 0
+    for number, row in enumerate(rows, start=2):
+        if None in row:
+            raise PackageError(
+                f"Line {number} of the file carries more values than its header names, "
+                "so its peril scope cannot be rewritten without guessing which column "
+                "each value belongs to."
+            )
+        for column in columns:
+            tokens = [token.strip() for token in (row.get(column) or "").split(";") if token.strip()]
+            if MODELLED_PERIL not in {token.upper() for token in tokens}:
+                continue
+            widened: list[str] = []
+            for token in tokens:
+                code = PERIL_SCOPE if token.upper() == MODELLED_PERIL else token
+                if code not in widened:
+                    widened.append(code)
+            row[column] = ";".join(widened)
+            changed += 1
+
+    if not changed:
+        return payload, 0
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8"), changed
+
+
+def _missing_weighted_channels(inputs: PackageInputs) -> dict[str, int]:
+    """For each table, how many multi-measure channels have no pre-weighted twin."""
+    needed = {
+        identifier + WEIGHTED_CHANNEL_OFFSET
+        for identifier in multi_channel_identifiers(inputs.mapping_csv)
+    }
+    tables = dict(inputs.vulnerability_variants) or {"vulnerability": inputs.vulnerability_csv}
+    missing: dict[str, int] = {}
+    for name, table in sorted(tables.items()):
+        present = {
+            int(row["vulnerability_id"])
+            for row in csv.DictReader(io.StringIO(table.decode("utf-8")))
+        }
+        absent = len(needed - present)
+        if absent:
+            missing[name] = absent
+    return missing
+
+
 # -- the package ----------------------------------------------------------------------
 
 def build(inputs: PackageInputs, destination: pathlib.Path) -> dict[str, Any]:
@@ -474,6 +622,33 @@ def build(inputs: PackageInputs, destination: pathlib.Path) -> dict[str, Any]:
             "set carries no footprint for it. Those functions would be answered by "
             "nothing and report zero, which reads exactly like no damage."
         )
+
+    sub_perils = carries_sub_peril_channels(inputs.imt_representation, inputs.mapping_csv)
+    if sub_perils:
+        spanning = multi_channel_identifiers(inputs.mapping_csv)
+        unmapped = sorted(
+            {
+                (row.get("RequiredIMT") or "").strip()
+                for row in csv.DictReader(io.StringIO(inputs.mapping_csv.decode("utf-8-sig")))
+                if int(row["VulnerabilityID"]) in spanning
+            }
+            - set(CHANNEL_PERILS)
+        )
+        if unmapped:
+            raise PackageError(
+                f"A class spanning measures reaches {', '.join(unmapped)}, which has no "
+                "earthquake sub-peril to be carried under."
+            )
+        missing = _missing_weighted_channels(inputs)
+        if missing:
+            raise PackageError(
+                "The vulnerability set carries classes spanning measures as sub-peril "
+                "channels, but its tables have no pre-weighted function for "
+                + ", ".join(f"{count} channels in {name}" for name, count in missing.items())
+                + ". It was built before those functions were written; build the set "
+                "again. Answered by the unweighted functions, each measure would be "
+                "priced as if it were the whole building."
+            )
 
     offset = event_id_offset(inputs.occurrence_csv)
     with (model_data / "footprint.bin").open("wb") as footprint, (
@@ -532,6 +707,13 @@ def build(inputs: PackageInputs, destination: pathlib.Path) -> dict[str, Any]:
                 "imt_representation": inputs.imt_representation,
                 "imt_channel_codes": dict(IMT_CHANNEL_CODES),
                 "channel_base": CHANNEL_BASE,
+                # Where a class spanning measures is split into one item per
+                # measure: the sub-peril each item is carried under, and where
+                # its pre-weighted function sits. Empty where nothing is split,
+                # so the lookup refuses such a class rather than keying it as
+                # shake alone.
+                "channel_perils": dict(CHANNEL_PERILS) if sub_perils else {},
+                "weighted_channel_offset": WEIGHTED_CHANNEL_OFFSET if sub_perils else 0,
             },
             indent=2,
             sort_keys=True,
@@ -562,7 +744,9 @@ def build(inputs: PackageInputs, destination: pathlib.Path) -> dict[str, Any]:
     unique_events = len(set(event_ids))
     (meta_data / "model_settings.json").write_text(
         json.dumps(
-            _model_settings(inputs, unique_events), indent=2, sort_keys=True
+            _model_settings(inputs, unique_events, sub_perils=sub_perils),
+            indent=2,
+            sort_keys=True,
         ),
         encoding="utf-8",
     )
@@ -588,6 +772,12 @@ def build(inputs: PackageInputs, destination: pathlib.Path) -> dict[str, Any]:
         "imt_representation": inputs.imt_representation,
         "imt_channel_codes": dict(IMT_CHANNEL_CODES),
         "channel_base": CHANNEL_BASE,
+        # Whether a class spanning measures reaches the engine as one item per
+        # measure, and if so under which sub-perils. A run against such a package
+        # scopes the financial terms it sends to every earthquake peril.
+        "sub_peril_channels": sub_perils,
+        "channel_perils": dict(CHANNEL_PERILS) if sub_perils else {},
+        "weighted_channel_offset": WEIGHTED_CHANNEL_OFFSET if sub_perils else 0,
         "measures": sorted(inputs.footprints),
         "measures_demanded": sorted(demanded),
         "events": unique_events,
@@ -636,7 +826,30 @@ def variant_key_is_usable(key: str) -> bool:
     )
 
 
-def _model_settings(inputs: PackageInputs, event_count: int) -> dict[str, Any]:
+def _supported_perils(sub_perils: bool) -> list[dict[str, str]]:
+    """The perils the engine is told the model answers.
+
+    Shake alone, unless classes spanning measures are split into sub-peril
+    items; then shake first, as before, and each measure's sub-peril after it.
+    """
+    if not sub_perils:
+        return [{"id": MODELLED_PERIL, "desc": "Earthquake shaking"}]
+    return [
+        {
+            "id": peril,
+            "desc": (
+                "Earthquake shaking"
+                if peril == MODELLED_PERIL
+                else f"Earthquake shaking, the {imt} channel of a class spanning measures"
+            ),
+        }
+        for imt, peril in CHANNEL_PERILS.items()
+    ]
+
+
+def _model_settings(
+    inputs: PackageInputs, event_count: int, *, sub_perils: bool = False
+) -> dict[str, Any]:
     document = {
         "version": "3",
         "model_settings": {
@@ -655,9 +868,7 @@ def _model_settings(inputs: PackageInputs, event_count: int) -> dict[str, Any]:
                 "options": [{"id": "lt", "desc": "Long term"}],
             },
         },
-        "lookup_settings": {
-            "supported_perils": [{"id": "QEQ", "desc": "Earthquake shaking"}]
-        },
+        "lookup_settings": {"supported_perils": _supported_perils(sub_perils)},
         "data_settings": {
             "damage_group_fields": ["PortNumber", "AccNumber", "LocNumber"],
             "hazard_group_fields": ["PortNumber", "AccNumber", "LocNumber"],
@@ -784,6 +995,12 @@ class EQKeysLookup(AbstractBasicKeyLookup, MultiprocLookupMixin):
             supported_imts=frozenset(self.codes),
             imt_representation=IMTRepresentation(channels["imt_representation"]),
         )
+        # Where the package splits a class spanning measures into one item per
+        # measure: the sub-peril each measure is carried under, and where each
+        # channel's pre-weighted function sits. Empty in a package that splits
+        # nothing, and then such a class is refused.
+        self.perils = channels.get("channel_perils") or {}
+        self.weighted_offset = int(channels.get("weighted_channel_offset") or 0)
 
     def process_locations(self, locations):
         frame = locations if isinstance(locations, pd.DataFrame) else pd.DataFrame(locations)
@@ -809,26 +1026,33 @@ class EQKeysLookup(AbstractBasicKeyLookup, MultiprocLookupMixin):
             if loc_id is None:
                 continue
             status = str(key.status)
+            peril = key.peril_id
             area_peril = 0
             vulnerability = 0
             message = key.message
             if status == "success":
-                if key.channel_count > 1:
+                if key.imt not in self.codes:
+                    status = "fail_v"
+                    message = f"No footprint channel carries {key.imt}."
+                elif key.channel_count > 1 and key.imt not in self.perils:
                     status = "fail_v"
                     message = (
                         "The class spans intensity measures and this package carries "
-                        "single-channel classes only."
+                        "no sub-peril channel for " + key.imt + "."
                     )
-                elif key.imt not in self.codes:
-                    status = "fail_v"
-                    message = f"No footprint channel carries {key.imt}."
                 else:
                     area_peril = int(key.area_peril_id) * self.channel_base + int(self.codes[key.imt])
                     vulnerability = int(key.vulnerability_id)
+                    if key.channel_count > 1:
+                        # One item per measure, each under its own sub-peril and
+                        # answered by its channel's function scaled by the
+                        # channel's share, so the items add back to the class.
+                        peril = self.perils[key.imt]
+                        vulnerability += self.weighted_offset
             keys.append(
                 {
                     "loc_id": loc_id,
-                    "peril_id": key.peril_id,
+                    "peril_id": peril,
                     "coverage_type": int(key.coverage_type),
                     "area_peril_id": area_peril,
                     "vulnerability_id": vulnerability,

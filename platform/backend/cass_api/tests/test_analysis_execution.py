@@ -370,6 +370,105 @@ def test_the_oed_is_uploaded_to_the_portfolio_rather_than_a_path(analysis_run, a
     assert b"PortNumber" in stream.read()
 
 
+@pytest.fixture()
+def shake_terms_exposure(api, project, earthquake_location_csv) -> ExposureVersion:
+    """The three-location book with a location deductible scoped to shake."""
+    header, *rows = earthquake_location_csv.decode("utf-8").strip().split("\n")
+    payload = (
+        "\n".join(
+            [
+                f"{header},LocDed6All,LocDedType6All,LocPeril",
+                *(f"{row},1000,0,QEQ" for row in rows),
+            ]
+        )
+        + "\n"
+    ).encode("utf-8")
+    created = api.post(
+        f"{API}/exposure-versions/",
+        {"project": str(project.id), "name": "Shake-scoped terms"},
+        format="json",
+    )
+    exposure_id = created.data["id"]
+    uploaded = api.post(
+        f"{API}/exposure-versions/{exposure_id}/files/",
+        {"kind": "location", "file": SimpleUploadedFile("loc.csv", payload, "text/csv")},
+        format="multipart",
+    )
+    assert uploaded.status_code == 201, uploaded.data
+    validated = api.post(f"{API}/exposure-versions/{exposure_id}/validate/")
+    assert validated.status_code == 200, validated.data
+    published = api.post(f"{API}/exposure-versions/{exposure_id}/publish/")
+    assert published.status_code == 200, published.data
+    return ExposureVersion.objects.get(id=exposure_id)
+
+
+def uploaded_location(session) -> bytes:
+    upload = next(
+        call for call in session.calls if call["path"] == "v2/portfolios/11/location_file/"
+    )
+    _, stream, _ = upload["files"]["file"]
+    stream.seek(0)
+    return stream.read()
+
+
+def run_on(exposure, model_version, project, analyst) -> AnalysisRun:
+    run = Run.objects.create(
+        kind=RunKind.ANALYSIS, project=project, label="Peril scope", created_by=analyst
+    )
+    return AnalysisRun.objects.create(
+        run=run,
+        exposure_version=exposure,
+        model_version=model_version,
+        perspectives=["ground_up"],
+        created_by=analyst,
+    )
+
+
+def test_an_engine_carrying_sub_peril_channels_gets_terms_scoped_to_every_earthquake_peril(
+    shake_terms_exposure, model_version, project, analyst
+):
+    """A class spanning measures reaches the engine as one item per sub-peril, and a
+    term applies only to the perils it names: left on shake, three measures' damage
+    would escape the deductible. The published file keeps what was reported."""
+    vulnerability = model_version.vulnerability_set
+    vulnerability.imt_representation = "correlated_channels"
+    vulnerability.multi_channel_class_count = 4
+    vulnerability.save(update_fields=["imt_representation", "multi_channel_class_count"])
+    analysis_run = run_on(shake_terms_exposure, model_version, project, analyst)
+    session = oasis_server()
+
+    run_it(analysis_run, session, actor=analyst)
+
+    sent = uploaded_location(session).decode("utf-8")
+    assert sent.count(",QQ1") == 3
+    # Cover is what the book reported; only the terms' scope moves.
+    assert sent.count(",QEQ,") == 3
+    kept = ArtifactLink.objects.get(
+        subject_type="analysis_run",
+        subject_id=analysis_run.run_id,
+        role="oed_location_peril_scope",
+    )
+    assert kept.artifact.size_bytes == len(sent.encode("utf-8"))
+    published = {role: payload for role, _, payload in oed_payloads(analysis_run)}
+    assert b"QQ1" not in published["oed_location"]
+
+
+def test_an_engine_without_sub_peril_channels_gets_the_terms_as_reported(
+    shake_terms_exposure, model_version, project, analyst
+):
+    analysis_run = run_on(shake_terms_exposure, model_version, project, analyst)
+    session = oasis_server()
+
+    run_it(analysis_run, session, actor=analyst)
+
+    assert b"QQ1" not in uploaded_location(session)
+    assert not ArtifactLink.objects.filter(
+        subject_type="analysis_run",
+        subject_id=analysis_run.run_id,
+        role="oed_location_peril_scope",
+    ).exists()
+
+
 def test_the_oasis_lookup_is_reconciled_against_the_published_count(analysis_run, analyst):
     session = oasis_server(lookup_rows=2, lookup_failures=1)
     manifest = run_oasis(analysis_run, session, analyst)

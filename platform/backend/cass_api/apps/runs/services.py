@@ -108,8 +108,14 @@ from cass_converter.enrichment import (
     exposure_lineage,
 )
 from cass_converter.model_build import BASELINE
-from cass_converter.oasis_package import PackageError, read_footprint_index
+from cass_converter.oasis_package import (
+    PERIL_SCOPE,
+    PackageError,
+    read_footprint_index,
+    widen_peril_scope,
+)
 from cass_core.artifacts import AccessPolicy, RetentionClass
+from cass_core.policy import MULTI_CHANNEL_REPRESENTATIONS, IMTRepresentation
 from cass_core.runs import RunState
 from cass_keys.lookup import lookup as keys_lookup
 from cass_oed import ord as ord_results
@@ -885,6 +891,28 @@ def _publish_oed(analysis_run, engine, actor) -> dict:
         analysis_run.currency_conversion = conversion
         analysis_run.save(update_fields=["currency_conversion", "updated_at"])
 
+    peril_scope: dict = {}
+    if carries_sub_peril_channels(analysis_run):
+        # A class spanning measures reaches the engine as one item per measure,
+        # each under its own earthquake sub-peril, and a term only applies to
+        # the perils it names. The engine's copy is scoped to every earthquake
+        # peril so each term covers all of a building's channels; the published
+        # files still say what was reported.
+        scoped = [
+            (role, filename, *widen_peril_scope(payload)) for role, filename, payload in payloads
+        ]
+        payloads = [(role, filename, payload) for role, filename, payload, _ in scoped]
+        changed = {role: count for role, _, _, count in scoped}
+        peril_scope = {
+            "scope": PERIL_SCOPE,
+            "values_changed": changed,
+            "artifacts": {
+                role: _store_keys_file(run, f"{role}_peril_scope", payload, actor)
+                for role, _, payload in payloads
+                if changed[role]
+            },
+        }
+
     portfolio_id = engine.create_portfolio(f"cass-{run.id}")
     uploaded = {}
     for role, filename, payload in payloads:
@@ -902,14 +930,45 @@ def _publish_oed(analysis_run, engine, actor) -> dict:
         message=(
             f"Published {len(uploaded)} OED files to Oasis portfolio {portfolio_id}."
             + (f" Converted at {rate.description}." if rate is not None else "")
+            + (
+                f" Terms scoped to {PERIL_SCOPE} for the model's sub-peril channels."
+                if peril_scope
+                else ""
+            )
         ),
-        metrics={"oasis_portfolio_id": portfolio_id, "bytes_by_role": uploaded},
+        metrics={
+            "oasis_portfolio_id": portfolio_id,
+            "bytes_by_role": uploaded,
+            **({"peril_scope": peril_scope} if peril_scope else {}),
+        },
     )
     return {
         "oasis_portfolio_id": portfolio_id,
         "files": uploaded,
         "currency_conversion": conversion,
+        "peril_scope": peril_scope,
     }
+
+
+def carries_sub_peril_channels(analysis_run: AnalysisRun) -> bool:
+    """Whether the run's model splits a class spanning measures into sub-peril items.
+
+    Read from the vulnerability set's record, which says what the set was built
+    under and how many of its classes span measures, rather than from the package
+    the worker happens to serve: the run already refuses a package that is not
+    this model version's.
+    """
+    vulnerability = analysis_run.model_version.vulnerability_set
+    try:
+        representation = IMTRepresentation(
+            vulnerability.imt_representation or IMTRepresentation.UNDECIDED
+        )
+    except ValueError:
+        return False
+    return (
+        representation in MULTI_CHANNEL_REPRESENTATIONS
+        and vulnerability.multi_channel_class_count > 0
+    )
 
 
 def _generate_inputs(analysis_run, engine, actor, *, poll_interval, timeout) -> dict:

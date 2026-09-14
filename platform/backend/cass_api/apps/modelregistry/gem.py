@@ -63,6 +63,7 @@ from cass_converter.model_build import (
 )
 from cass_converter.policy import ConversionPolicy, IMTRepresentation
 from cass_converter.vulnerability import damage_bins_to_csv
+from cass_core.policy import MULTI_CHANNEL_REPRESENTATIONS
 
 from . import pilot
 from .assets import (
@@ -276,16 +277,19 @@ def build_all(
     )
 
 
-def default_policy() -> ConversionPolicy:
+def default_policy(
+    imt_representation: IMTRepresentation = IMTRepresentation.UNDECIDED,
+) -> ConversionPolicy:
     """The policy a pilot vulnerability build runs under.
 
-    Undecided on both open questions, which is what the record should say. It
-    declares the four measures GEM's pilot-country functions actually demand --
-    not the three the SA-first sequencing prefers -- because a function built
-    for PGA is not made an SA function by leaving PGA off a list.
+    Undecided on both open questions unless the build names a representation,
+    which is what the record should say. It declares the four measures GEM's
+    pilot-country functions actually demand -- not the three the SA-first
+    sequencing prefers -- because a function built for PGA is not made an SA
+    function by leaving PGA off a list.
     """
     return ConversionPolicy(
-        imt_representation=IMTRepresentation.UNDECIDED,
+        imt_representation=imt_representation,
         imts=pilot_bins.PILOT_IMTS,
         notes=(
             "Vulnerability build only. No event identity or investigation time is "
@@ -448,6 +452,27 @@ def register_from_specification(
             "a table, and a wrong one would read another country's mapping."
         )
 
+    stated = str(document.get("imt_representation") or "").strip()
+    if stated and policy is None:
+        try:
+            representation = IMTRepresentation(stated)
+        except ValueError:
+            raise GemRegistrationError(
+                f"{stated!r} is not a multi-IMT representation. Known: "
+                + ", ".join(item.value for item in IMTRepresentation)
+                + "."
+            ) from None
+        if (
+            representation is not IMTRepresentation.UNDECIDED
+            and representation not in MULTI_CHANNEL_REPRESENTATIONS
+        ):
+            raise GemRegistrationError(
+                f"A vulnerability set is built undecided or as correlated channels. "
+                f"{representation} answers a class spanning measures outside the keys "
+                "and the Oasis package, and CASS does not build it."
+            )
+        policy = default_policy(representation)
+
     return register_vulnerability(
         written.country_code,
         root=root,
@@ -505,6 +530,7 @@ def report(built: CountryBuild) -> dict[str, Any]:
         "vulnerability_version": vulnerability_version(built.enrichment),
         "classes": len(built.classes),
         "functions": len(built.functions),
+        "weighted_channel_functions": len(built.weighted_functions),
         "sources": dict(built.sources),
         "multi_imt": multi_imt_report(built),
         "evidence": evidence_summary(built),

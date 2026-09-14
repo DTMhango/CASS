@@ -257,6 +257,7 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
             fields={
                 "gem": serializers.DictField(),
                 "enrichment": serializers.DictField(),
+                "imt_representation": serializers.CharField(required=False),
             },
         ),
         responses={

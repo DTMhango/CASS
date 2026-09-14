@@ -140,6 +140,24 @@ storey count with OED's default of 0, and CASS's lookup inside the engine read
 keys answered it. No live run had shown it because every live book states its
 storeys. It is fixed (tracker item 33).
 
+### Step 3, 14 September 2026: candidate B built into CASS
+
+What the engine test did by hand, CASS now does itself, for a vulnerability set
+built as correlated channels:
+
+- The build writes, beside each channel's own function, the same function with
+  its damage scaled by the channel's share of the class, one million identifiers
+  above it. Each assumption set scales by its own shares.
+- The package keys a class spanning measures as one item per measure, under the
+  sub-perils QEQ, QFF, QLS and QTS for PGA, SA(0.3), SA(0.6) and SA(1.0), and
+  refuses to build from a set that lacks the scaled functions.
+- A run against such a package sends the engine a copy of the portfolio whose
+  financial terms are scoped to all earthquake perils (`QQ1`), keeps that copy
+  with the run, and leaves the published files as reported.
+
+A set built without naming a representation stays undecided, and refuses these
+classes as before, until the live measurement below decides the question.
+
 ## 2. Whether a simulated occurrence or a rupture is the Oasis event (item 26)
 
 **The question, plainly.** OpenQuake simulates each earthquake rupture's shaking,
