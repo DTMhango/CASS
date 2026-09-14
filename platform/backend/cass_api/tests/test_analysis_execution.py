@@ -1883,6 +1883,77 @@ def test_a_set_the_vulnerability_set_does_not_carry_stops_the_run_at_enrich(
     assert session.calls == []
 
 
+def _record_enrichment(vulnerability_set, actor, **assumption_sets):
+    """Give a set the dictionary a GEM build writes, holding only the enrichments."""
+    import json
+
+    from apps.modelregistry.assets import attach_vulnerability_dictionary
+
+    attach_vulnerability_dictionary(
+        vulnerability_set,
+        json.dumps({"assumption_sets": assumption_sets}).encode("utf-8"),
+        actor=actor,
+    )
+
+
+def test_the_lineage_is_recorded_under_the_enrichment_the_set_was_built_under(
+    analysis_run, analyst, model_version, modeller
+):
+    """A country built on the platform has no compiled-in enrichment to fall back on.
+
+    Its design eras were written by somebody and survive only in what the
+    vulnerability set recorded when it was built, so that is what the run is
+    described under.
+    """
+    from cass_converter.enrichment import DesignEra, Enrichment
+
+    written = Enrichment(
+        name="written on the platform",
+        version="0.2.0",
+        country_code="ID",
+        iso3="IDN",
+        design_eras=(
+            DesignEra(to_year=None, design_levels=("CDL",), reason="Stated for the test."),
+        ),
+    )
+    _record_enrichment(model_version.vulnerability_set, modeller, baseline=written.as_dict())
+
+    run_oasis(analysis_run, oasis_server(), analyst)
+
+    analysis_run.refresh_from_db()
+    recorded = analysis_run.enrichment_run.attribute_lineage["enrichment"]
+    assert recorded["name"] == "written on the platform"
+    assert recorded["version"] == "0.2.0"
+    assert recorded["design_eras"] == [
+        {"to_year": None, "design_levels": ["CDL"], "reason": "Stated for the test."}
+    ]
+
+
+def test_a_set_that_recorded_no_enrichment_is_described_by_the_compiled_in_one(
+    analysis_run, analyst
+):
+    run_oasis(analysis_run, oasis_server(), analyst)
+
+    analysis_run.refresh_from_db()
+    assert analysis_run.enrichment_run.attribute_lineage["enrichment"]["name"] == "id_gem_stock"
+
+
+def test_an_unreadable_enrichment_record_stops_the_run_at_enrich(
+    analysis_run, analyst, model_version, modeller
+):
+    """Passing over it would describe a different model without saying so."""
+    _record_enrichment(
+        model_version.vulnerability_set, modeller, baseline={"name": "no version or eras"}
+    )
+    session = oasis_server()
+
+    with pytest.raises(AnalysisExecutionError, match="cannot be read"):
+        run_it(analysis_run, session, actor=analyst)
+
+    assert Run.objects.get(id=analysis_run.run_id).failure_stage == "enrich"
+    assert session.calls == []
+
+
 def test_a_result_under_an_unapproved_set_is_research_output(
     analysis_run, oasis_is, api, model_version, more_vulnerable
 ):

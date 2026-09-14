@@ -89,7 +89,13 @@ from apps.common.engines import oasis_adapter, oasis_model_triple
 from apps.common.storage import bucket, get_store
 from apps.exposure import services as exposure_services
 from apps.exposure.models import CurrencyRate, EnrichmentRun
-from apps.modelregistry.assets import ModelAssetError, load_grid, load_vulnerability
+from apps.modelregistry.assets import (
+    VULNERABILITY_DICTIONARY_ROLE,
+    ModelAssetError,
+    asset_bytes,
+    load_grid,
+    load_vulnerability,
+)
 from apps.modelregistry.models import PublicationState
 from cass_adapters.base import AdapterError, EngineState
 from cass_adapters.oasis import OasisPhase, PortfolioFileKind
@@ -98,6 +104,7 @@ from cass_converter.enrichment import (
     Enrichment,
     EnrichmentError,
     assumption_variant,
+    enrichment_from,
     exposure_lineage,
 )
 from cass_converter.model_build import BASELINE
@@ -536,6 +543,45 @@ def _served_package(analysis_run) -> dict:
     }
 
 
+def _recorded_enrichment(vulnerability, key: str) -> Enrichment | None:
+    """The enrichment a vulnerability set's functions were built under, as it recorded it.
+
+    A set built on the platform is built under an enrichment somebody wrote, so
+    there is no constant to look it up by country: the set's dictionary is the
+    only place it survives. Reading it from there is right for the pilot
+    countries too, since a compiled-in enrichment can move after a set was built
+    and the lineage has to describe the functions the engine will use.
+
+    ``None`` for a set whose dictionary predates the record, which is then
+    described as before. A record that is present but unreadable stops the run
+    instead of being passed over, because the lineage would otherwise describe a
+    different model without saying so.
+    """
+    try:
+        payload = asset_bytes(
+            vulnerability, "vulnerability_set", VULNERABILITY_DICTIONARY_ROLE, str(vulnerability)
+        )
+    except ModelAssetError:
+        return None
+    try:
+        recorded = json.loads(payload).get("assumption_sets") or {}
+    except (ValueError, AttributeError) as exc:
+        raise AnalysisExecutionError(
+            f"The provenance dictionary of {vulnerability} cannot be read ({exc}), so the "
+            "enrichment its functions were built under cannot be established."
+        ) from exc
+    document = recorded.get(key) if isinstance(recorded, dict) else None
+    if document is None:
+        return None
+    try:
+        return enrichment_from(document)
+    except EnrichmentError as exc:
+        raise AnalysisExecutionError(
+            f"{vulnerability} records the enrichment behind its {key} functions, and the "
+            f"record cannot be read: {exc}"
+        ) from exc
+
+
 def _enrich(analysis_run, actor) -> dict:
     """Apply the run's assumption set, and record what the run rests on.
 
@@ -582,24 +628,27 @@ def _enrich(analysis_run, actor) -> dict:
             )
 
     rules = variants.get(key, {})
-    try:
-        base = pilot_enrichment.enrichment(model_version.country_code)
-    except KeyError:
-        # A country with no pilot enrichment still has lineage: what the schedule
-        # states, with nothing derived from a year no era covers.
-        base = Enrichment(
-            name=f"{model_version.country_code.lower()}_no_pilot_enrichment",
-            version="0",
-            country_code=model_version.country_code.upper(),
-        )
-    try:
-        enrichment = (
-            base
-            if key == BASELINE and not rules
-            else assumption_variant(base, key=key, rules=rules)
-        )
-    except EnrichmentError as exc:
-        raise AnalysisExecutionError(str(exc)) from exc
+    enrichment = _recorded_enrichment(vulnerability, key)
+    if enrichment is None:
+        # A set registered before its dictionary recorded the enrichment.
+        try:
+            base = pilot_enrichment.enrichment(model_version.country_code)
+        except KeyError:
+            # A country with no pilot enrichment still has lineage: what the
+            # schedule states, with nothing derived from a year no era covers.
+            base = Enrichment(
+                name=f"{model_version.country_code.lower()}_no_pilot_enrichment",
+                version="0",
+                country_code=model_version.country_code.upper(),
+            )
+        try:
+            enrichment = (
+                base
+                if key == BASELINE and not rules
+                else assumption_variant(base, key=key, rules=rules)
+            )
+        except EnrichmentError as exc:
+            raise AnalysisExecutionError(str(exc)) from exc
 
     try:
         files = exposure_services.load_files(version)

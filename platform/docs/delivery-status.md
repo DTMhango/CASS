@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,945 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,948 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   126 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -83,6 +83,12 @@ run. Production items that serve only a governed deployment are not pursued
   blockers, among them the multi-IMT decision and the absence of a hazard set.
   A Manila coordinate read back through the pair to its refined cell. The check
   removed all three afterwards.
+- A run now takes its enrichment from what the vulnerability set recorded when
+  it was built, not from the compiled-in pilots. On the live stack the
+  Indonesian set's three records — baseline, more robust and more vulnerable —
+  all read back as the enrichments the pilot path produces, with their three
+  eras and their design-level tilts, so Indonesian runs record the same lineage
+  as before and a country built on the platform records its own.
 - A vulnerability set for a country CASS ships no constants for was built on the
   live stack from the real GEM v2026.0.0 release: the catalogue read the release,
   and a written enrichment — three design eras, each with its reason — produced
@@ -248,6 +254,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 25 | Build a vulnerability set for any country GEM covers | §6, §8 | Done: the catalogue is read from the release on the installation, and the enrichment — the design eras, each with its reason — is posted with it rather than compiled in. The set's version follows the enrichment, because the enrichment is the assumption behind every function. An era table that is out of order, ends before today, or names a design level GEM does not use is refused |
 | 26 | Event representation study: build one calculation both ways, compare each against the OpenQuake reference, and decide | §6, §16 | Not started. Occurrence per event is in use and rupture-binned is the alternative; item 9 is how either is measured. It ends in a decision record, not an approval |
 | 27 | Assemble a model version for any country from a built grid and a built vulnerability set | §6 | Done: the two halves are paired at `/model-versions/assemble/` into the draft a run names. A pair from two different countries is refused, because such a version would calculate happily and mean nothing. The scope statement and the limitations are written from the halves rather than typed, so a version's caveats cannot drift from its parts |
+| 28 | A run on a country built on the platform is described under the enrichment its vulnerability set was built under | §5, §8 | Done: the enrich stage looked the enrichment up among the compiled-in pilots by country code, so a run on any other country recorded its lineage under an empty enrichment and no year could derive a design level. It now reads the enrichment each assumption set's functions were built under from the set's own provenance dictionary. A set registered before the dictionary recorded it is described as before, and a record that cannot be read stops the run at enrich rather than being passed over |
 
 ## Needs a decision or outside input
 
