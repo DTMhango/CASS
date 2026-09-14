@@ -18,7 +18,13 @@ import pytest
 
 from cass_converter import pilot_enrichment
 from cass_converter.bins import DamageBinSet, IntensityBinSet, log_bins, oasis_damage_bins
-from cass_converter.enrichment import Attributes, Evidence, OccupancyClass, read_stock_prior
+from cass_converter.enrichment import (
+    Attributes,
+    Evidence,
+    OccupancyClass,
+    enrichment_from,
+    read_stock_prior,
+)
 from cass_converter.gem import LossCategory
 from cass_converter.model_build import (
     build_country,
@@ -40,10 +46,53 @@ needs_gem = pytest.mark.skipif(
 IMTS = ("PGA", "SA(0.3)", "SA(0.6)", "SA(1.0)")
 COUNTRIES = {"ID": ("Southeast_Asia", "Indonesia"), "NP": ("South_Asia", "Nepal")}
 
+#: Nepal's enrichment, written the way any country is now given one. CASS no
+#: longer compiles Nepal in, but GEM's published data for it is still the best
+#: test of a building stock unlike Indonesia's.
+NEPAL = enrichment_from(
+    {
+        "name": "np_gem_stock",
+        "version": "0.1.0-written",
+        "country_code": "NP",
+        "iso3": "NPL",
+        "design_eras": [
+            {
+                "to_year": 1994,
+                "design_levels": ["CDN"],
+                "reason": "Before the Nepal National Building Code.",
+            },
+            {
+                "to_year": 2015,
+                "design_levels": ["CDN", "CDL"],
+                "reason": "The code is mandatory in principle from 2003; enforcement is uneven.",
+            },
+            {
+                "to_year": None,
+                "design_levels": ["CDL", "CDM"],
+                "reason": "After Gorkha, which changed enforcement and reconstruction practice.",
+            },
+        ],
+        "open_questions": [
+            "GEM's exposure is national building stock and a facultative book is not.",
+            "Only shake is modelled.",
+        ],
+    }
+)
+
+
+def enrichment_for(code: str):
+    return NEPAL if code == "NP" else pilot_enrichment.enrichment(code.upper())
+
 
 def sources(code: str, *, mapped: bool = True):
+    region, folder = COUNTRIES[code]
     models, prior, _ = pilot_enrichment.load(
-        GEM_PATH, code, use_published_mapping=mapped
+        GEM_PATH,
+        code,
+        use_published_mapping=mapped,
+        chosen=enrichment_for(code),
+        region=region,
+        folder=folder,
     )
     return models, prior
 
@@ -76,7 +125,7 @@ def built(code: str, policy, bins):
     damage, intensity = bins
     models, prior = sources(code)
     return build_country(
-        enrichment=pilot_enrichment.enrichment(code),
+        enrichment=enrichment_for(code),
         models=models,
         prior=prior,
         intensity_bins=intensity,
@@ -170,7 +219,7 @@ def test_a_nepali_masonry_risk_reaches_many_more_candidates_than_an_indonesian_o
     counts = {}
     for code in ("ID", "NP"):
         models, prior = sources(code)
-        mixture = pilot_enrichment.enrichment(code).resolve(
+        mixture = enrichment_for(code).resolve(
             Attributes("1050", "5100"), models[LossCategory.STRUCTURAL], prior
         )
         counts[code] = len(mixture)
@@ -310,7 +359,7 @@ def test_the_published_mapping_places_every_dollar_of_stock(code):
     """
     from cass_converter.enrichment import mapping_coverage, read_taxonomy_mapping
 
-    enrichment = pilot_enrichment.enrichment(code)
+    enrichment = enrichment_for(code)
     _, prior = sources(code, mapped=False)
     mapping = read_taxonomy_mapping(
         Path(GEM_PATH) / pilot_enrichment.MAPPING_PATH, iso3=enrichment.iso3
@@ -324,7 +373,7 @@ def test_the_mapping_reaches_every_published_function(code):
     """A function nothing maps to would be a curve no risk could ever use."""
     from cass_converter.enrichment import read_taxonomy_mapping
 
-    enrichment = pilot_enrichment.enrichment(code)
+    enrichment = enrichment_for(code)
     models, _ = sources(code)
     mapping = read_taxonomy_mapping(
         Path(GEM_PATH) / pilot_enrichment.MAPPING_PATH, iso3=enrichment.iso3
@@ -368,7 +417,7 @@ def test_the_published_weights_are_not_the_macro_class_fallback(code):
     """
     from cass_converter.enrichment import Attributes
 
-    enrichment = pilot_enrichment.enrichment(code)
+    enrichment = enrichment_for(code)
     models, exact = sources(code)
     _, coarse = sources(code, mapped=False)
     structural = models[LossCategory.STRUCTURAL]
@@ -398,7 +447,7 @@ def test_the_build_records_which_weighting_produced_it(code, policy, bins):
     damage, intensity = bins
     models, prior = sources(code)
     build = build_country(
-        enrichment=pilot_enrichment.enrichment(code),
+        enrichment=enrichment_for(code),
         models=models,
         prior=prior,
         intensity_bins=intensity,

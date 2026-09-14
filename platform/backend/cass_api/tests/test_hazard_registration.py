@@ -227,7 +227,7 @@ def test_a_hazard_set_missing_a_measure_the_functions_demand_is_refused(
 
 def test_another_countrys_hazard_is_refused(registered, modeller):
     """It would apply one country's ground motion to another's buildings."""
-    model = fixture_model.register("NP", actor=modeller)
+    model = fixture_model.register_written(fixture_model.NEPAL_GRID, actor=modeller)
     hazard_set, _ = registered
     with pytest.raises(hazard.HazardRegistrationError, match="apply one"):
         hazard.attach(model, hazard_set, actor=modeller)

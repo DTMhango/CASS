@@ -23,7 +23,7 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,950 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,947 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
   126 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
@@ -256,6 +256,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 27 | Assemble a model version for any country from a built grid and a built vulnerability set | §6 | Done: the two halves are paired at `/model-versions/assemble/` into the draft a run names. A pair from two different countries is refused, because such a version would calculate happily and mean nothing. The scope statement and the limitations are written from the halves rather than typed, so a version's caveats cannot drift from its parts |
 | 28 | A run on a country built on the platform is described under the enrichment its vulnerability set was built under | §5, §8 | Done: the enrich stage looked the enrichment up among the compiled-in pilots by country code, so a run on any other country recorded its lineage under an empty enrichment and no year could derive a design level. It now reads the enrichment each assumption set's functions were built under from the set's own provenance dictionary. A set registered before the dictionary recorded it is described as before, and a record that cannot be read stops the run at enrich rather than being passed over |
 | 29 | The OpenQuake reference comparison, for a country built on the platform | WP4, §16 | Done: the comparison found GEM's functions for a run's country through a table of the two pilots, so it refused any other country — and it is the measurement items 21 and 26 rest on. A vulnerability set's dictionary now records where GEM publishes its country, the comparison reads GEM's functions from there, and a set registered before that record is found through the table as before |
+| 30 | Remove the Nepal prototype | — | Done: the compiled-in Nepal grid, enrichment and GEM location are gone, now that a grid, a vulnerability set and a model version can be built on the platform for any country. The 30 June book still carries Nepali business, so the tests that map it build Nepal from a written grid specification, and the acceptance tests against GEM's published Nepal data use a written enrichment — the path somebody working on a country now takes. KRE's own Nepal policies are untouched |
 
 ## Needs a decision or outside input
 
@@ -294,7 +295,8 @@ machinery around one, the decision still has to be taken.
   than what it acquires. Indonesia and Nepal were test countries: somebody using
   a finished CASS builds the grid and the keys for the country they work on, so
   the pilot data is disposable and the native path is what matters. That path is
-  items 24 and 25.
+  items 24, 25 and 27, and the Nepal prototype was removed once it existed
+  (item 30).
 - **The multi-IMT representation, the realisation-weighting rule and the
   footprint storage format.** Not waiting on anybody else: CASS is to research
   each and decide. They are backlog items 21, 22 and 23, and each ends in a

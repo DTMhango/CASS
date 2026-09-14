@@ -546,10 +546,13 @@ def test_the_promoted_oed_names_no_counterparty(batch, analyst):
 
 @pytest.fixture()
 def pilot_models(db, modeller):
-    """Both prototype country models, registered with their cells and functions."""
+    """A model for each country the book spans: Indonesia's compiled in, Nepal's written."""
     from . import fixture_model
 
-    return {model.country_code: model for model in fixture_model.register_all(actor=modeller)}
+    return {
+        "ID": fixture_model.register("ID", actor=modeller),
+        "NP": fixture_model.register_written(fixture_model.NEPAL_GRID, actor=modeller),
+    }
 
 
 def _keys_for(version, model):

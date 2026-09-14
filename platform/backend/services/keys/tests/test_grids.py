@@ -15,7 +15,7 @@ import pytest
 
 from cass_keys import grids
 from cass_keys.lookup import AreaPerilGrid
-from cass_keys.pilot_grids import INDONESIA, NEPAL, PILOT_GRIDS, specification
+from cass_keys.pilot_grids import INDONESIA, PILOT_GRIDS, specification
 
 _D = Decimal
 
@@ -142,12 +142,12 @@ def test_a_coordinate_outside_the_domain_is_reported_rather_than_snapped():
 
 def test_the_index_agrees_with_a_linear_scan():
     """The optimisation must not change the answer."""
-    cells = grids.build(NEPAL)
-    grid = AreaPerilGrid(country_code="NP", version="t", cells=cells)
+    cells = grids.build(INDONESIA)
+    grid = AreaPerilGrid(country_code="ID", version="t", cells=cells)
     for point in [
-        (_D("27.7172"), _D("85.3240")),
-        (_D("28.2096"), _D("83.9856")),
-        (_D("26.4525"), _D("87.2718")),
+        (_D("-6.2088"), _D("106.8456")),
+        (_D("-7.2575"), _D("112.7521")),
+        (_D("-4.0"), _D("138.0")),
         (_D("0"), _D("0")),
     ]:
         by_scan = next((c for c in cells if c.contains(*point)), None)
@@ -156,33 +156,21 @@ def test_the_index_agrees_with_a_linear_scan():
 
 # -- the pilot specifications --------------------------------------------------------
 
-@pytest.mark.parametrize("spec", [INDONESIA, NEPAL])
-def test_every_pilot_grid_states_what_it_leaves_open(spec):
+def test_the_pilot_grid_states_what_it_leaves_open():
     """A grid must not quietly acquire the authority of a decision nobody made."""
-    assert spec.open_questions
-    assert any("Site conditions" in item for item in spec.open_questions)
-    assert "not an approved model asset" in spec.notes.lower()
+    assert INDONESIA.open_questions
+    assert any("Site conditions" in item for item in INDONESIA.open_questions)
+    assert "not an approved model asset" in INDONESIA.notes.lower()
 
 
-@pytest.mark.parametrize("spec", [INDONESIA, NEPAL])
-def test_every_pilot_grid_is_marked_a_draft(spec):
-    assert spec.version.endswith("-draft")
+def test_the_pilot_grid_is_marked_a_draft():
+    assert INDONESIA.version.endswith("-draft")
 
 
-def test_the_pilot_grids_build():
+def test_the_pilot_grid_builds():
     indonesia = grids.build(INDONESIA)
-    nepal = grids.build(NEPAL)
     assert len(indonesia) > 40_000
-    assert len(nepal) > 3_000
     assert indonesia[0].country_code == "ID"
-    assert nepal[0].country_code == "NP"
-
-
-def test_kathmandu_is_refined_as_the_plan_asks():
-    grid = AreaPerilGrid(country_code="NP", version="t", cells=grids.build(NEPAL))
-    cell = grid.find(_D("27.7172"), _D("85.3240"))
-    assert cell is not None
-    assert cell.max_latitude - cell.min_latitude == _D("0.025")
 
 
 def test_jakarta_is_refined_and_a_sparse_area_is_not():
@@ -195,7 +183,9 @@ def test_jakarta_is_refined_and_a_sparse_area_is_not():
 
 def test_the_specification_lookup_names_what_is_available():
     assert specification("id") is INDONESIA
-    assert set(PILOT_GRIDS) == {"ID", "NP"}
+    assert set(PILOT_GRIDS) == {"ID"}
+    with pytest.raises(KeyError, match="No prototype grid specification"):
+        specification("NP")
     with pytest.raises(KeyError, match="No prototype grid specification"):
         specification("FR")
 

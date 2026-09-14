@@ -199,8 +199,9 @@ modeller writes the specification on the Build tab — the tiles that say what i
 modelled, the base resolution, the areas refined and the reason for each — and
 CASS generates the cells from it, refusing a specification that would exceed the
 installation's cell limit with its own count rather than taking an hour to find
-out. The two pilot grids are now just two specifications that happen to be
-compiled in, registered through the same door.
+out. The Indonesian pilot grid is now just a specification that happens to be
+compiled in, registered through the same door; the Nepal prototype, which was
+test data, is gone.
 
 **A country's vulnerability set is built from GEM under a written enrichment.**
 The functions and the stock weights are GEM's, read from the release the

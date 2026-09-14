@@ -21,7 +21,7 @@ promoted without a stated occupancy returns ``fail_v`` and holds at the section
 
 from __future__ import annotations
 
-from apps.modelregistry import pilot
+from apps.modelregistry import assembly, grid_build, pilot
 from apps.modelregistry.assets import attach_vulnerability_mapping
 from apps.modelregistry.models import ModelVersion, PublicationState, VulnerabilitySet
 from cass_keys import vulnerability as vulnerability_specs
@@ -139,5 +139,56 @@ def register(country_code: str, *, actor=None) -> ModelVersion:
     )
 
 
-def register_all(*, actor=None) -> list[ModelVersion]:
-    return [register(code, actor=actor) for code in pilot.PILOT_COUNTRIES]
+#: Nepal's grid, written the way a country is now given one. CASS no longer
+#: ships a Nepal prototype -- it was test data -- but the 30 June book carries
+#: Nepali business, so the tests that map it build Nepal from a specification.
+NEPAL_GRID = {
+    "country_code": "NP",
+    "version": "0.1.0-written",
+    "label": "Nepal, written for the tests",
+    "base_resolution_deg": "0.1",
+    "mapping_tolerance_km": "0",
+    "tiles": [
+        {
+            "name": "Nepal",
+            "reason": "The national domain; the Main Himalayan Thrust runs its length.",
+            "min_latitude": "26.3",
+            "max_latitude": "30.5",
+            "min_longitude": "80.0",
+            "max_longitude": "88.3",
+        }
+    ],
+    "refinements": [
+        {
+            "name": "Kathmandu valley",
+            "reason": "The valley concentrates exposure and its sediments amplify strongly.",
+            "resolution_deg": "0.025",
+            "min_latitude": "27.6",
+            "max_latitude": "27.85",
+            "min_longitude": "85.2",
+            "max_longitude": "85.55",
+        },
+        {
+            "name": "Pokhara",
+            "reason": "Material exposure.",
+            "resolution_deg": "0.025",
+            "min_latitude": "28.1",
+            "max_latitude": "28.3",
+            "min_longitude": "83.9",
+            "max_longitude": "84.1",
+        },
+    ],
+    "open_questions": ["Written for the tests; nobody has reviewed it."],
+    "notes": "Test grid. Not a model asset.",
+}
+
+
+def register_written(grid_document, *, actor=None) -> ModelVersion:
+    """A country with no compiled-in grid, built the way the platform builds one."""
+    grid, _ = grid_build.build(grid_document, actor=actor)
+    return assembly.assemble(
+        grid=grid,
+        vulnerability_set=register_vulnerability(grid.country_code, actor=actor),
+        version=VERSION,
+        actor=actor,
+    )

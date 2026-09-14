@@ -1,10 +1,14 @@
 """Prototype grid specifications for the pilot countries.
 
 These are drafts, and the code says so. Phase 0 of the build plan lists
-defining the Indonesia and Nepal adaptive grids as an open charter item with a
-named owner; what is written here is a starting point for that conversation,
-not its conclusion. Every specification carries the questions it does not
-answer, and any grid built from one is published as a draft.
+defining the Indonesia adaptive grid as an open charter item with a named
+owner; what is written here is a starting point for that conversation, not its
+conclusion. Every specification carries the questions it does not answer, and
+any grid built from one is published as a draft.
+
+Nepal had a prototype here as well. It was test data, and it was removed once a
+grid could be written for any country on the platform: a country somebody works
+on is built from a specification, not compiled in.
 
 The tiles approximate land. Indonesia is an archipelago and the plan asks its
 grid to avoid unnecessary calculation points over ocean; without a coastline
@@ -13,7 +17,7 @@ reviewer can see the shape being claimed and correct it. That is the single
 largest open question on the Indonesian specification.
 
 Refinements name the exposure centres the pilot portfolio actually sits in --
-Jakarta, Bandung, Surabaya, Denpasar, Medan and Kathmandu. That is deliberate
+Jakarta, Bandung, Surabaya, Denpasar and Medan. That is deliberate
 and it is a limitation: refining around today's exposure is a reasonable first
 pass and a poor permanent rule, because it makes the grid depend on the book
 rather than on the hazard. The charter has to settle a refinement rule based on
@@ -114,44 +118,8 @@ INDONESIA = GridSpecification(
     ),
 )
 
-NEPAL = GridSpecification(
-    country_code="NP",
-    version="0.1.0-draft",
-    label="Nepal earthquake prototype grid",
-    base_resolution=_D("0.1"),
-    tiles=(
-        Tile(
-            "Nepal",
-            _box("26.3", "30.5", "80.0", "88.3"),
-            "The national domain; the Main Himalayan Thrust runs its length.",
-        ),
-    ),
-    refinements=(
-        Refinement(
-            "Kathmandu valley",
-            _box("27.6", "27.85", "85.2", "85.55"),
-            _D("0.025"),
-            "The plan asks for deliberate refinement here: the valley concentrates "
-            "exposure and its sediments amplify strongly.",
-        ),
-        Refinement("Pokhara", _box("28.1", "28.3", "83.9", "84.1"), _D("0.025"), ""),
-    ),
-    mapping_tolerance_km=_D("0"),
-    open_questions=(
-        "The national bounding box includes territory beyond the border on all "
-        "sides. A boundary polygon would remove cells that will never carry Nepali "
-        "exposure.",
-        *_SHARED_QUESTIONS,
-    ),
-    notes=(
-        "Draft geometry for the phase 3 grid design spike. Not an approved model "
-        "asset and not usable for a decision."
-    ),
-)
-
 PILOT_GRIDS: dict[str, GridSpecification] = {
     INDONESIA.country_code: INDONESIA,
-    NEPAL.country_code: NEPAL,
 }
 
 
