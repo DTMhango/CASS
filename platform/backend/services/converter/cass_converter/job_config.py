@@ -218,12 +218,15 @@ PARAMETERS: tuple[Parameter, ...] = (
             "samples that many paths at random, weighted."
         ),
         consequence=(
-            "Full enumeration of a national model is hundreds of realisations, "
-            "each an alternative view of the hazard. A footprint is one event "
-            "set, so combining them needs a weighting rule CASS does not invent "
-            "-- until one is approved, a conversion needs exactly one realisation."
+            "Sampled paths are drawn in proportion to their weights, so a "
+            "catalogue pooling several of them carries the model's own "
+            "weighting and covers that many times the simulated years. One path "
+            "is one view: measured against the model's weighted mean it sat "
+            "between 0.84 and 1.24 of it depending on the draw, and twenty paths "
+            "cost the same to run. Full enumeration is refused, because its "
+            "branches carry unequal weights (ADR 18)."
         ),
-        required_for_footprint="1",
+        required_for_footprint="one or more sampled paths, never enumeration",
     ),
     _p(
         "investigation_time", "calculation", Kind.NUMBER, "Investigation time",
@@ -734,22 +737,41 @@ def validate(config: JobConfig, *, required_measures: Sequence[str] = ()) -> lis
         )
 
     samples = config.get("number_of_logic_tree_samples")
-    if samples is not None and samples.strip() not in ("1",):
-        detail = (
-            "Full enumeration"
-            if samples.strip() == "0"
-            else f"Sampling {samples.strip()} paths"
-        )
-        problems.append(
-            Problem(
-                "number_of_logic_tree_samples",
-                "error",
-                f"{detail} produces more than one realisation. Each is an "
-                "alternative view of the hazard carrying its own weight, and "
-                "combining them into one event set needs a weighting rule that "
-                "has not been approved. Sample exactly one path.",
+    if samples is not None:
+        stated = samples.strip()
+        if stated == "0":
+            problems.append(
+                Problem(
+                    "number_of_logic_tree_samples",
+                    "error",
+                    "Full enumeration produces every branch of the logic tree, "
+                    "each carrying its own weight. Pooling them into one event "
+                    "set would treat a low-weight branch as the model's mean "
+                    "(ADR 18). Sample paths instead: they are drawn in "
+                    "proportion to their weights, so the catalogue carries the "
+                    "weighting already.",
+                )
             )
-        )
+        elif not stated.isdigit():
+            problems.append(
+                Problem(
+                    "number_of_logic_tree_samples",
+                    "error",
+                    f"{stated!r} is not a number of paths to sample.",
+                )
+            )
+        elif stated == "1":
+            problems.append(
+                Problem(
+                    "number_of_logic_tree_samples",
+                    "warning",
+                    "One sampled path is one view of the logic tree. Measured "
+                    "against the model's own weighted mean, a single path's "
+                    "hazard sat between 0.84 and 1.24 of it depending on which "
+                    "path was drawn, and sampling twenty cost the same to run "
+                    "(ADR 18).",
+                )
+            )
 
     if config.is_event_based:
         fields = (config.get("ground_motion_fields") or "").strip().lower()
@@ -873,7 +895,10 @@ def to_event_based(
     *,
     measures: Sequence[str],
     investigation_time: float = 50.0,
-    ses_per_logic_tree_path: int = 20,
+    # Twenty paths of one event set each: a thousand simulated years drawn
+    # across twenty views of the logic tree rather than one (ADR 18).
+    ses_per_logic_tree_path: int = 1,
+    logic_tree_samples: int = 20,
     minimum_intensity: float | None = None,
     sites_file: str = "sites.csv",
     site_model_file: str | None = None,
@@ -902,7 +927,7 @@ def to_event_based(
 
     working = config
     working = apply(working, "calculation_mode", EVENT_BASED)
-    working = apply(working, "number_of_logic_tree_samples", 1)
+    working = apply(working, "number_of_logic_tree_samples", logic_tree_samples)
     working = apply(working, "investigation_time", investigation_time)
     working = apply(working, "ses_per_logic_tree_path", ses_per_logic_tree_path)
     if site_model_file:

@@ -345,7 +345,13 @@ EDITABLE = tuple(
 #: sampled.
 CASS_DEFAULTS: dict[str, Any] = {
     "investigation_time": 50.0,
-    "ses_per_logic_tree_path": 20,
+    # Twenty paths of one event set each: a thousand simulated years, as before,
+    # but drawn across twenty views of the logic tree rather than one. A single
+    # path's hazard curve sat between 0.84 and 1.24 of the model's own weighted
+    # mean depending on which path was drawn, and twenty cost the same to run
+    # (ADR 18).
+    "ses_per_logic_tree_path": 1,
+    "number_of_logic_tree_samples": 20,
 }
 
 
@@ -529,6 +535,7 @@ def _build(
         measures=pilot_bins.PILOT_IMTS,
         investigation_time=float(chosen["investigation_time"]),
         ses_per_logic_tree_path=int(chosen["ses_per_logic_tree_path"]),
+        logic_tree_samples=int(chosen["number_of_logic_tree_samples"]),
         minimum_intensity=float(pilot_bins.INTENSITY_RANGE["PGA"][0]),
         # A site model where the published one could be joined, so every cell
         # carries its own Vs30. Otherwise a plain sites file, and the model's
@@ -541,21 +548,29 @@ def _build(
 
     resolved = conversion.config
     for name, value in (overrides or {}).items():
-        if name in ("investigation_time", "ses_per_logic_tree_path"):
+        if name in (
+            "investigation_time",
+            "ses_per_logic_tree_path",
+            "number_of_logic_tree_samples",
+        ):
             continue
         resolved = resolved.set(name, value)
 
     problems = job_config.validate(resolved, required_measures=pilot_bins.PILOT_IMTS)
     problems.extend(extra_problems)
-    if model.estimated_realizations > 1:
+    sampled = int(chosen["number_of_logic_tree_samples"])
+    if model.estimated_realizations > 1 and sampled == 1:
         problems.append(
             job_config.Problem(
                 "number_of_logic_tree_samples",
                 "warning",
                 f"This model's logic tree enumerates to about "
                 f"{model.estimated_realizations} realisations and the run samples "
-                "one of them. The result is one alternative view of the hazard, "
-                "not the model's weighted mean.",
+                "one of them. The result is one view of the hazard rather than "
+                "the model's weighted mean, and measured against that mean a "
+                "single path sat between 0.84 and 1.24 of it depending on which "
+                "path was drawn. Sampling several costs the same to run "
+                "(ADR 18).",
             )
         )
 

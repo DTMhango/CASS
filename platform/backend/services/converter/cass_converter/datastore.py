@@ -178,6 +178,22 @@ def metadata(path: str | pathlib.Path) -> DatastoreMetadata:
         )
 
 
+def realization_weights(path: str | pathlib.Path) -> tuple[float, ...]:
+    """The weight of each logic-tree realisation behind the calculation.
+
+    Equal weights mean the paths were sampled, and a pooled catalogue carries
+    the logic tree's own weighting because each path was drawn in proportion to
+    it. Unequal weights mean the tree was enumerated, and pooling would treat a
+    low-weight branch as the mean (ADR 18). Empty where the calculation records
+    none, which is a calculation on a single branch.
+    """
+    with _open(path) as store:
+        found = store.get("weights")
+        if found is None:
+            return ()
+        return tuple(float(value) for value in found[:])
+
+
 def site_keys(path: str | pathlib.Path) -> dict[int, str]:
     """Site id to the key a grid maps, which is ``custom_site_id`` where present.
 

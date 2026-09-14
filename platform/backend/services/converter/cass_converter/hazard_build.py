@@ -53,7 +53,8 @@ from .openquake import (
     read_ground_motion,
     read_metadata,
     read_realization_count,
-    require_single_realization,
+    read_realization_weights,
+    require_equal_realization_weights,
 )
 
 #: Bumped when the tables this produces change shape.
@@ -174,6 +175,16 @@ def _realization_count(base: pathlib.Path, events: Sequence[Event]) -> int:
     return len({event.realization_id for event in events})
 
 
+def _realization_weights(base: pathlib.Path) -> tuple[float, ...]:
+    """What each realisation weighs, where the calculation exported it.
+
+    Equal weights are sampled paths, which pool into one catalogue; unequal ones
+    are an enumerated tree, which does not (ADR 18).
+    """
+    found = sorted(base.glob("realizations_*.csv"))
+    return read_realization_weights(found[0]) if found else ()
+
+
 def build_hazard(
     directory: str | pathlib.Path,
     *,
@@ -202,7 +213,7 @@ def build_hazard(
         read_metadata(_export(base, "ruptures"), _export(base, "events"), gmf),
         realization_count=_realization_count(base, events),
     )
-    require_single_realization(metadata)
+    require_equal_realization_weights(metadata, _realization_weights(base))
 
     table = occurrences(events)
 
@@ -301,14 +312,27 @@ def build_hazard_from_datastore(
     except datastore.DatastoreError as exc:
         raise HazardBuildError(str(exc)) from exc
 
+    # The datastore states its effective time directly, and the ratio to the
+    # investigation time is the event sets of every sampled path together. Split
+    # back into sets per path and paths, so the record says which it was; where
+    # they do not divide, the ratio stands and the paths are checked anyway.
+    weights = datastore.realization_weights(location)
+    realizations = max(1, len(weights))
+    span = facts.ses_per_logic_tree_path
+    if span is not None and realizations > 1 and span % realizations == 0:
+        sets, counted = span // realizations, realizations
+    else:
+        sets, counted = span, 1
     metadata = CalculationMetadata(
         engine_version="",
         checksum="",
         investigation_time=facts.investigation_time,
-        ses_per_logic_tree_path=facts.ses_per_logic_tree_path,
-        realization_count=1,
+        ses_per_logic_tree_path=sets,
+        realization_count=counted,
     )
-    require_single_realization(metadata)
+    require_equal_realization_weights(
+        dataclasses.replace(metadata, realization_count=realizations), weights
+    )
 
     frequency = check_frequency(
         source_event_count=facts.event_count,

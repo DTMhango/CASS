@@ -73,6 +73,11 @@ class HazardJob:
     gsim_logic_tree: str
     investigation_time: float = 50.0
     ses_per_logic_tree_path: int = 20
+    #: Paths drawn through the logic tree, each in proportion to its weight and
+    #: each covering the whole span again, so the catalogue carries the model's
+    #: own weighting (ADR 18). One is a single view of the hazard, which is all
+    #: a single-branch prototype has.
+    logic_tree_samples: int = 1
     truncation_level: float = 3.0
     maximum_distance: float = 300.0
     rupture_mesh_spacing: float = 5.0
@@ -124,7 +129,12 @@ class HazardJob:
 
     @property
     def effective_time(self) -> float:
-        return self.investigation_time * self.ses_per_logic_tree_path
+        """Years the catalogue covers: every path's event sets, end to end."""
+        return (
+            self.investigation_time
+            * self.ses_per_logic_tree_path
+            * self.logic_tree_samples
+        )
 
     @property
     def area_perils(self) -> dict[str, int]:
@@ -202,10 +212,11 @@ def job_ini(job: HazardJob, *, sites_file: str = "sites.csv") -> bytes:
         f"sites_csv = {sites_file}",
         "",
         "[logic_tree]",
-        # Full enumeration. Sampling produces several realisations, and
-        # flattening those into one occurrence table needs a weighting rule the
-        # converter refuses to invent.
-        "number_of_logic_tree_samples = 0",
+        # Sampled paths, never enumeration. A sampled path is drawn in
+        # proportion to its weight, so pooling several carries the model's own
+        # weighting; enumeration would hand over branches of unequal weight for
+        # the converter to flatten, which it refuses to do (ADR 18).
+        f"number_of_logic_tree_samples = {job.logic_tree_samples}",
         "",
         "[erf]",
         f"rupture_mesh_spacing = {job.rupture_mesh_spacing}",

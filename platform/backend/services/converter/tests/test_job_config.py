@@ -187,14 +187,35 @@ def test_a_classical_configuration_cannot_make_a_footprint(published):
     )
 
 
-def test_full_enumeration_is_refused_because_it_is_many_realisations(published):
+def test_full_enumeration_is_refused_because_its_branches_are_weighted(published):
+    """Pooling them as equals would treat a low-weight branch as the mean."""
     problems = job_config.validate(published)
-    message = next(
-        item.message
-        for item in problems
-        if item.parameter == "number_of_logic_tree_samples"
+    problem = next(
+        item for item in problems if item.parameter == "number_of_logic_tree_samples"
     )
-    assert "weighting rule" in message
+    assert problem.severity == "error"
+    assert "low-weight branch" in problem.message
+
+
+def test_sampling_several_paths_is_accepted(published):
+    """The rule ADR 18 decided: paths are drawn in proportion to their weights."""
+    problems = job_config.validate(published.set("number_of_logic_tree_samples", 20))
+
+    assert not [
+        item
+        for item in problems
+        if item.parameter == "number_of_logic_tree_samples" and item.severity == "error"
+    ]
+
+
+def test_one_sampled_path_is_reported_as_one_view(published):
+    problems = job_config.validate(published.set("number_of_logic_tree_samples", 1))
+    problem = next(
+        item for item in problems if item.parameter == "number_of_logic_tree_samples"
+    )
+
+    assert problem.severity == "warning"
+    assert "one view" in problem.message
 
 
 def test_a_measure_the_calculation_does_not_produce_is_refused(published):

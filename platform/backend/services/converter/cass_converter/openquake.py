@@ -73,11 +73,13 @@ class CalculationMetadata:
     def effective_time(self) -> float:
         """Years the event set represents, and so the number of Oasis periods.
 
-        One stochastic event set covers the investigation time; the job runs
-        several per logic-tree path, and the engine numbers each event's year
-        across the whole span. Multiplying by the realisation count as well
-        would double-count: a sampled realisation is an alternative history of
-        the same span, not more of it.
+        One stochastic event set covers the investigation time, the job runs
+        several per logic-tree path, and a job that samples several paths runs
+        all of that once per path. The engine numbers years across the whole
+        pooled catalogue -- the first path's years, then the second's, and so
+        on -- and states the product as its own effective time, which is what
+        this reproduces (ADR 18). A sampled path is therefore more simulated
+        years, not an alternative history of the same ones.
         """
         if self.investigation_time is None or self.ses_per_logic_tree_path is None:
             raise OpenQuakeError(
@@ -90,7 +92,11 @@ class CalculationMetadata:
                 f"Investigation time {self.investigation_time} and event set count "
                 f"{self.ses_per_logic_tree_path} must both be positive."
             )
-        return self.investigation_time * self.ses_per_logic_tree_path
+        return (
+            self.investigation_time
+            * self.ses_per_logic_tree_path
+            * max(1, self.realization_count)
+        )
 
     @property
     def period_count(self) -> int:
@@ -184,6 +190,28 @@ def read_metadata(*paths: str | pathlib.Path) -> CalculationMetadata:
 def read_realization_count(path: str | pathlib.Path) -> int:
     """How many logic-tree realisations the calculation produced."""
     return sum(1 for _ in _rows(_lines(pathlib.Path(path))))
+
+
+def read_realization_weights(path: str | pathlib.Path) -> tuple[float, ...]:
+    """The weight each realisation carries, from the realizations export.
+
+    Equal weights mean the paths were sampled; unequal ones mean the tree was
+    enumerated, which is the case a pooled catalogue may not carry (ADR 18).
+    Empty where the export states no weight at all.
+    """
+    found: list[float] = []
+    for row in _rows(_lines(pathlib.Path(path))):
+        raw = (row.get("weight") or "").strip()
+        if not raw:
+            continue
+        try:
+            found.append(float(raw))
+        except ValueError:
+            raise OpenQuakeError(
+                f"{path} states a realisation weight of {raw!r}, which is not a "
+                "number, so CASS cannot tell a sampled tree from an enumerated one."
+            ) from None
+    return tuple(found)
 
 
 def read_sites(path: str | pathlib.Path) -> dict[str, tuple[float, float]]:
@@ -318,20 +346,36 @@ def occurrences(events: Iterable[Event]) -> tuple[OccurrenceRow, ...]:
     )
 
 
-def require_single_realization(metadata: CalculationMetadata) -> None:
-    """Refuse a sampled logic tree until the weighting is decided.
+def require_equal_realization_weights(
+    metadata: CalculationMetadata, weights: Sequence[float] | None = None
+) -> None:
+    """Refuse a logic tree whose realisations do not carry the same weight.
 
-    Several realisations are alternative histories of the same span, each
-    carrying a weight. Flattening them into one occurrence table without
-    applying those weights would treat a low-weight branch as though it were as
-    likely as the mean, which is a scientific choice and not a conversion
-    detail. Refused here rather than approximated, for the same reason the
-    multi-IMT representation is.
+    Sampled paths are drawn with probability equal to their weight, so a
+    catalogue pooling several of them already carries the logic tree's own
+    weighting and every event in it is one draw of the model's distribution.
+    That is the rule ADR 18 decided, and it is the reason this no longer
+    refuses more than one realisation.
+
+    An enumerated tree is the case that stays refused. Its realisations carry
+    their weights explicitly and unequally, and pooling them as though each were
+    as likely as the next would treat a low-weight branch as the mean -- a
+    scientific choice, not a conversion detail.
     """
-    if metadata.realization_count > 1:
+    if metadata.realization_count <= 1:
+        return
+    if not weights:
         raise OpenQuakeError(
             f"This calculation has {metadata.realization_count} logic-tree "
-            "realisations. Combining them into one event set needs a weighting "
-            "rule, which is a scientific decision this converter does not make. "
-            "Run one realisation, or decide the rule first."
+            "realisations and states no weight for them, so CASS cannot tell "
+            "sampled paths from an enumerated tree. Export the realisations "
+            "beside the events."
+        )
+    distinct = {round(float(weight), 9) for weight in weights}
+    if len(distinct) > 1:
+        raise OpenQuakeError(
+            f"This calculation's {metadata.realization_count} realisations carry "
+            f"{len(distinct)} different weights, so its logic tree was enumerated "
+            "rather than sampled. Pooling them into one event set would treat a "
+            "low-weight branch as the model's mean. Sample the paths instead."
         )

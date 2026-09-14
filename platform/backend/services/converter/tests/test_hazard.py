@@ -9,7 +9,7 @@ production calculation.
 
 What these hold to account is one asymmetry. Anything that would quietly lose
 hazard is refused -- a site with no area peril, a measure the export does not
-carry, motion above the top bin, several realisations with no weighting rule.
+carry, motion above the top bin, realisations whose weights are not all equal.
 Anything that merely produces less hazard honestly is allowed: motion below the
 bottom bin is dropped and counted, because it is shaking too weak to damage
 anything and keeping it would double the size of every footprint.
@@ -201,11 +201,43 @@ def test_a_repeated_event_identifier_is_refused(export):
         openquake.read_events(export / "events_1.csv")
 
 
-def test_several_realisations_are_refused_until_the_weighting_is_decided():
-    """They are alternative histories, and flattening them needs a rule."""
+def test_equally_weighted_paths_are_pooled(export):
+    """Sampled paths are drawn in proportion to their weights, so pooling them
+    carries the model's own weighting (ADR 18)."""
     metadata = openquake.CalculationMetadata(realization_count=3)
-    with pytest.raises(openquake.OpenQuakeError, match="weighting rule"):
-        openquake.require_single_realization(metadata)
+
+    openquake.require_equal_realization_weights(metadata, (0.25, 0.25, 0.25))
+
+
+def test_an_enumerated_logic_tree_is_still_refused():
+    """Its branches carry their weights explicitly, and pooling them as equals
+    would treat a low-weight branch as the model's mean."""
+    metadata = openquake.CalculationMetadata(realization_count=3)
+
+    with pytest.raises(openquake.OpenQuakeError, match="enumerated"):
+        openquake.require_equal_realization_weights(metadata, (0.6, 0.3, 0.1))
+
+
+def test_realisations_with_no_stated_weight_are_refused():
+    """Sampled and enumerated are told apart by the weights, so their absence
+    is not something to assume past."""
+    metadata = openquake.CalculationMetadata(realization_count=3)
+
+    with pytest.raises(openquake.OpenQuakeError, match="states no weight"):
+        openquake.require_equal_realization_weights(metadata, ())
+
+
+def test_sampled_paths_are_more_simulated_years():
+    """The engine numbers years across the pooled catalogue and states the same
+    effective time, so a path is years rather than an alternative history."""
+    one = openquake.CalculationMetadata(investigation_time=50.0, ses_per_logic_tree_path=20)
+    twenty = openquake.CalculationMetadata(
+        investigation_time=50.0, ses_per_logic_tree_path=1, realization_count=20
+    )
+
+    assert one.effective_time == 1000.0
+    assert twenty.effective_time == 1000.0
+    assert twenty.period_count == 1000
 
 
 # -- the whole build ---------------------------------------------------------------------
@@ -272,7 +304,7 @@ def test_events_from_several_branches_are_refused_even_with_no_realizations_expo
         EVENTS.replace("1,7,0,774,9", "1,7,1,774,9"), encoding="utf-8"
     )
 
-    with pytest.raises(openquake.OpenQuakeError, match="weighting rule"):
+    with pytest.raises(openquake.OpenQuakeError, match="states no weight"):
         hazard_build.build_hazard(export, country_code="ID", intensity_bins=bins)
 
 
@@ -416,9 +448,14 @@ def test_the_job_declares_the_measures_and_the_effective_time():
     assert job().effective_time == 1000.0
 
 
-def test_the_job_enumerates_the_logic_tree_rather_than_sampling_it():
-    """Sampling gives several realisations, which the reader refuses."""
-    assert "number_of_logic_tree_samples = 0" in hazard_job.job_ini(job()).decode()
+def test_the_job_samples_the_logic_tree_rather_than_enumerating_it():
+    """A sampled path is drawn in proportion to its weight, so a catalogue of
+    several carries the model's own weighting; enumeration hands over branches
+    of unequal weight, which the reader refuses (ADR 18)."""
+    assert "number_of_logic_tree_samples = 1" in hazard_job.job_ini(job()).decode()
+    sampled = hazard_job.job_ini(job(logic_tree_samples=20)).decode()
+    assert "number_of_logic_tree_samples = 20" in sampled
+    assert job(logic_tree_samples=20).effective_time == 20000.0
 
 
 def test_a_job_covering_no_sites_is_refused():

@@ -302,8 +302,22 @@ def test_an_operator_may_not_change_the_model_s_logic_tree(model, grid):
 
 def test_sampling_one_path_from_a_large_tree_is_declared(model, grid):
     """One realisation is not the model's weighted mean, and the run says so."""
-    outcome = hazard_models.resolve(model, grid)
+    outcome = hazard_models.resolve(
+        model, grid, overrides={"number_of_logic_tree_samples": 1}
+    )
     assert any(
+        "weighted mean" in item["message"] for item in outcome["problems"]
+    )
+
+
+def test_a_run_samples_twenty_paths_over_the_same_thousand_years(model, grid):
+    """The rule ADR 18 decided, and the same span as one path covered before."""
+    outcome = hazard_models.resolve(model, grid)
+
+    assert "number_of_logic_tree_samples = 20" in outcome["rendered"]
+    assert "ses_per_logic_tree_path = 1" in outcome["rendered"]
+    assert "investigation_time = 50.0" in outcome["rendered"]
+    assert not any(
         "weighted mean" in item["message"] for item in outcome["problems"]
     )
 
