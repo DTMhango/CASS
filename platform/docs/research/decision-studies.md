@@ -345,6 +345,59 @@ What it does not settle: 12 sites of one region, one source model, one or two
 draws per arm. It says one path is a lottery of roughly ±20% on this model, not
 that twenty paths have converged.
 
+### What the rebuild did to the loss, measured 14 September 2026
+
+The decision above was measured on hazard at 12 sites. Acting on it — rebuilding
+the Indonesian hazard the way ADR 18 says to run one — let the same question be
+asked of loss, on the whole region and the real book.
+
+The rebuilt set covers the same thousand simulated years as the one it replaces,
+now as one fifty-year event set along each of twenty sampled paths rather than
+twenty event sets along one path: 27,001 events over the same 962 cells, no
+ground motion clipped. Everything else was held fixed — the same grid, the same
+vulnerability set built as correlated channels, the same three study books, the
+same conversion policy — so the difference between these results and the ones
+above them is the hazard and nothing else.
+
+Ground-up, the same books on each hazard:
+
+| Book | Measure | One path | Twenty paths | Change |
+| --- | --- | --- | --- | --- |
+| Storeys stated | Average annual loss | 566,728 | 602,289 | +6.3% |
+| | 100-year | 11,958,553 | 11,401,906 | −4.7% |
+| | 250-year | 20,948,830 | 27,517,640 | +31.4% |
+| | 1,000-year | 51,877,868 | 99,870,856 | +92.5% |
+| Storeys withheld | Average annual loss | 601,527 | 642,533 | +6.8% |
+| | 1,000-year | 55,540,620 | 103,572,552 | +86.5% |
+| Commercial of unknown height | Average annual loss | 568,401 | 566,414 | −0.3% |
+| | 1,000-year | 49,791,864 | 75,158,616 | +50.9% |
+
+The average annual loss moves a few per cent. The far tail roughly doubles.
+
+That is the shape ADR 18's hazard measurement predicted, and the footprints
+confirm the mechanism without going near the engine. Comparing the two PGA
+footprints over the same cells and the same bins, the body of the distribution is
+the same catalogue twice over — mean peak bin 11.57 against 11.60, and 22.15%
+against 22.39% of events peaking at bin 18 or above — while the strongest
+shaking anywhere in the catalogue rises from bin 42 to bin 50. Pooling twenty
+views does not make every event worse; it thins the middle slightly (12.37% of
+events peaked at bin 22+ against 11.67%) and extends the extreme, because among
+twenty draws of the ground-motion tree are branches that produce shaking no
+single draw did.
+
+What this does not settle: one draw of each configuration. The 500- and
+1,000-year losses are read off a catalogue of exactly a thousand simulated years,
+so they are the second-worst and worst year in it — the noisiest numbers on the
+page, and not separately estimated by either run. The stable comparisons are the
+average annual loss, which moved 6%, and the footprint statistics, which are
+counts over 3.7 million rows rather than order statistics. The direction is not
+in doubt; the factor of two is one draw's worth of evidence for it.
+
+The consequence for anything already measured on this platform: every Indonesian
+result produced before this rebuild sits on the one-path hazard, and its far tail
+is the part to distrust. The average annual losses those runs reported are within
+a few per cent of what the rebuilt hazard gives.
+
 ## 4. How a footprint is stored for the engine (item 23)
 
 **The question, plainly.** A footprint is the table of shaking for every event,

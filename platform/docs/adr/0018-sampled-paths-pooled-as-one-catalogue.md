@@ -85,9 +85,23 @@ A hazard set's events come from several paths, and its record says how many.
 Nothing about the occurrence table changes: the engine's own year numbering
 already spans the pooled catalogue, so each event still falls in one period.
 
-The hazard behind existing Indonesian results is still one sampled path. Those
-results are not wrong, but they are one view; a set built after this samples
-twenty.
+The Indonesian hazard has been rebuilt on this decision: `id-hazard-2024.0.0-b88ea45f`
+covers the same thousand simulated years as one fifty-year event set along each
+of twenty sampled paths, 27,001 events over 962 cells with nothing clipped.
+
+What that changed, measured on the same books with everything but the hazard
+held fixed, is mostly the tail. Ground-up average annual loss moved between
+−0.3% and +6.8%; the 1,000-year loss rose between 51% and 93%. The footprints
+say why: the body of the two catalogues is the same distribution — mean peak
+PGA bin 11.57 against 11.60 — while the strongest shaking anywhere rises from
+bin 42 to bin 50, because among twenty draws of the ground-motion tree are
+branches no single draw produced. Those far return periods are the worst one or
+two years of a thousand-year catalogue and are not precisely estimated by either
+run; the direction is firm, the factor is one draw's worth of evidence.
+
+Results produced before that rebuild sit on the single-path hazard. They are not
+wrong, but they are one view, and it is their tail rather than their average to
+distrust.
 
 The measurement is 12 sites of one region, one source model, and one or two
 draws per arm. It says a single path is a lottery of about ±20% on this model,
