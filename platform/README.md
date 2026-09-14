@@ -236,6 +236,16 @@ summed. The results workspace draws them as a grid plot with the exact table
 beside it, and says how much loss could not be placed and how far the locations
 add back to the portfolio number.
 
+**A financial structure is built on the platform.** A portfolio that arrived
+with locations alone can be given its policies and treaties on the financial
+structure screen: policies with their layers, and quota share, surplus share and
+catastrophe excess of loss contracts with the scope each reaches. They are
+written into the draft version's own OED files, validated like an imported file
+and read straight back with their findings. The forms ask only for the terms the
+engine uses for each type, and refuse what it would reject — a surplus share
+must name each risk and the share ceded on it — so a structure built here is one
+the engine runs.
+
 **A result reports its range across assumption scenarios.** The same book on the
 same model, run under each assumption set, is a scenario range: the baseline is
 the central estimate, every metric names the scenario at each end of its range,

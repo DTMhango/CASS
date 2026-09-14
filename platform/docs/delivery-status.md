@@ -23,12 +23,12 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,995 backend tests pass, 1 skipped. Of the 106 integration tests, the
+- 2,009 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
   revision against the 30 June workbook and the real GEM v2026.0.0 files; the
   rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
   specifications and an OpenQuake datastore the engine wrote.
-  129 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  137 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -77,6 +77,21 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- A financial structure was built on the live stack through the builder's API
+  and run through the engine. The Jakarta–Bandung book's 64 locations were taken
+  into a new portfolio labelled "Structure builder live check", given a policy on
+  each of its 3 accounts and three contracts — a surplus share on two sites, a
+  whole-book quota share of 30% and a catastrophe excess of loss of 2,000,000
+  per event over 100,000 — with no blocking finding, then published and run for
+  all three perspectives in 96 seconds. It is the first surplus share CASS has
+  run through the engine. The ground-up AAL was 566,728.13, the book's figure
+  under baseline weights. The insured AAL was 305,479.06, below ground-up
+  because 38 of the locations carry the book's own location deductibles and
+  limits, which apply once an account file exists. The reinsurance perspective
+  was 151,313.83, and in Oasis that perspective is the loss net of reinsurance
+  (oasislmf's `ri` stream): the three contracts ceded 154,165.23, about half the
+  insured loss. CASS's label "Reinsurance loss" does not say that, which is item
+  32.
 - The Jakarta–Bandung book was run twice more on the live stack, under baseline
   weights and under the more vulnerable assumption set, and the two results
   recorded the same calculation digest, so the scenario range brought them
@@ -159,7 +174,7 @@ run. Production items that serve only a governed deployment are not pursued
 | M2 Engine integration | Met | PiWind live suite; the sample book through keys, generation, losses and collection; the smoke check proven against the live engine | — |
 | M3 Hazard | Partly met | OpenQuake adapter and hazard runs; PuSGeN 2024 on the Jakarta–Bandung region; published Vs30 joined to 37% of cells; benchmark comparison machinery | Approved benchmark curves; a full-country run; a realisation-weighting rule (item 22). Nepal acquires no hazard: it was a test country and Indonesia is covered |
 | M4 Conversion | Partly met | Four-measure footprints with frequency preserved; package built under a converter approval; the engine's own datastore read in slices; acceptance measurements taken and judged | Approved QA tolerances |
-| M5 Loss | Partly met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled and shown | Building a structure on the platform rather than importing one |
+| M5 Loss | Met | Ground-up, insured and reinsurance with keys reconciliation; allocation scenarios reconcile exactly; an assumption set applied within a run and compared live against the baseline; a book converted to the run currency under an approved rate; the financial structure read, reconciled, shown, and built on the platform | — |
 | M6 Product | Met | Result approval, export, two-result comparison, EP curve chart, event loss table, loss by area-peril cell with its map, scenario ranges across assumption sets, and the financial structure workspace | — |
 | M7 Production | Not pursued | CI builds the CASS images and the patched Oasis worker and scans the CASS ones; an integration workflow runs on demand against the pinned GEM release; every pulled image is pinned by digest | Nothing as a milestone: CASS is a research tool, so no production release gate applies ([ADR 15](adr/0015-research-tool-and-gem-permission.md)). Backing up research work stays in the backlog as item 18 |
 
@@ -221,7 +236,7 @@ reviewed research result, not a basis for pricing or reserving.
 | Portfolio dashboard | Built | Storage and model notices |
 | Model catalogue | Built, Models tab | — |
 | Exposure workspace | Built, Exposure tab: intake import, OED attach, validation, row correction, publication | Assumption scenarios; reported-versus-inferred display across attributes |
-| Financial structure workspace | Built, Exposure tab: accounts and layers, contracts in inuring order, scope preview, reconciliation, and which contracts the engine will not apply | Building or editing a structure on the platform; guided contract forms |
+| Financial structure workspace | Built, Exposure tab: accounts and layers, contracts in inuring order, scope preview, reconciliation, which contracts the engine will not apply, and guided forms that build policies and contracts on a draft portfolio | — |
 | Analysis builder | Built, including the assumption set, the run mode and what each resource profile has room for | Output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
 | Results workspace | Built: AAL, return-period table, EP curve chart, event loss table, loss by area-peril cell with its map, scenario ranges across assumption sets, caveats, approval, export, comparison | — |
@@ -261,7 +276,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 2 | Run modes: geometry-only, technical loss, research, decision use | Brief §5.2 | Done |
 | 3 | Currency conversion evidence captured and applied before generation | §8 | Done |
 | 4 | Results: event loss tables, geographic summaries, EP curve chart, map, scenario ranges | §3, M6 | Done: event loss table, EP curve chart, geographic summary and map, and scenario ranges built. Every analysis now asks the engine for a location summary level beside the portfolio one, carrying only the period average loss; at publication each location's average annual loss is placed in the cell the run's own keys mapped it to, the cells are summed, and the result says how much could not be placed and how far the locations add back to the portfolio number. The results workspace draws the cells as a grid plot rather than on a basemap, with the exact table beside it. A scenario range takes the same book on the same model version, perspective, currency, run mode and ORD basis, calculated under the same settings apart from the assumption set, run under each assumption set, and reports every metric's central estimate (the baseline), its low and high and the scenario behind each, and ranks the assumptions by how far they move any number; it lists what does not vary — the hazard realisation, the allocation of value between sites, where a coarse geocode places a location — so a range across one assumption is not read as the whole uncertainty |
-| 5 | Financial structure workspace | §3, M5 | Partly done: accounts and layers, contracts, inuring order, scope preview and reconciliation are read from the published portfolio and checked. Building a structure on the platform, rather than importing one, is not built |
+| 5 | Financial structure workspace | §3, M5 | Done: accounts and layers, contracts, inuring order, scope preview and reconciliation are read from the portfolio and checked, and a structure can now be built on the platform rather than only imported. Policies with their layers, and quota share, surplus share and catastrophe excess of loss contracts with their scope, are written into the draft version's own OED files and read straight back with their findings. The forms ask only for the terms oasislmf 2.5.7 uses for each type — a quota share's ceded share, a surplus share's share on each risk it names, a catastrophe excess of loss's attachment and limit per event — and refuse what the engine would reject, such as a surplus share whose scope does not name exactly the risk at its risk level. A type CASS does not apply in a run (ADR 10) is refused rather than written. A published version is offered its correction |
 | 6 | OED standards registry: `DataStandardVersion`, pinned OED 4.0.0 and 5.0.0 reference JSON, schema API, ODS Tools validation, version diff | §8, §17 | Done |
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Done |
 | 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Done as machinery. Both gates still stand open, because no benchmark curves and no tolerances have been approved — which is a decision, not code |
@@ -274,7 +289,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 15 | Administration: users and roles, queues, storage, retention, support bundle | §3, §4 | Done: an administrator changes a person's role or access, and the API refuses any change that would leave nobody able to undo it; the screen shows what each profile is running, what the store holds and what the retention sweep removes next; the support bundle carries settings by allowlist and failures by stage, never secrets or portfolio contents, and viewing it is audited apart from downloading it |
 | 16 | Observability: metrics, correlation IDs through background tasks | §4 | Done: the request's correlation ID travels in task headers into the worker and is stamped on the run when it is queued; /metrics/ serves run, profile, failure, artifact, result and approval gauges read from the records, behind a scrape token |
 | 17 | Multi-factor authentication and single sign-on configuration | §10 | Not pursued: a research tool with local accounts ([ADR 15](adr/0015-research-tool-and-gem-permission.md)) |
-| 18 | Backup and restore of research work: the database and the artifact store | §11 | Not started. Re-scoped from a production restore drill to a procedure that keeps research work from being lost |
+| 18 | Backup and restore of research work: the database and the artifact store | §11 | Postponed on 14 September 2026: not yet necessary. Re-scoped earlier from a production restore drill to a procedure that keeps research work from being lost |
 | 19 | CI: Oasis worker image build and the integration workflow | §17 | Done: CI builds the patched Oasis worker beside the other images, so raising the upstream version past the patched defect fails the build; it is the one image not scanned, because its findings are the upstream image's. A separate integration workflow runs on demand and weekly: it fetches GEM's exposure and vulnerability models at the commits the model manifest pins, runs the integration suite, and lists what it skipped for data CI cannot have — the national hazard package, an OpenQuake datastore, a live Oasis. The portfolio workbook never enters CI, and a deployment test refuses a workflow that names it. Neither workflow has run on GitHub yet: both parse, and reading the pinned commits from the manifest was run locally. SBOMs for releases stay dropped |
 | 20 | Pinned image digests, so a run can be repeated on the same engines | §18 | Done: every image the compose file pulls from a registry is pinned by digest as well as tag — `openquake/engine:3.23` among them, a minor-version tag that would otherwise move — and each pinned reference resolves to the image the installation already runs. Every base a CASS build starts from is pinned the same way, the patched Oasis worker's included; those digests were read from the registry, and no image has been rebuilt from them yet. The images this repository builds are not pinned, because their digest changes with every build: a run records the engine version and, where the deployment exposes it, the image digest it ran on. A deployment test refuses an unpinned image. The signed release bundle stays dropped |
 | 21 | Multi-IMT representation: measure the candidates against an OpenQuake reference calculation and decide | §6, §16 | Not started. Item 9 is the measurement, and its first run puts the channel representation 10% below the engine on the pilot book. The decision needs the candidates measured against each other, and classes whose taxonomies span measures stay refused until it is taken ([ADR 8](adr/0008-intensity-measures-as-area-peril-channels.md)) |
@@ -286,6 +301,8 @@ reviewed research result, not a basis for pricing or reserving.
 | 27 | Assemble a model version for any country from a built grid and a built vulnerability set | §6 | Done: the two halves are paired at `/model-versions/assemble/` into the draft a run names. A pair from two different countries is refused, because such a version would calculate happily and mean nothing. The scope statement and the limitations are written from the halves rather than typed, so a version's caveats cannot drift from its parts |
 | 28 | A run on a country built on the platform is described under the enrichment its vulnerability set was built under | §5, §8 | Done: the enrich stage looked the enrichment up among the compiled-in pilots by country code, so a run on any other country recorded its lineage under an empty enrichment and no year could derive a design level. It now reads the enrichment each assumption set's functions were built under from the set's own provenance dictionary. A set registered before the dictionary recorded it is described as before, and a record that cannot be read stops the run at enrich rather than being passed over |
 | 29 | The OpenQuake reference comparison, for a country built on the platform | WP4, §16 | Done: the comparison found GEM's functions for a run's country through a table of the two pilots, so it refused any other country — and it is the measurement items 21 and 26 rest on. A vulnerability set's dictionary now records where GEM publishes its country, the comparison reads GEM's functions from there, and a set registered before that record is found through the table as before |
+| 32 | Say that the reinsurance perspective is the loss net of reinsurance | §9 | Not started. Oasis's `ri` stream is the loss retained after every inuring priority, and CASS labels it "Reinsurance loss" on results, comparisons and the analysis builder, which reads as the ceded amount |
+| 31 | Point CASS at the GEM release on the user's own device, and check it | §6 | Not started. The release is not bundled; the location is set on the platform, validated against GEM's repository layout, and the release it holds is reported |
 | 30 | Remove the Nepal prototype | — | Done: the compiled-in Nepal grid, enrichment and GEM location are gone, now that a grid, a vulnerability set and a model version can be built on the platform for any country. The 30 June book still carries Nepali business, so the tests that map it build Nepal from a written grid specification, and the acceptance tests against GEM's published Nepal data use a written enrichment — the path somebody working on a country now takes. KRE's own Nepal policies are untouched |
 
 ## Needs a decision or outside input
@@ -331,3 +348,17 @@ machinery around one, the decision still has to be taken.
   footprint storage format.** Not waiting on anybody else: CASS is to research
   each and decide. They are backlog items 21, 22 and 23, and each ends in a
   decision record rather than a preference.
+
+### Answered on 14 September 2026
+
+- **Who decides the modelling-science questions.** CASS researches and tests
+  the candidates for the multi-IMT representation, the realisation-weighting
+  rule, the footprint storage format and the event representation (items 21,
+  22, 23 and 26), measures them on the platform, and decides with the evidence
+  written down in plain terms. They are not waiting on a reviewer's judgement.
+- **Backup and restore of research work.** Postponed: not yet necessary
+  (item 18).
+- **Where the GEM release comes from.** Not bundled: the 2026 release is too
+  large to carry in the codebase. The person using CASS points it at the GEM
+  clone on their own device, and CASS checks that the folder has the exact GEM
+  repository layout and says which release it found (item 31).

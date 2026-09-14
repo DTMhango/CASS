@@ -28,6 +28,7 @@ const EXPOSURE = {
   name: "Jakarta facultative",
   version: 1,
   state: "published",
+  is_frozen: true,
   is_usable_by_runs: true,
   location_count: 3,
   total_tiv: "9000000.00",
@@ -121,6 +122,7 @@ const STRUCTURE: FinancialStructureSummary = {
 };
 
 let structure: FinancialStructureSummary = STRUCTURE;
+let exposure: Record<string, unknown> = EXPOSURE;
 
 function routeFor(url: string): unknown {
   if (url.includes("/session/")) {
@@ -148,7 +150,7 @@ function routeFor(url: string): unknown {
     return structure;
   }
   if (url.includes("/exposure-versions/")) {
-    return { count: 1, next: null, previous: null, results: [EXPOSURE] };
+    return { count: 1, next: null, previous: null, results: [exposure] };
   }
   return {};
 }
@@ -170,6 +172,7 @@ function renderScreen() {
 
 beforeEach(() => {
   structure = STRUCTURE;
+  exposure = EXPOSURE;
   window.localStorage.setItem(
     "cass.working-context.v1",
     JSON.stringify({ projectId: PROJECT_ID, exposureId: EXPOSURE_ID }),
@@ -217,6 +220,24 @@ describe("FinancialStructure", () => {
 
     const headings = await screen.findAllByText(/^Priority \d/);
     expect(headings.map((item) => item.textContent)).toEqual(["Priority 1", "Priority 2"]);
+  });
+
+  it("offers a published portfolio its correction rather than forms", async () => {
+    renderScreen();
+
+    expect(
+      await screen.findByRole("button", { name: "Correct in a new version" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write the contract" })).not.toBeInTheDocument();
+  });
+
+  it("lets a draft portfolio's structure be built beside what it already says", async () => {
+    exposure = { ...EXPOSURE, state: "validated", is_frozen: false };
+    renderScreen();
+
+    expect(await screen.findByText("Add a policy")).toBeInTheDocument();
+    expect(screen.getByText("Add a reinsurance contract")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove contract 2" })).toBeInTheDocument();
   });
 
   it("shows an advisory finding without anything having to be opened", async () => {

@@ -1037,7 +1037,7 @@ This section is a summary at 14 September 2026. The working tracker, which moves
 | M2 Engine integration | Met, including the pre-loss smoke check | — |
 | M3 Hazard | Partly met: PuSGeN 2024 run on the Jakarta–Bandung region with published Vs30 | Benchmark gate, full-country run, a realisation-weighting rule (tracker item 22) |
 | M4 Conversion | Partly met: four-measure footprints, frequency preserved, package built under approval, the HDF5 datastore read in slices, QA measured, and the OpenQuake reference comparison run on the pilot book | Approved QA tolerances |
-| M5 Loss | Partly met: ground-up, insured and reinsurance run with keys reconciliation, an assumption set applied within a run and compared live against the baseline, currency conversion under an approved rate, and the financial structure read and reconciled | Building a financial structure on the platform |
+| M5 Loss | Met: ground-up, insured and reinsurance run with keys reconciliation, an assumption set applied within a run and compared live against the baseline, currency conversion under an approved rate, and the financial structure read, reconciled and built on the platform | — |
 | M6 Product | Met: result approval, export, comparison, EP chart, event loss table, loss by area-peril cell with its map, scenario ranges across assumption sets, and the financial structure workspace | — |
 | M7 Production | Not pursued after 1.8: CASS is a research tool ([ADR 15](../platform/docs/adr/0015-research-tool-and-gem-permission.md)) | — |
 
@@ -1058,9 +1058,9 @@ This section is a summary at 14 September 2026. The working tracker, which moves
 
 ### What remains
 
-Buildable in code, scoped for research after 1.8: building a financial structure on the platform; and backup and restore of research work. Not pursued after 1.8: separately deployed keys and converter services, MFA and single sign-on, SBOMs, and a signed release bundle.
+Buildable in code, scoped for research after 1.8: pointing CASS at the GEM release on the user's own device; and backup and restore of research work, postponed on 14 September 2026 as not yet necessary. CASS is also to research, test and decide the multi-IMT representation, the realisation-weighting rule, the footprint storage format and the event representation. Not pursued after 1.8: separately deployed keys and converter services, MFA and single sign-on, SBOMs, and a signed release bundle.
 
-Delivered since 1.8, by 14 September 2026: a grid, a vulnerability set and a model version built on the platform for any country, with runs and the OpenQuake reference comparison following the enrichment and GEM location each set records; the Nepal prototype removed as test data; the Cohort B geocoding sensitivity; loss by area-peril cell with its map; scenario ranges across assumption sets; CI coverage of the patched worker and an integration workflow; and every pulled image pinned by digest so a run can be repeated.
+Delivered since 1.8, by 14 September 2026: a grid, a vulnerability set and a model version built on the platform for any country, with runs and the OpenQuake reference comparison following the enrichment and GEM location each set records; the Nepal prototype removed as test data; the Cohort B geocoding sensitivity; loss by area-peril cell with its map; scenario ranges across assumption sets; a financial structure built on the platform; CI coverage of the patched worker and an integration workflow; and every pulled image pinned by digest so a run can be repeated.
 
 Needing a decision or outside input: secondary-peril and business-interruption scope; approved benchmark curves and QA tolerances; the brief's section 5.1 data questions; whether to adopt OED 5.0.0; and a full-country hazard run.
 

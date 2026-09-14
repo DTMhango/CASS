@@ -28,6 +28,8 @@ import {
 import { useWorkingContext } from "@/context/WorkingContext";
 import { formatCount, formatMoney, formatMoneyExact, formatPercent } from "@/lib/format";
 
+import { StructureBuilder } from "./StructureBuilder";
+
 import "./FinancialStructure.css";
 
 /** Shares cross the API as decimal strings, as every other proportion does. */
@@ -243,6 +245,8 @@ export function FinancialStructure({ embedded = false }: { embedded?: boolean } 
               </Disclosure>
             </Card>
           ) : null}
+
+          <StructureBuilder exposure={exposure} structure={structure} />
         </div>
       )}
     </>

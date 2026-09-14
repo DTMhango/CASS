@@ -38,6 +38,8 @@ import type {
   EventLossPage,
   ExposurePreview,
   FinancialStructureSummary,
+  ContractInput,
+  PolicyInput,
   ConfiguredRun,
   ExposureVersion,
   HazardJobSpec,
@@ -1352,6 +1354,40 @@ export function useRemoveRow(id: UUID | undefined) {
       client.invalidateQueries({ queryKey: keys.exposure(id ?? "") });
     },
   });
+}
+
+/**
+ * Change a draft portfolio's financial structure.
+ *
+ * Every change comes back as the structure read from the files just written,
+ * so the screen shows what the portfolio now says rather than what was sent.
+ */
+function useStructureChange<Body>(id: UUID | undefined, path: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Body) =>
+      api.post<FinancialStructureSummary>(`/exposure-versions/${id}/structure/${path}/`, body),
+    onSuccess: (structure) => {
+      if (id) client.setQueryData(keys.financialStructure(id), structure);
+      client.invalidateQueries({ queryKey: ["exposure-versions"] });
+    },
+  });
+}
+
+export function useAddPolicy(id: UUID | undefined) {
+  return useStructureChange<PolicyInput>(id, "policies");
+}
+
+export function useRemovePolicy(id: UUID | undefined) {
+  return useStructureChange<{ account: string; policy: string }>(id, "policies/remove");
+}
+
+export function useAddContract(id: UUID | undefined) {
+  return useStructureChange<ContractInput>(id, "contracts");
+}
+
+export function useRemoveContract(id: UUID | undefined) {
+  return useStructureChange<{ number: number }>(id, "contracts/remove");
 }
 
 /** Copy a published portfolio into the next version, so it can be corrected. */

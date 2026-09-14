@@ -1302,6 +1302,48 @@ export interface StructureFinding {
   blocking: boolean;
 }
 
+/** One layer of a policy being written: amounts as decimal strings, a share as a proportion. */
+export interface PolicyLayerInput {
+  attachment: string;
+  limit: string;
+  participation: string;
+}
+
+/** A policy to write into a draft portfolio's account file. */
+export interface PolicyInput {
+  account: string;
+  policy: string;
+  perils: string;
+  deductible?: string;
+  policy_limit?: string;
+  layers: PolicyLayerInput[];
+}
+
+/** One risk a contract's scope names; a surplus share also states the share ceded on it. */
+export interface ContractScopeInput {
+  account: string;
+  policy?: string;
+  location?: string;
+  ceded_percent?: string;
+}
+
+/** A reinsurance contract to write into a draft portfolio. Only the engine's terms for the type are sent. */
+export interface ContractInput {
+  type: "QS" | "SS" | "CXL";
+  name?: string;
+  perils: string;
+  inuring_priority?: number;
+  ceded_percent?: string;
+  placed_percent?: string;
+  occurrence_attachment?: string;
+  occurrence_limit?: string;
+  risk_level?: "" | "LOC" | "POL" | "ACC";
+  risk_limit?: string;
+  risk_attachment?: string;
+  whole_portfolio?: boolean;
+  scope?: ContractScopeInput[];
+}
+
 export interface FinancialStructureSummary {
   exposure_version: UUID;
   currency: string;

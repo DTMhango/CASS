@@ -41,7 +41,7 @@ from cass_keys.sensitivity import SensitivityError
 from cass_oed import structure as oed_structure
 from cass_oed.schema import FileKind
 
-from . import editing, geocoding, promotion, review, scenarios, services
+from . import editing, geocoding, promotion, review, scenarios, services, structure_builder
 from . import extract as extract_service
 from .models import (
     AttributeOverride,
@@ -451,6 +451,98 @@ class ExposureVersionViewSet(viewsets.ModelViewSet):
                 "currency": exposure.run_currency,
                 **structure.as_dict(),
             }
+        )
+
+    def _built(self, operation, *, created: bool = False) -> Response:
+        """Apply one change to a draft portfolio's structure, and return it read back."""
+        try:
+            document = operation()
+        except structure_builder.BuildError as exc:
+            return Response(
+                {"detail": "The structure was not changed.", "fields": exc.problems},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.ExposureError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(document, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="structure/policies")
+    def add_policy(self, request, pk=None, version=None):
+        """Write a policy and its layers into this draft portfolio's account file."""
+        exposure = self.get_object()
+        data = request.data
+        return self._built(
+            lambda: structure_builder.add_policy(
+                exposure,
+                account=data.get("account"),
+                policy=data.get("policy"),
+                perils=data.get("perils"),
+                layers=data.get("layers") or [],
+                deductible=data.get("deductible"),
+                policy_limit=data.get("policy_limit"),
+                inception=data.get("inception") or "",
+                expiry=data.get("expiry") or "",
+                actor=request.user,
+            ),
+            created=True,
+        )
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="structure/policies/remove")
+    def remove_policy(self, request, pk=None, version=None):
+        """Remove every layer of one policy from this draft portfolio."""
+        exposure = self.get_object()
+        return self._built(
+            lambda: structure_builder.remove_policy(
+                exposure,
+                account=request.data.get("account"),
+                policy=request.data.get("policy"),
+                actor=request.user,
+            )
+        )
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="structure/contracts")
+    def add_contract(self, request, pk=None, version=None):
+        """Write a reinsurance contract and the scope it reaches into this draft portfolio.
+
+        Only the terms the engine uses for the contract type are accepted, and a
+        type CASS does not apply in a run is refused rather than written.
+        """
+        exposure = self.get_object()
+        data = request.data
+        return self._built(
+            lambda: structure_builder.add_contract(
+                exposure,
+                contract_type=data.get("type"),
+                perils=data.get("perils"),
+                name=data.get("name") or "",
+                currency=data.get("currency") or "",
+                inuring_priority=data.get("inuring_priority") or 1,
+                ceded_percent=data.get("ceded_percent"),
+                placed_percent=data.get("placed_percent"),
+                occurrence_attachment=data.get("occurrence_attachment"),
+                occurrence_limit=data.get("occurrence_limit"),
+                risk_level=data.get("risk_level") or "",
+                risk_attachment=data.get("risk_attachment"),
+                risk_limit=data.get("risk_limit"),
+                scope=data.get("scope") or [],
+                whole_portfolio=bool(data.get("whole_portfolio")),
+                actor=request.user,
+            ),
+            created=True,
+        )
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="structure/contracts/remove")
+    def remove_contract(self, request, pk=None, version=None):
+        """Remove one contract, and every scope row naming it, from this draft portfolio."""
+        exposure = self.get_object()
+        return self._built(
+            lambda: structure_builder.remove_contract(
+                exposure, number=request.data.get("number"), actor=request.user
+            )
         )
 
     @action(detail=True, methods=["get"], url_path="findings")
