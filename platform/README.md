@@ -213,6 +213,18 @@ enrichment, because the enrichment is the assumption behind every function in
 it, and an era table that is out of order or ends before today is refused rather
 than applied.
 
+**The two halves are assembled into the version a run names.** A grid says where
+a loss can be computed and a vulnerability set says how much damage the shaking
+does; the model version is the pair, and until it exists neither half is
+runnable. Assembling one asks for nothing but the two halves and a version of
+its own: the peril scope and the limitations are written from what was paired,
+so a version's caveats cannot drift from its parts, and a pair from two
+different countries is refused — such a version would calculate happily and mean
+nothing. What comes out is a draft research prototype that says what still
+blocks it, usually a hazard set and the multi-IMT decision. With this in place a
+country CASS ships nothing for can be built on the platform from end to end,
+which is why the pilot countries' test data is no longer load-bearing.
+
 **The conversion is measured against the engine's own answer.** A finished
 analysis run can be compared with an OpenQuake risk calculation on the same
 events: `compare_with_openquake` rebuilds the run's keys and blend weights as

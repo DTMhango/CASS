@@ -26,6 +26,7 @@ import type {
   GridBuildResult,
   GridSpecificationInput,
   VulnerabilityBuildResult,
+  VulnerabilitySetSummary,
   VulnerabilitySpecificationInput,
   AuditEvent,
   CatalogueModel,
@@ -579,6 +580,39 @@ export function useBuildGrid() {
     mutationFn: (specification: GridSpecificationInput) =>
       api.post<GridBuildResult>("/grids/build/", specification),
     onSuccess: () => client.invalidateQueries({ queryKey: ["grids"] }),
+  });
+}
+
+export function useVulnerabilitySets(countryCode?: string) {
+  return useQuery({
+    queryKey: ["vulnerability-sets", countryCode ?? "all"] as const,
+    queryFn: async () =>
+      rows(
+        await api.get<Paginated<VulnerabilitySetSummary>>(
+          "/vulnerability-sets/",
+          countryCode ? { country_code: countryCode } : undefined,
+        ),
+      ),
+  });
+}
+
+/**
+ * Pair a grid with a vulnerability set into a model version a run can name.
+ *
+ * The scope statement and both halves' limitations are written by the API, not
+ * here: they follow from what was paired, and a form that asked for them would
+ * be asking somebody to retype what the registry already knows.
+ */
+export function useAssembleModelVersion() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      grid: UUID;
+      vulnerability_set: UUID;
+      version: string;
+      label?: string;
+    }) => api.post<ModelVersion>("/model-versions/assemble/", input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["model-versions"] }),
   });
 }
 

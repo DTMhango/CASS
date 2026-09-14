@@ -679,6 +679,16 @@ export interface GridSpecificationInput {
   notes: string;
 }
 
+export interface VulnerabilitySetSummary {
+  id: UUID;
+  country_code: string;
+  version: string;
+  source: string;
+  function_count: number;
+  imts_used: string[];
+  publication_state: string;
+}
+
 /** One country a GEM release publishes vulnerability functions for. */
 export interface GemCountry {
   region: string;

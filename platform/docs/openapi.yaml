@@ -4199,6 +4199,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelVersion'
           description: ''
+  /api/v1/model-versions/assemble/:
+    post:
+      operationId: api_v1_model_versions_assemble_create
+      description: |-
+        Pair a country's grid with its vulnerability set.
+
+        A grid says where a loss can be computed and a vulnerability set says how
+        much damage the shaking does. The model version is the pair, and it is
+        what a run names -- so the scope statement and both halves' limitations
+        are written onto it here rather than left to whoever fills the form.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelVersionAssemblyRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelVersionAssemblyRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelVersionAssemblyRequestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+          description: ''
   /api/v1/model-versions/catalogue/:
     get:
       operationId: api_v1_model_versions_catalogue_retrieve
@@ -8093,6 +8127,25 @@ components:
       - usable_for_decisions
       - version
       - vulnerability_detail
+      - vulnerability_set
+    ModelVersionAssemblyRequestRequest:
+      type: object
+      properties:
+        grid:
+          type: string
+          format: uuid
+        vulnerability_set:
+          type: string
+          format: uuid
+        version:
+          type: string
+          minLength: 1
+        label:
+          type: string
+          minLength: 1
+      required:
+      - grid
+      - version
       - vulnerability_set
     ModelVersionRequest:
       type: object

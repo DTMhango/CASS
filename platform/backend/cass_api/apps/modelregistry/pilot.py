@@ -24,13 +24,11 @@ Nothing here approves anything. Everything registered is a draft, and
 
 from __future__ import annotations
 
-from typing import Any
-
 from django.db import transaction
 
 from cass_keys import grids, pilot_grids
 
-from . import grid_build
+from . import assembly, grid_build
 from .models import AreaPerilGrid, ModelVersion, Peril, PublicationState, VulnerabilitySet
 
 #: Countries with a prototype grid specification.
@@ -101,7 +99,7 @@ def register_model_version(
             "vulnerability_set": vulnerability_set,
             "imts": sorted(vulnerability_set.imts_used),
             "oed_schema_version": "4.0.0",
-            "peril_scope": _peril_scope(),
+            "peril_scope": assembly.peril_scope(),
             "known_limitations": _limitations(grid_spec, vulnerability_limitations),
             "unsupported_taxonomy_report": {
                 "note": (
@@ -117,33 +115,6 @@ def register_model_version(
         },
     )
     return model
-
-
-def _peril_scope() -> dict[str, Any]:
-    """Section 9's machine-readable scope statement for the prototype."""
-    return {
-        "QEQ": {
-            "treatment": "included",
-            "rationale": "Shake is the only sub-peril this prototype routes.",
-        },
-        "QFF": {"treatment": "excluded", "rationale": "No fire-following module."},
-        "QTS": {"treatment": "excluded", "rationale": "No tsunami module."},
-        "QSL": {
-            "treatment": "excluded",
-            "rationale": (
-                "No liquefaction module, and no cell carries the site parameters "
-                "one would need."
-            ),
-        },
-        "QLS": {"treatment": "excluded", "rationale": "No landslide module."},
-        "site_response": {
-            "treatment": "excluded",
-            "rationale": (
-                "No Vs30, soil class or basin parameter is attached to any cell. "
-                "Loss on soft soil will be understated, and by an unknown amount."
-            ),
-        },
-    }
 
 
 def _limitations(grid_specification, vulnerability_limitations: str) -> str:

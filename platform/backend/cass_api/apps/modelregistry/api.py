@@ -10,6 +10,7 @@ may be used for decisions and what is blocking publication.
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
@@ -25,8 +26,8 @@ from apps.modelregistry.assets import ModelAssetError, load_grid
 from apps.runs.models import HazardRun, Run, RunKind
 from cass_converter import gem as gem_release
 
+from . import assembly, grid_build, hazard_models, quality
 from . import gem as gem_registry
-from . import grid_build, hazard_models, quality
 from . import hazard as hazard_registry
 from .models import (
     AreaPerilGrid,
@@ -334,6 +335,14 @@ class AssumptionSetViewSet(viewsets.ModelViewSet):
     filterset_fields = ["country_code", "flavour", "publication_state"]
 
 
+def _registered(model, identifier):
+    """One record by id, or nothing where the id is unusable or unknown."""
+    try:
+        return model.objects.filter(pk=identifier).first()
+    except (DjangoValidationError, TypeError, ValueError):
+        return None
+
+
 class ModelVersionViewSet(viewsets.ModelViewSet):
     queryset = ModelVersion.objects.select_related("grid", "vulnerability_set")
     serializer_class = ModelVersionSerializer
@@ -343,6 +352,71 @@ class ModelVersionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user, updated_by=self.request.user)
+
+    @extend_schema(
+        request=inline_serializer(
+            name="ModelVersionAssemblyRequest",
+            fields={
+                "grid": serializers.UUIDField(),
+                "vulnerability_set": serializers.UUIDField(),
+                "version": serializers.CharField(),
+                "label": serializers.CharField(required=False),
+            },
+        ),
+        responses={201: ModelVersionSerializer},
+    )
+    @action(detail=False, methods=["post"], url_path="assemble")
+    def assemble(self, request, version=None):
+        """Pair a country's grid with its vulnerability set.
+
+        A grid says where a loss can be computed and a vulnerability set says how
+        much damage the shaking does. The model version is the pair, and it is
+        what a run names -- so the scope statement and both halves' limitations
+        are written onto it here rather than left to whoever fills the form.
+        """
+        grid = _registered(AreaPerilGrid, request.data.get("grid"))
+        vulnerability_set = _registered(
+            VulnerabilitySet, request.data.get("vulnerability_set")
+        )
+        missing = [
+            name
+            for name, value in (("grid", grid), ("vulnerability set", vulnerability_set))
+            if value is None
+        ]
+        if missing:
+            return Response(
+                {"detail": f"No {' and no '.join(missing)} with that id is registered."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            model = assembly.assemble(
+                grid=grid,
+                vulnerability_set=vulnerability_set,
+                version=str(request.data.get("version") or ""),
+                label=str(request.data.get("label") or ""),
+                actor=request.user,
+            )
+        except assembly.AssemblyError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        audit.record(
+            action=AuditAction.CREATE,
+            subject_type="model_version",
+            subject_id=model.id,
+            actor=request.user,
+            subject_label=str(model),
+            request=request,
+            after={
+                "grid": grid.reference,
+                "vulnerability_set": vulnerability_set.version,
+                "blockers": model.publication_blockers(),
+            },
+            detail=f"Assembled {model.reference} from {grid.reference}.",
+        )
+        return Response(
+            ModelVersionSerializer(model).data, status=status.HTTP_201_CREATED
+        )
 
     @action(detail=True, methods=["post"])
     def publish(self, request, pk=None, version=None):

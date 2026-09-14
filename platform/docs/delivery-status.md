@@ -23,10 +23,10 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,936 backend tests pass, 1 skipped. 99 integration tests pass against the
+- 1,945 backend tests pass, 1 skipped. 99 integration tests pass against the
   real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
   pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
-  122 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+  126 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -75,6 +75,14 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- A whole country was built on the live stack out of nothing but the product,
+  for a country CASS ships no constants for: a specification became a 27-cell
+  grid, the GEM release became a 484-function vulnerability set under a written
+  enrichment, and the two were assembled into `ph-qeq-scratch-check` — a draft
+  research prototype carrying all four intensity measures and four stated
+  blockers, among them the multi-IMT decision and the absence of a hazard set.
+  A Manila coordinate read back through the pair to its refined cell. The check
+  removed all three afterwards.
 - A vulnerability set for a country CASS ships no constants for was built on the
   live stack from the real GEM v2026.0.0 release: the catalogue read the release,
   and a written enrichment — three design eras, each with its reason — produced
@@ -181,7 +189,7 @@ reviewed research result, not a basis for pricing or reserving.
 | Analysis builder | Built, including the assumption set, the run mode and what each resource profile has room for | Output selection |
 | Run monitor | Built: stages, events, artifacts, keys gate, cancel, retry, exceptions and resume at a gate, smoke and review checks | — |
 | Results workspace | Partly built: AAL, return-period table, EP curve chart, event loss table, caveats, approval, export, comparison | Maps, geographic summaries, scenario ranges |
-| Model build workspace | Built, Hazard and Build tabs, including building a country's grid from a written specification and its vulnerability set from GEM under a written enrichment | Benchmark and QA evidence views |
+| Model build workspace | Built, Hazard and Build tabs: a country's grid from a written specification, its vulnerability set from GEM under a written enrichment, and the two assembled into the model version a run names | Benchmark and QA evidence views |
 | Administration | Built: installation facts, compatibility, profiles, engine health, data standards, users with role and access changes, queues, storage, retention, support bundle, audit search | — |
 
 ## Geocoded portfolio brief
@@ -239,6 +247,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 24 | Build an area-peril grid on the platform, for any country, from a written specification | §6 | Done: a specification — tiles, a base resolution, named refinements and the reason for each — is posted to `/grids/build/`, generated through the same builder the prototypes use, and registered as a draft with its cells. A specification that would exceed the installation's cell limit is refused with its own count, before anything is generated. The prototypes now go through the same registration, and the Build tab carries the form |
 | 25 | Build a vulnerability set for any country GEM covers | §6, §8 | Done: the catalogue is read from the release on the installation, and the enrichment — the design eras, each with its reason — is posted with it rather than compiled in. The set's version follows the enrichment, because the enrichment is the assumption behind every function. An era table that is out of order, ends before today, or names a design level GEM does not use is refused |
 | 26 | Event representation study: build one calculation both ways, compare each against the OpenQuake reference, and decide | §6, §16 | Not started. Occurrence per event is in use and rupture-binned is the alternative; item 9 is how either is measured. It ends in a decision record, not an approval |
+| 27 | Assemble a model version for any country from a built grid and a built vulnerability set | §6 | Done: the two halves are paired at `/model-versions/assemble/` into the draft a run names. A pair from two different countries is refused, because such a version would calculate happily and mean nothing. The scope statement and the limitations are written from the halves rather than typed, so a version's caveats cannot drift from its parts |
 
 ## Needs a decision or outside input
 
