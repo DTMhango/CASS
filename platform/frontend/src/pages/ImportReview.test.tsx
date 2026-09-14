@@ -271,7 +271,66 @@ const SCENARIOS = {
     "Movement is exposure moving between area-peril cells, not a loss difference.",
 };
 
+const GEOCODING = {
+  version: "1.0.0",
+  grid: "id-grid-0.1.0",
+  cohort: "B",
+  country: "ID",
+  buffers_km: { admin: "25", locality: "5", postcode: "5" },
+  sampling: { rings: 3, bearings: 16 },
+  summary: {
+    assessed: 2,
+    unassessed: 0,
+    stable: 1,
+    unstable: 1,
+    outside_grid_at_recorded_coordinate: 0,
+    buffer_reaches_outside_grid: 0,
+    most_cells_reached: 4,
+    mean_share_in_recorded_cell: 0.7041,
+    tiv: "900000.00",
+    stable_tiv: "500000.00",
+    unstable_tiv: "400000.00",
+    without_stated_value: 0,
+    by_precision: {
+      locality: { locations: 2, stable: 1, unstable: 1, unstable_tiv: "400000.00" },
+    },
+  },
+  locations: [
+    {
+      location: "B-COARSE/1",
+      precision: "locality",
+      radius_km: "5",
+      recorded_cell: 12,
+      cells_reached: [11, 12, 13, 14],
+      points: 49,
+      points_in_recorded_cell: 20,
+      points_outside_grid: 0,
+      share_in_recorded_cell: 0.4082,
+      stable: false,
+      tiv: "400000.00",
+    },
+    {
+      location: "B-TOWN/1",
+      precision: "locality",
+      radius_km: "5",
+      recorded_cell: 30,
+      cells_reached: [30],
+      points: 49,
+      points_in_recorded_cell: 49,
+      points_outside_grid: 0,
+      share_in_recorded_cell: 1,
+      stable: true,
+      tiv: "500000.00",
+    },
+  ],
+  unassessed: [],
+  other_countries: {},
+  value_basis:
+    "The insured value each location states, so the value at stake is a floor rather than the book's.",
+};
+
 function routeFor(url: string): unknown {
+  if (url.includes("/geocoding-sensitivity/")) return GEOCODING;
   if (url.includes("/allocation-scenarios/")) return SCENARIOS;
   if (url.includes("/model-versions/catalogue/")) return CATALOGUE;
   if (url.includes("/projects/")) {
@@ -449,7 +508,7 @@ describe("ImportReview", () => {
 
     // The select renders with its placeholder before the catalogue arrives,
     // so wait for the option rather than for the control.
-    await screen.findByRole("option", { name: "id-eq-0.1.0-sa" });
+    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
     await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
 
     expect(await screen.findByText(/65\.0% of the selection/)).toBeInTheDocument();
@@ -464,7 +523,7 @@ describe("ImportReview", () => {
 
     // The select renders with its placeholder before the catalogue arrives,
     // so wait for the option rather than for the control.
-    await screen.findByRole("option", { name: "id-eq-0.1.0-sa" });
+    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
     await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
 
     const row = (await screen.findByText(/equal location v1/)).closest("th");
@@ -479,12 +538,25 @@ describe("ImportReview", () => {
 
     // The select renders with its placeholder before the catalogue arrives,
     // so wait for the option rather than for the control.
-    await screen.findByRole("option", { name: "id-eq-0.1.0-sa" });
+    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
     await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
 
     expect(
       await screen.findByText(/allocation assumption changes nothing here/),
     ).toBeInTheDocument();
     SCENARIOS.materiality.businesses_where_allocation_is_material = 2;
+  });
+
+  it("tries each coarse geocode against the chosen grid and says which move", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
+    await user.selectOptions(screen.getByLabelText(/Test against/), MODEL_ID);
+
+    expect(await screen.findByText("Reach another cell")).toBeInTheDocument();
+    // The buffers are assumptions, so the card states them.
+    expect(screen.getByText(/locality 5 km/)).toBeInTheDocument();
+    expect(screen.getByText(/1 location\(s\) whose cell moves/)).toBeInTheDocument();
   });
 });

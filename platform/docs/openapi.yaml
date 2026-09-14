@@ -4418,6 +4418,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportBatch'
           description: ''
+  /api/v1/portfolio-imports/{id}/geocoding-sensitivity/:
+    get:
+      operationId: api_v1_portfolio_imports_geocoding_sensitivity_retrieve
+      description: |-
+        Whether each Cohort B geocode supports the cell the grid gives it.
+
+        Work package 3 step 4. Each location is tried across the area its
+        precision stands for, and the report says which keep their cell, which
+        reach others, and how much value sits on the ones that move. The buffers
+        are assumptions, recorded on the report and open to override.
+      parameters:
+      - in: query
+        name: buffer_admin_km
+        schema:
+          type: number
+        description: Radius a admin-precision geocode stands for.
+      - in: query
+        name: buffer_locality_km
+        schema:
+          type: number
+        description: Radius a locality-precision geocode stands for.
+      - in: query
+        name: buffer_postcode_km
+        schema:
+          type: number
+        description: Radius a postcode-precision geocode stands for.
+      - in: query
+        name: grid
+        schema:
+          type: string
+          format: uuid
+        description: Or against a grid directly, before any version uses it.
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this import batch.
+        required: true
+      - in: query
+        name: model_version
+        schema:
+          type: string
+          format: uuid
+        description: Compare against this model version's grid.
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/portfolio-imports/{id}/import-results/:
     get:
       operationId: api_v1_portfolio_imports_import_results_retrieve

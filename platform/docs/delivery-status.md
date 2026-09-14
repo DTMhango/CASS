@@ -23,10 +23,12 @@ run. Production items that serve only a governed deployment are not pursued
 
 ## Evidence at this revision
 
-- 1,947 backend tests pass, 1 skipped. 99 integration tests pass against the
-  real GEM v2026.0.0 files, the PuSGeN 2024 package, the 30 June workbook, the
-  pinned ODS Tools specifications and an OpenQuake datastore the engine wrote.
-  126 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
+- 1,969 backend tests pass, 1 skipped. Of the 106 integration tests, the
+  portfolio and enrichment acceptance suites (57 and 27) were re-run at this
+  revision against the 30 June workbook and the real GEM v2026.0.0 files; the
+  rest last passed against the PuSGeN 2024 package, the pinned ODS Tools
+  specifications and an OpenQuake datastore the engine wrote.
+  127 frontend tests pass. Ruff, ESLint and TypeScript are clean, the OpenAPI
   contract matches the code, and no model change lacks a migration.
 - On the live stack, one Jakarta–Bandung book ran twice through the patched
   Oasis under two assumption sets, and the engine took the set the run named:
@@ -75,6 +77,17 @@ run. Production items that serve only a governed deployment are not pursued
   GEM's mosaic and the hazard set computed from it all cite the permission
   beside their CC BY-NC-SA 4.0 licence, and the Indonesia model version no
   longer lists a licence blocker.
+- The Cohort B geocoding sensitivity was run on the 30 June book, against the
+  Indonesian pilot grid and a Nepal grid written on the platform. Every one of
+  the 44 Cohort B locations — 29 in Indonesia (25 locality, 3 postcode, 1
+  administrative) and 15 in Nepal (all locality) — reaches more than one cell
+  within its buffer, up to 24 cells; on average only 51% of an Indonesian
+  buffer and 48% of a Nepali one stays in the recorded cell. At 0.1-degree cells
+  refined to 0.025 degrees, the grid implies more precision than any Cohort B
+  geocode supports, so their mapping is roughly a coin-flip between
+  neighbouring cells. That puts USD 69.8m of stated Indonesian value and USD
+  36.6m of Nepali value on assignments the geocode cannot vouch for, as a
+  floor: three of the locations state no value of their own.
 - A whole country was built on the live stack out of nothing but the product,
   for a country CASS ships no constants for: a specification became a 27-cell
   grid, the GEM release became a 484-function vulnerability set under a written
@@ -204,7 +217,7 @@ reviewed research result, not a basis for pricing or reserving.
 | --- | --- |
 | WP1 Secure importer | Done, then superseded by the intake template ([ADR 11](adr/0011-intake-template-and-policy-id.md)); acceptance counts in `test_extract_acceptance.py` |
 | WP2 Eligibility and review interface | Done |
-| WP3 Area-peril and keys test | Partly done: mapping, offshore and outside-domain reporting, and a geometry-only run that reports eligibility without a loss. Cohort B sensitivity and OpenQuake site comparison not built |
+| WP3 Area-peril and keys test | Partly done: mapping, offshore and outside-domain reporting, a geometry-only run that reports eligibility without a loss, and the Cohort B geocoding sensitivity (item 10). The OpenQuake site comparison is not built |
 | WP4 Controlled Oasis earthquake test | Steps 1 to 8 done against the fixture model; step 9 built and run on the live stack, putting the Oasis representation at 0.904 of the engine's own average annual loss |
 | WP5 Portfolio-loss readiness | Partly done: enrichment applied in a run under a named assumption set, and the four run modes separate what a number may claim. Section 5.1 questions unanswered |
 
@@ -236,7 +249,7 @@ reviewed research result, not a basis for pricing or reserving.
 | 7 | Converter reads the OpenQuake HDF5 datastore in chunks | §7, M4 | Done |
 | 8 | Hazard benchmark and conversion QA gates: registered references, comparison, report | §7, M3, M4 | Done as machinery. Both gates still stand open, because no benchmark curves and no tolerances have been approved — which is a decision, not code |
 | 9 | OpenQuake reference loss comparison for a controlled portfolio | §7, WP4 | Done: `compare_with_openquake` rebuilds the run's own keys and blend weights as GEM taxonomies at the cells they mapped to, chains the risk job onto the hazard calculation so both sides read one set of ground-motion fields, and reports ratios it does not grade. First measurement on the live stack: 0.904 of the engine's average annual loss |
-| 10 | Cohort B geocoding sensitivity | WP3 | Not started |
+| 10 | Cohort B geocoding sensitivity | WP3 | Done: each Cohort B location — no review needed, but a geocode that resolves only to a locality, a postcode or an administrative area — is tried at its recorded coordinate and across the area its precision stands for, against a chosen grid, and the report says which keep their cell, which reach others or leave the grid, and how much stated value sits on the ones that move. The buffers are assumptions (5 km for a locality or postcode, 25 km for an administrative match), recorded on every report and open to override; a precision with no buffer is listed as unassessed rather than given one. The review screen carries it beside the allocation comparison |
 | 11 | Direct-to-store uploads completed, checksummed and scanned | §5, §10 | Done: sessions are issued into the owning project's prefix to someone who may write there, completion reads back and checksums what arrived, and a content check plus an optional clamd engine scan it before release. An installation with no antivirus engine says so on each artifact |
 | 12 | Execution profiles enforced: time limits and admission control | §11 | Done |
 | 13 | Keys and converter HTTP services | §4 | Not pursued: the keys lookup and the converter run inside the worker, with the same results. Separate services only serve a governed deployment ([ADR 15](adr/0015-research-tool-and-gem-permission.md)) |

@@ -26,6 +26,7 @@ import type {
   GridBuildResult,
   GridSpecificationInput,
   VulnerabilityBuildResult,
+  GeocodingSensitivity,
   VulnerabilitySetSummary,
   VulnerabilitySpecificationInput,
   AuditEvent,
@@ -1123,6 +1124,33 @@ export function useCreateComparison() {
  * Without a grid there is nothing to answer it against, so the query stays
  * disabled until one is chosen rather than guessing at a default.
  */
+/**
+ * Whether each Cohort B geocode supports the cell a model version's grid gives it.
+ *
+ * Off until a model version is chosen, for the allocation comparison's reason:
+ * the answer depends entirely on how fine the cells are.
+ */
+export function useGeocodingSensitivity(
+  batchId: UUID | undefined,
+  modelVersionId: UUID | undefined,
+) {
+  return useQuery({
+    queryKey: [
+      "portfolio-imports",
+      batchId ?? "",
+      "geocoding-sensitivity",
+      modelVersionId ?? "",
+    ] as const,
+    queryFn: () =>
+      api.get<GeocodingSensitivity>(
+        `/portfolio-imports/${batchId}/geocoding-sensitivity/`,
+        { model_version: modelVersionId },
+      ),
+    enabled: Boolean(batchId) && Boolean(modelVersionId),
+    retry: false,
+  });
+}
+
 export function useAllocationScenarios(
   batchId: UUID | undefined,
   modelVersionId: UUID | undefined,

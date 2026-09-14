@@ -32,15 +32,16 @@ from apps.audit import services as audit
 from apps.audit.models import AuditAction
 from apps.common.permissions import IsProjectMember
 from apps.common.queries import visible_projects
-from apps.modelregistry.assets import ModelAssetError
-from apps.modelregistry.models import ModelVersion
+from apps.modelregistry.assets import ModelAssetError, load_grid
+from apps.modelregistry.models import AreaPerilGrid, ModelVersion
 from apps.projects.models import Project
 from cass_extract import profile as intake_profile
 from cass_extract import template as intake_template
+from cass_keys.sensitivity import SensitivityError
 from cass_oed import structure as oed_structure
 from cass_oed.schema import FileKind
 
-from . import editing, promotion, review, scenarios, services
+from . import editing, geocoding, promotion, review, scenarios, services
 from . import extract as extract_service
 from .models import (
     AttributeOverride,
@@ -938,6 +939,75 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         """The locations a person still owes a decision on."""
         batch = self.get_object()
         return Response(review.queue(batch))
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "model_version",
+                OpenApiTypes.UUID,
+                description="Compare against this model version's grid.",
+            ),
+            OpenApiParameter(
+                "grid",
+                OpenApiTypes.UUID,
+                description="Or against a grid directly, before any version uses it.",
+            ),
+            *(
+                OpenApiParameter(
+                    f"buffer_{name}_km",
+                    OpenApiTypes.NUMBER,
+                    description=f"Radius a {name}-precision geocode stands for.",
+                )
+                for name in ("locality", "postcode", "admin")
+            ),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    @action(detail=True, methods=["get"], url_path="geocoding-sensitivity")
+    def geocoding_sensitivity(self, request, pk=None, version=None):
+        """Whether each Cohort B geocode supports the cell the grid gives it.
+
+        Work package 3 step 4. Each location is tried across the area its
+        precision stands for, and the report says which keep their cell, which
+        reach others, and how much value sits on the ones that move. The buffers
+        are assumptions, recorded on the report and open to override.
+        """
+        batch = self.get_object()
+        model_reference = str(request.query_params.get("model_version") or "").strip()
+        grid_reference = str(request.query_params.get("grid") or "").strip()
+        if not (model_reference or grid_reference):
+            return Response(
+                {
+                    "detail": (
+                        "Name the model version or the grid to test against. Whether a "
+                        "geocode supports its cell depends on how fine the cells are."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if model_reference:
+            model_version = ModelVersion.objects.filter(id=model_reference).first()
+            registered = model_version.grid if model_version else None
+        else:
+            registered = AreaPerilGrid.objects.filter(id=grid_reference).first()
+        if registered is None:
+            return Response(
+                {"detail": f"No model version or grid {model_reference or grid_reference}."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        overrides = {
+            name: request.query_params[f"buffer_{name}_km"]
+            for name in ("locality", "postcode", "admin")
+            if request.query_params.get(f"buffer_{name}_km") not in (None, "")
+        }
+        try:
+            document = geocoding.cohort_b_sensitivity(
+                batch, grid=load_grid(registered), buffers_km=overrides
+            )
+        except (SensitivityError, ModelAssetError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(document)
 
     @extend_schema(
         parameters=[

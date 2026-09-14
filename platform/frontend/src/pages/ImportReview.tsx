@@ -32,6 +32,7 @@ import {
   useAcceptImport,
   useAllocationScenarios,
   useAssumptionCatalogue,
+  useGeocodingSensitivity,
   useImportResults,
   useModelCatalogue,
   usePortfolioImports,
@@ -147,6 +148,7 @@ export function ImportReview({ embedded = false }: { embedded?: boolean } = {}) 
           <Included results={results.data} />
           <Allocation results={results.data} />
           {batchId ? <AllocationScenarios batchId={batchId} /> : null}
+          {batchId ? <GeocodingSensitivityCard batchId={batchId} /> : null}
           <UseModes results={results.data} />
           {batchId ? (
             <ReviewQueuePanel
@@ -168,6 +170,121 @@ export function ImportReview({ embedded = false }: { embedded?: boolean } = {}) 
         </>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Does a coarse geocode support the cell it was given?
+ *
+ * Cohort B is the brief's geocoding-sensitivity cohort: rows nobody flagged, in
+ * the right country, whose geocodes resolve only to a locality, a postcode or an
+ * administrative area. Each is tried across the area its precision stands for,
+ * and a row whose points reach more than one cell has a mapping the geocode
+ * cannot vouch for. The buffers are shown because they are assumptions, and the
+ * value is the value each row states -- a floor, which the card says.
+ */
+function GeocodingSensitivityCard({ batchId }: { batchId: UUID }) {
+  const models = useModelCatalogue();
+  const [modelId, setModelId] = useState("");
+  const report = useGeocodingSensitivity(batchId, modelId || undefined);
+
+  const error = report.error as ApiError | null;
+  const data = report.data;
+  const moving = data?.locations.filter((item) => !item.stable) ?? [];
+
+  return (
+    <Card
+      title="Do the coarse geocodes support their cells?"
+      description="Cohort B rows resolve only to a locality, a postcode or an administrative area. Each is tried across the area its precision stands for; a row that reaches more than one cell has a mapping the geocode cannot vouch for, and is reported apart from the benchmark."
+    >
+      <Field
+        label="Test against"
+        htmlFor="geocoding-model"
+        hint="A model version, because the answer depends on how fine its grid is."
+      >
+        <Select
+          id="geocoding-model"
+          value={modelId}
+          onChange={(event) => setModelId(event.target.value)}
+        >
+          <option value="">Select a model version</option>
+          {models.data?.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.reference}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {report.isLoading ? <Spinner label="Trying each geocode across its area" /> : null}
+
+      {error ? (
+        <Notice tone="error" title="The sensitivity could not be produced">
+          {error.message}
+        </Notice>
+      ) : null}
+
+      {data && data.summary.assessed === 0 ? (
+        <EmptyState
+          title={`No Cohort B location in ${data.country}`}
+          description="Nothing in this import resolves only to a locality, a postcode or an administrative area inside this grid's country."
+        />
+      ) : null}
+
+      {data && data.summary.assessed > 0 ? (
+        <>
+          <div className="tiles">
+            <MetricTile
+              label="Keep their cell"
+              value={formatCount(data.summary.stable)}
+              footnote={`of ${formatCount(data.summary.assessed)} in ${data.country}`}
+            />
+            <MetricTile
+              label="Reach another cell"
+              value={formatCount(data.summary.unstable)}
+              footnote={`up to ${formatCount(data.summary.most_cells_reached)} cells`}
+            />
+            <MetricTile
+              label="Area that stays in the cell"
+              value={percent(data.summary.mean_share_in_recorded_cell)}
+              footnote="on average, across each buffer"
+            />
+            <MetricTile
+              label="Value on those that move"
+              value={formatMoney(data.summary.unstable_tiv)}
+              footnote="stated values only, so a floor"
+            />
+            <MetricTile label="Grid" value={data.grid} />
+          </div>
+
+          <p className="muted">
+            Buffers assumed:{" "}
+            {Object.entries(data.buffers_km)
+              .map(([precision, radius]) => `${precision} ${radius} km`)
+              .join(", ")}
+            . {data.value_basis}
+          </p>
+
+          {moving.length === 0 ? (
+            <Notice tone="ok" title="Every coarse geocode keeps its cell at this grid">
+              The grid is no finer than these geocodes can support.
+            </Notice>
+          ) : (
+            <Disclosure summary={`${formatCount(moving.length)} location(s) whose cell moves`}>
+              <ul>
+                {moving.map((item) => (
+                  <li key={item.location}>
+                    {item.location} — {item.precision}, {formatCount(item.cells_reached.length)}{" "}
+                    cells within {item.radius_km} km
+                    {item.points_outside_grid > 0 ? ", partly outside the grid" : ""}
+                  </li>
+                ))}
+              </ul>
+            </Disclosure>
+          )}
+        </>
+      ) : null}
+    </Card>
   );
 }
 

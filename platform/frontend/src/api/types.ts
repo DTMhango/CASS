@@ -679,6 +679,53 @@ export interface GridSpecificationInput {
   notes: string;
 }
 
+/** One Cohort B location, tried across the area its geocode stands for. */
+export interface GeocodingLocation {
+  location: string;
+  precision: string;
+  radius_km: string;
+  recorded_cell: number | null;
+  cells_reached: number[];
+  points: number;
+  points_in_recorded_cell: number;
+  points_outside_grid: number;
+  share_in_recorded_cell: number;
+  stable: boolean;
+  tiv: string;
+}
+
+/** Whether Cohort B's geocodes support the cells a grid gives them: WP3 step 4. */
+export interface GeocodingSensitivity {
+  version: string;
+  grid: string;
+  cohort: string;
+  country: string;
+  buffers_km: Record<string, string>;
+  sampling: { rings: number; bearings: number };
+  summary: {
+    assessed: number;
+    unassessed: number;
+    stable: number;
+    unstable: number;
+    outside_grid_at_recorded_coordinate: number;
+    buffer_reaches_outside_grid: number;
+    most_cells_reached: number;
+    mean_share_in_recorded_cell: number;
+    tiv: string;
+    stable_tiv: string;
+    unstable_tiv: string;
+    without_stated_value: number;
+    by_precision: Record<
+      string,
+      { locations: number; stable: number; unstable: number; unstable_tiv: string }
+    >;
+  };
+  locations: GeocodingLocation[];
+  unassessed: { location: string; reason: string }[];
+  other_countries: Record<string, number>;
+  value_basis: string;
+}
+
 export interface VulnerabilitySetSummary {
   id: UUID;
   country_code: string;

@@ -629,6 +629,28 @@ def test_the_two_country_benchmark_splits_into_two_runnable_selections(batch, an
 
 
 @needs_extract
+@pytest.mark.parametrize(("code", "expected"), [("ID", 29), ("NP", 15)])
+def test_every_coarse_geocode_in_a_country_is_tried_against_its_grid(
+    batch, pilot_models, code, expected
+):
+    """Work package 3 step 4, on the real book: every Cohort B row assessed, none guessed."""
+    from decimal import Decimal
+
+    from apps.exposure import geocoding
+    from apps.modelregistry.assets import load_grid
+
+    report = geocoding.cohort_b_sensitivity(batch, grid=load_grid(pilot_models[code].grid))
+    summary = report["summary"]
+
+    assert summary["assessed"] == expected
+    assert summary["unassessed"] == 0
+    assert summary["stable"] + summary["unstable"] == expected
+    assert Decimal(summary["stable_tiv"]) + Decimal(summary["unstable_tiv"]) == Decimal(
+        summary["tiv"]
+    )
+
+
+@needs_extract
 def test_the_whole_benchmark_cannot_run_against_one_country_model(
     batch, analyst, pilot_models
 ):

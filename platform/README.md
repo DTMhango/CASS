@@ -226,6 +226,17 @@ blocks it, usually a hazard set and the multi-IMT decision. With this in place a
 country CASS ships nothing for can be built on the platform from end to end,
 which is why the pilot countries' test data is no longer load-bearing.
 
+**A coarse geocode is tested against the cell it was given.** Cohort B rows need
+no review and sit in the right country, but their geocodes resolve only to a
+locality, a postcode or an administrative area, and a grid fine enough to
+separate districts can give such a row a cell the geocode cannot vouch for. The
+review screen tries each one across the area its precision stands for, against a
+chosen grid, and says which keep their cell, how much of each buffer stays in it,
+and how much value sits on the ones that move. The buffers are assumptions — 5 km
+for a locality or postcode, 25 km for an administrative match — so they are shown
+on the report and can be changed. On the 30 June book, none of the 44 keeps its
+cell at the pilot grids.
+
 **The conversion is measured against the engine's own answer.** A finished
 analysis run can be compared with an OpenQuake risk calculation on the same
 events: `compare_with_openquake` rebuilds the run's keys and blend weights as
