@@ -62,7 +62,12 @@ from .footprint import (
     GroundMotionSample,
     build_footprint,
     check_event_coverage,
+    event_coverage,
     validate_footprint,
+)
+from .footprint_tables import (
+    FootprintTables,
+    FootprintTableWriter,
 )
 from .gem import (
     GemError,
@@ -84,6 +89,7 @@ from .hazard_build import (
     hazard_report,
     intensity_bins_csv,
     occurrence_csv,
+    table_paths,
 )
 from .hazard_job import (
     HazardJob,
@@ -160,6 +166,10 @@ from .vulnerability import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "table_paths",
+    "event_coverage",
+    "FootprintTableWriter",
+    "FootprintTables",
     "load",
     "read_taxonomy_mapping",
     "mapping_coverage",

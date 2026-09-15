@@ -357,10 +357,14 @@ def test_one_footprint_is_produced_for_each_measure(export, bins):
     hazard = hazard_build.build_hazard(
         export, country_code="ID", intensity_bins=bins
     )
-    produced = hazard_build.tables(hazard)
-    assert "footprint_PGA.csv" in produced
-    assert "footprint_SA0p3.csv" in produced
-    assert "occurrence.csv" in produced
+    # The footprints are files by the time this is called -- they are written
+    # as the conversion streams -- so they are named by path rather than handed
+    # over as bytes. The small tables still come back as payloads.
+    footprints = hazard_build.table_paths(hazard)
+    assert "footprint_PGA.csv" in footprints
+    assert "footprint_SA0p3.csv" in footprints
+    assert all(path.is_file() for path in footprints.values())
+    assert "occurrence.csv" in hazard_build.tables(hazard)
 
 
 def test_the_footprint_has_no_intensity_measure_column(export, bins):

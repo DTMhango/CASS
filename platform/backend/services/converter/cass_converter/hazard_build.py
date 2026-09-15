@@ -29,7 +29,8 @@ import csv
 import dataclasses
 import io
 import pathlib
-from collections.abc import Mapping, Sequence
+import tempfile
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from . import datastore
@@ -37,9 +38,13 @@ from .bins import IntensityBinSet
 from .footprint import (
     ConversionMetrics,
     FootprintAccumulator,
+    FootprintError,
     FootprintRow,
-    check_event_coverage,
-    validate_footprint,
+)
+from .footprint_tables import (
+    FootprintTables,
+    FootprintTableWriter,
+    measure_stem,
 )
 from .hazard_job import HazardJob
 from .occurrence import OccurrenceRow, check_frequency
@@ -82,7 +87,7 @@ class HazardSet:
     metadata: CalculationMetadata
     events: tuple[Event, ...]
     occurrences: tuple[OccurrenceRow, ...]
-    footprint: tuple[FootprintRow, ...]
+    footprint: FootprintTables
     intensity_bins: Mapping[str, IntensityBinSet]
     metrics: ConversionMetrics
     problems: tuple[str, ...]
@@ -95,14 +100,15 @@ class HazardSet:
 
     @property
     def imts(self) -> tuple[str, ...]:
-        return tuple(sorted({row.imt for row in self.footprint}))
+        return self.footprint.imts
 
     @property
     def is_valid(self) -> bool:
         return not self.problems
 
-    def rows_for(self, imt: str) -> tuple[FootprintRow, ...]:
-        return tuple(row for row in self.footprint if row.imt == imt)
+    def rows_for(self, imt: str) -> Iterator[FootprintRow]:
+        """This measure's rows, read back from its file one at a time."""
+        return self.footprint.rows_for(imt)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -117,9 +123,7 @@ class HazardSet:
             "annual_rate": len(self.events) / self.metadata.effective_time,
             "footprint_rows": len(self.footprint),
             "intensity_measures": list(self.imts),
-            "rows_by_measure": {
-                imt: len(self.rows_for(imt)) for imt in self.imts
-            },
+            "rows_by_measure": dict(self.footprint.rows_by_measure),
             "conversion": self.metrics.as_dict(),
             "event_coverage": dict(self.coverage),
             "valid": self.is_valid,
@@ -185,6 +189,23 @@ def _realization_weights(base: pathlib.Path) -> tuple[float, ...]:
     return read_realization_weights(found[0]) if found else ()
 
 
+def _open_footprint(
+    work_dir: str | pathlib.Path | None,
+) -> tuple[Any, FootprintTableWriter]:
+    """Somewhere to write the footprint, and the writer over it.
+
+    A caller that names a directory owns it -- the registration path does,
+    because it uploads the files from there and then lets the whole workspace
+    go. Where none is named the workspace is a temporary directory kept alive by
+    the footprint that was written into it, so a hazard set is never left
+    holding paths that have already been cleaned up underneath it.
+    """
+    if work_dir is not None:
+        return None, FootprintTableWriter(work_dir)
+    workspace = tempfile.TemporaryDirectory(prefix="cass-footprint-")
+    return workspace, FootprintTableWriter(workspace.name)
+
+
 def build_hazard(
     directory: str | pathlib.Path,
     *,
@@ -195,6 +216,7 @@ def build_hazard(
     job: HazardJob | None = None,
     imts: Sequence[str] | None = None,
     drop_below: float = 0.0,
+    work_dir: str | pathlib.Path | None = None,
 ) -> HazardSet:
     """Read one exported calculation and produce its Oasis tables.
 
@@ -245,16 +267,19 @@ def build_hazard(
         )
 
     accumulator = FootprintAccumulator(intensity_bins, drop_below=drop_below)
-    rows: list[FootprintRow] = []
+    workspace, writer = _open_footprint(work_dir)
     try:
         for sample in read_ground_motion(gmf, area_perils=area_perils, imts=wanted):
-            rows.extend(accumulator.add(sample))
+            writer.extend(accumulator.add(sample))
     except OpenQuakeError as exc:
         raise HazardBuildError(str(exc)) from exc
-    rows.extend(accumulator.close())
+    writer.extend(accumulator.close())
+    footprint = writer.close(
+        expected_event_ids=[item.event_id for item in events], workspace=workspace
+    )
 
-    problems = list(validate_footprint(rows))
-    coverage = check_event_coverage(rows, [item.event_id for item in events])
+    problems = list(footprint.problems)
+    coverage = footprint.coverage
     problems.extend(coverage["problems"])
     if accumulator.metrics.clips_the_hazard:
         problems.append(
@@ -271,7 +296,7 @@ def build_hazard(
         metadata=metadata,
         events=events,
         occurrences=table,
-        footprint=tuple(rows),
+        footprint=footprint,
         intensity_bins=dict(intensity_bins),
         metrics=accumulator.metrics,
         problems=tuple(problems),
@@ -291,6 +316,7 @@ def build_hazard_from_datastore(
     imts: Sequence[str] | None = None,
     drop_below: float = 0.0,
     row_budget: int = datastore.DEFAULT_ROW_BUDGET,
+    work_dir: str | pathlib.Path | None = None,
 ) -> HazardSet:
     """Build the same tables from the engine's datastore rather than its exports.
 
@@ -362,18 +388,21 @@ def build_hazard_from_datastore(
         )
 
     accumulator = FootprintAccumulator(intensity_bins, drop_below=drop_below)
-    rows: list[FootprintRow] = []
+    workspace, writer = _open_footprint(work_dir)
     try:
         for sample in datastore.read_ground_motion(
             location, area_perils=area_perils, imts=wanted, row_budget=row_budget
         ):
-            rows.extend(accumulator.add(sample))
+            writer.extend(accumulator.add(sample))
     except datastore.DatastoreError as exc:
         raise HazardBuildError(str(exc)) from exc
-    rows.extend(accumulator.close())
+    writer.extend(accumulator.close())
+    footprint = writer.close(
+        expected_event_ids=[row.event_id for row in table], workspace=workspace
+    )
 
-    problems = list(validate_footprint(rows))
-    coverage = check_event_coverage(rows, [row.event_id for row in table])
+    problems = list(footprint.problems)
+    coverage = footprint.coverage
     problems.extend(coverage["problems"])
     if accumulator.metrics.clips_the_hazard:
         problems.append(
@@ -400,7 +429,7 @@ def build_hazard_from_datastore(
         metadata=metadata,
         events=events,
         occurrences=table,
-        footprint=tuple(rows),
+        footprint=footprint,
         intensity_bins=dict(intensity_bins),
         metrics=accumulator.metrics,
         problems=tuple(problems),
@@ -446,28 +475,23 @@ def _identity_area_perils(gmf: pathlib.Path) -> dict[str, int]:
 # -- the Oasis tables ------------------------------------------------------------------
 
 def footprint_csv(hazard: HazardSet, imt: str) -> bytes:
-    """One measure's Oasis ``footprint.csv``.
+    """One measure's Oasis ``footprint.csv``, read whole.
 
     The measure is not a column. An Oasis footprint is a table of event, cell
     and intensity bin for one hazard channel, and which channel it is has to be
     carried by the file's identity rather than inside it.
+
+    The file was written as the conversion streamed, so this reads it back
+    rather than building it. For a national footprint that is gigabytes in one
+    ``bytes``, which is why the registration path uploads from the path instead
+    (:func:`table_paths`); this remains for small sets and for tests.
     """
-    rows = hazard.rows_for(imt)
-    if not rows:
-        raise HazardBuildError(
-            f"This hazard set has no rows for {imt}. It carries "
-            f"{', '.join(hazard.imts) or 'nothing'}."
-        )
-    buffer = io.StringIO(newline="")
-    writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(["event_id", "areaperil_id", "intensity_bin_id", "probability"])
-    for row in sorted(
-        rows, key=lambda item: (item.event_id, item.area_peril_id, item.intensity_bin_id)
-    ):
-        writer.writerow(
-            [row.event_id, row.area_peril_id, row.intensity_bin_id, f"{row.probability:.8f}"]
-        )
-    return buffer.getvalue().encode("utf-8")
+    try:
+        return hazard.footprint.csv_bytes(imt)
+    except FootprintError as exc:
+        # The caller's contract is this module's error, whatever the tables
+        # underneath happen to raise.
+        raise HazardBuildError(str(exc)) from exc
 
 
 def occurrence_csv(hazard: HazardSet) -> bytes:
@@ -495,20 +519,34 @@ def intensity_bins_csv(bins: IntensityBinSet) -> bytes:
 
 
 def tables(hazard: HazardSet) -> dict[str, bytes]:
-    """Every file this hazard set contributes, keyed by filename.
+    """The small tables this hazard set contributes, keyed by filename.
 
-    One footprint and one intensity dictionary per measure, with the measure in
-    the filename, plus the single occurrence table -- events and their periods
-    are shared across measures because they are the same events.
+    The occurrence table and one intensity dictionary per measure: tens of
+    thousands of rows and tens of bins, which are comfortably bytes.
+
+    The footprints are not here. They are the large tables, they are already
+    written to files by the time this is called, and reading a national one
+    back into a ``bytes`` to hand it along would undo the reason it was
+    streamed. :func:`table_paths` names them instead.
     """
     produced: dict[str, bytes] = {"occurrence.csv": occurrence_csv(hazard)}
     for imt in hazard.imts:
-        safe = imt.replace("(", "").replace(")", "").replace(".", "p")
-        produced[f"footprint_{safe}.csv"] = footprint_csv(hazard, imt)
-        produced[f"intensity_bin_dict_{safe}.csv"] = intensity_bins_csv(
+        produced[f"intensity_bin_dict_{measure_stem(imt)}.csv"] = intensity_bins_csv(
             hazard.intensity_bins[imt]
         )
     return produced
+
+
+def table_paths(hazard: HazardSet) -> dict[str, pathlib.Path]:
+    """The footprint files, keyed by the filename each is stored under.
+
+    Paths rather than payloads so that a caller can upload them from disk. A
+    national footprint is gigabytes per measure.
+    """
+    try:
+        return hazard.footprint.paths()
+    except FootprintError as exc:
+        raise HazardBuildError(str(exc)) from exc
 
 
 def hazard_report(hazard: HazardSet) -> dict[str, Any]:

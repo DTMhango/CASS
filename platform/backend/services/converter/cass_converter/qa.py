@@ -112,7 +112,12 @@ def measure(
         )
 
     metrics = hazard.metrics
-    distance, detail = probability_sums(hazard.footprint)
+    # Measured as the footprint was written, where it was streamed to files:
+    # the worst group is a running maximum, so nothing has to be read back.
+    measured = getattr(hazard.footprint, "probability_distance", None)
+    distance, detail = (
+        measured if measured is not None else probability_sums(hazard.footprint)
+    )
 
     read = metrics.samples_read or 0
     clipped = metrics.samples_above_range or 0

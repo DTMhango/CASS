@@ -41,7 +41,7 @@ from cass_converter.hazard_build import HazardSet as ConvertedHazard
 from cass_converter.hazard_job import HazardJob
 
 from . import quality
-from .assets import attach_hazard_asset
+from .assets import attach_hazard_asset, attach_hazard_asset_file
 from .models import (
     INTERNAL_USE_LICENCE,
     AreaPerilGrid,
@@ -153,7 +153,10 @@ def register(
             "footprint names would refer to nothing. Register the grid first."
         )
 
-    cells = {row.area_peril_id for row in converted.footprint}
+    # Counted as the footprint was written, not by reading it back: a
+    # national footprint is hundreds of millions of rows and the cell set is
+    # bounded by the grid.
+    cells = converted.footprint.cells
     hazard_set, _ = HazardSet.objects.update_or_create(
         country_code=code,
         version=version,
@@ -189,6 +192,11 @@ def register(
 
     for name, payload in hazard_build.tables(converted).items():
         attach_hazard_asset(hazard_set, name, payload, actor=actor)
+    # The footprints go up from their files. They are the large tables, and
+    # reading one back into memory to hand it along would undo the streaming
+    # that produced it.
+    for name, path in hazard_build.table_paths(converted).items():
+        attach_hazard_asset_file(hazard_set, name, path, actor=actor)
     if job is not None:
         for name, payload in hazard_build.hazard_job.files(job).items():
             attach_hazard_asset(hazard_set, f"job_{name}", payload, actor=actor)

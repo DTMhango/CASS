@@ -128,10 +128,11 @@ def _attach(
     subject,
     subject_type: str,
     role: str,
-    payload: bytes,
+    payload: bytes | None,
     filename: str,
     actor,
     key: str | None = None,
+    source=None,
 ):
     """Store one model asset and link it to its registry record.
 
@@ -144,14 +145,28 @@ def _attach(
     # unreadable to anything that trusts the content type.
     suffix = pathlib.PurePosixPath(filename).suffix.lstrip(".").lower() or "csv"
     store = get_store()
-    ref = store.put_bytes(
-        bucket("model"),
-        key or f"{subject_type}/{subject.id}/{role}.{suffix}",
-        payload,
-        content_type=_MEDIA_TYPES.get(suffix, "text/csv"),
-        retention=RetentionClass.MODEL_ASSET,
-        access=AccessPolicy.MODEL,
-    )
+    target = key or f"{subject_type}/{subject.id}/{role}.{suffix}"
+    content_type = _MEDIA_TYPES.get(suffix, "text/csv")
+    if source is not None:
+        # Streamed from disk. ``payload`` is None in this case, and holding the
+        # file's bytes to pass here is exactly what the caller avoided.
+        ref = store.put_file(
+            bucket("model"),
+            target,
+            source,
+            content_type=content_type,
+            retention=RetentionClass.MODEL_ASSET,
+            access=AccessPolicy.MODEL,
+        )
+    else:
+        ref = store.put_bytes(
+            bucket("model"),
+            target,
+            payload,
+            content_type=content_type,
+            retention=RetentionClass.MODEL_ASSET,
+            access=AccessPolicy.MODEL,
+        )
     artifact, _ = Artifact.objects.update_or_create(
         uri=ref.uri,
         defaults={
@@ -437,6 +452,20 @@ def attach_hazard_asset(hazard_set, filename: str, payload: bytes, *, actor=None
     """
     role = HAZARD_ROLE_PREFIX + pathlib.PurePosixPath(filename).stem
     return _attach(hazard_set, "hazard_set", role, payload, filename, actor)
+
+
+def attach_hazard_asset_file(hazard_set, filename: str, source, *, actor=None):
+    """Register one file of a hazard set from a path rather than from bytes.
+
+    For the footprints. A national one is gigabytes per measure, and the whole
+    point of streaming it to a file was not to hold it in memory -- so it is
+    uploaded from that file, which the store does through a file object rather
+    than by reading it whole.
+    """
+    role = HAZARD_ROLE_PREFIX + pathlib.PurePosixPath(filename).stem
+    return _attach(
+        hazard_set, "hazard_set", role, None, filename, actor, source=source
+    )
 
 
 def attach_hazard_model_file(model, path: str, payload: bytes, *, actor=None):

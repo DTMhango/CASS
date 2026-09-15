@@ -313,7 +313,20 @@ def check_event_coverage(
     loss with no occurrence behind it, so it contributes damage at no frequency
     and nothing downstream will notice.
     """
-    present = {row.event_id for row in rows}
+    return event_coverage({row.event_id for row in rows}, expected_event_ids)
+
+
+def event_coverage(
+    present_event_ids: Iterable[int],
+    expected_event_ids: Iterable[int],
+) -> dict[str, Any]:
+    """The same comparison, from the events themselves rather than the rows.
+
+    A streamed footprint never holds its rows, but it does collect the events it
+    touched as it writes them -- a set bounded by the event count rather than by
+    the table -- so the coverage can be judged without reading anything back.
+    """
+    present = set(present_event_ids)
     expected = set(expected_event_ids)
 
     silent = sorted(expected - present)
