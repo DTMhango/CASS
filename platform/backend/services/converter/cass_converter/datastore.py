@@ -39,7 +39,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
-from .footprint import GroundMotionSample
+from .footprint import GroundMotionBlock, GroundMotionSample
 from .occurrence import OccurrenceRow
 
 #: How many ground-motion rows one batch may hold in memory at once. Two
@@ -251,7 +251,8 @@ def read_ground_motion(
     imts: Sequence[str] | None = None,
     row_budget: int = DEFAULT_ROW_BUDGET,
     chunk: int = DEFAULT_CHUNK,
-) -> Iterator[GroundMotionSample]:
+    blocks: bool = False,
+) -> Iterator[GroundMotionSample | GroundMotionBlock]:
     """Stream the ground motion, one complete event at a time.
 
     ``area_perils`` maps a site key to the area peril it stands for, as the CSV
@@ -291,6 +292,15 @@ def read_ground_motion(
                     "must map to a cell of the grid it was run on, or its ground "
                     "motion is dropped."
                 ) from None
+
+        # The site-to-cell map as an array, so a slice of site identifiers
+        # becomes a slice of cells in one indexing operation rather than a
+        # dictionary lookup per value.
+        lookup = None
+        if blocks and peril_by_site:
+            lookup = numpy.zeros(max(peril_by_site) + 1, dtype=numpy.int64)
+            for site, peril in peril_by_site.items():
+                lookup[site] = peril
 
         eid = group["eid"]
         sid = group["sid"]
@@ -346,6 +356,25 @@ def read_ground_motion(
 
             for event in batch:
                 for sites_slice, measurements in held[event]:
+                    if blocks:
+                        cells = lookup[numpy.asarray(sites_slice, dtype=numpy.int64)]
+                        for name in wanted:
+                            values = numpy.asarray(
+                                measurements[name], dtype=numpy.float64
+                            )
+                            # Values at or below zero are no ground motion at
+                            # all, and the scalar path skips them before the
+                            # bins are consulted.
+                            keep = values > 0
+                            if not keep.any():
+                                continue
+                            yield GroundMotionBlock(
+                                event_id=event,
+                                imt=name,
+                                area_peril_ids=cells[keep],
+                                values=values[keep],
+                            )
+                        continue
                     for position in range(len(sites_slice)):
                         site = int(sites_slice[position])
                         for name in wanted:

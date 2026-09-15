@@ -390,10 +390,18 @@ def build_hazard_from_datastore(
     accumulator = FootprintAccumulator(intensity_bins, drop_below=drop_below)
     workspace, writer = _open_footprint(work_dir)
     try:
-        for sample in datastore.read_ground_motion(
-            location, area_perils=area_perils, imts=wanted, row_budget=row_budget
+        # Blocks rather than samples: one array per event and measure, binned
+        # and counted with array operations. The bins are the same bins the
+        # value-at-a-time path assigns -- measured over every ground-motion
+        # value of the Indonesian calculation, not assumed.
+        for block in datastore.read_ground_motion(
+            location,
+            area_perils=area_perils,
+            imts=wanted,
+            row_budget=row_budget,
+            blocks=True,
         ):
-            writer.extend(accumulator.add(sample))
+            writer.extend(accumulator.add_block(block))
     except datastore.DatastoreError as exc:
         raise HazardBuildError(str(exc)) from exc
     writer.extend(accumulator.close())

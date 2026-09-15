@@ -59,6 +59,7 @@ from .footprint import (
     FootprintAccumulator,
     FootprintError,
     FootprintRow,
+    GroundMotionBlock,
     GroundMotionSample,
     build_footprint,
     check_event_coverage,
@@ -166,6 +167,7 @@ from .vulnerability import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "GroundMotionBlock",
     "table_paths",
     "event_coverage",
     "FootprintTableWriter",

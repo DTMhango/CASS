@@ -10,6 +10,7 @@ count.
 from __future__ import annotations
 
 import tracemalloc
+from decimal import Decimal
 
 import pytest
 
@@ -152,3 +153,93 @@ def test_the_memory_it_costs_does_not_follow_the_row_count(tmp_path):
     # Ten times the rows. The sets of events and cells grow a little, which is
     # bounded by the event set and the grid rather than by the table.
     assert large < small * 3
+
+
+# -- the vectorised path must stay the scalar one ------------------------------------
+
+def test_binning_an_array_agrees_with_binning_one_value_at_a_time():
+    """The whole speed-up rests on this, so it is a test rather than a comment.
+
+    A national conversion bins about eight hundred million values, and doing
+    that one at a time means a string-formatted ``Decimal`` per value. The array
+    path rounds in float instead, which can only be adopted if it lands every
+    value in the same bin -- including at the boundaries, where rounding to six
+    significant figures is what decides which side a value falls.
+    """
+    import numpy as np
+
+    from cass_converter import pilot_bins
+
+    for imt, bin_set in pilot_bins.intensity_bins().items():
+        edges = [float(item.lower) for item in bin_set.bins]
+        # The bin edges themselves, either side of each, and a spread across the
+        # range -- the values where the two paths could disagree if anywhere.
+        values = np.array(
+            edges
+            + [edge * (1 + 1e-9) for edge in edges]
+            + [edge * (1 - 1e-9) for edge in edges]
+            + list(np.linspace(1e-5, float(bin_set.bins[-1].upper) * 1.1, 500)),
+            dtype=np.float64,
+        )
+        vector = bin_set.find_many(values)
+        for position, raw in enumerate(values):
+            value = Decimal(f"{float(raw):.6g}")
+            found = bin_set.find(value)
+            if found is None:
+                expected = (
+                    bin_set.BELOW_RANGE
+                    if value < bin_set.bins[0].lower
+                    else bin_set.ABOVE_RANGE
+                )
+            else:
+                expected = found.bin_index
+            assert int(vector[position]) == expected, (imt, raw)
+
+
+def test_a_block_counts_what_the_samples_would_have_counted():
+    """``add_block`` is the twin of ``add``, and produces the same rows."""
+    import numpy as np
+
+    from cass_converter import pilot_bins
+    from cass_converter.footprint import (
+        FootprintAccumulator,
+        GroundMotionBlock,
+        GroundMotionSample,
+    )
+
+    bins = pilot_bins.intensity_bins()
+    cells = np.array([10, 10, 11, 11, 10, 12], dtype=np.int64)
+    values = np.array([0.2, 0.25, 0.4, 0.4, 0.2, 0.0001], dtype=np.float64)
+
+    one_at_a_time = FootprintAccumulator(bins)
+    rows = []
+    for cell, value in zip(cells.tolist(), values.tolist(), strict=True):
+        rows.extend(
+            one_at_a_time.add(
+                GroundMotionSample(
+                    event_id=7,
+                    area_peril_id=cell,
+                    imt="PGA",
+                    value=Decimal(f"{value:.6g}"),
+                )
+            )
+        )
+    rows.extend(one_at_a_time.close())
+
+    in_bulk = FootprintAccumulator(bins)
+    bulk_rows = list(
+        in_bulk.add_block(
+            GroundMotionBlock(
+                event_id=7, imt="PGA", area_peril_ids=cells, values=values
+            )
+        )
+    )
+    bulk_rows.extend(in_bulk.close())
+
+    assert bulk_rows == rows
+    assert in_bulk.metrics.samples_binned == one_at_a_time.metrics.samples_binned
+    assert (
+        in_bulk.metrics.samples_below_range
+        == one_at_a_time.metrics.samples_below_range
+    )
+    assert in_bulk.metrics.cells_seen == one_at_a_time.metrics.cells_seen

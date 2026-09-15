@@ -120,6 +120,23 @@ class GroundMotionSample:
     value: Decimal
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class GroundMotionBlock:
+    """Every value one event produced for one measure, as arrays.
+
+    The same information as a stream of :class:`GroundMotionSample`, in the
+    shape the binning can act on all at once. A national conversion reads about
+    eight hundred million values, and a Python object for each -- with a
+    ``Decimal`` built by formatting a float into a string -- is most of what
+    converting a calculation costs.
+    """
+
+    event_id: int
+    imt: str
+    area_peril_ids: Any
+    values: Any
+
+
 class FootprintAccumulator:
     """Turns ground-motion samples into intensity-bin probabilities.
 
@@ -198,6 +215,58 @@ class FootprintAccumulator:
         self.metrics.samples_binned += 1
         self.metrics.cells_seen.add(sample.area_peril_id)
         self.metrics.imts_seen.add(sample.imt)
+        self.metrics.peak_open_events = max(self.metrics.peak_open_events, 1)
+
+    def add_block(self, block: GroundMotionBlock) -> Iterator[FootprintRow]:
+        """Add every value of one event and measure at once.
+
+        The vectorised twin of :meth:`add`, and it must stay a twin: the bins it
+        assigns are the bins ``find`` assigns, which was measured over every
+        ground-motion value of the Indonesian calculation rather than assumed.
+        """
+        import numpy
+
+        if self._current_event is not None and block.event_id != self._current_event:
+            if block.event_id < self._current_event:
+                raise FootprintError(
+                    f"samples are not grouped by event: {block.event_id} arrived "
+                    f"after {self._current_event}"
+                )
+            yield from self._flush()
+
+        self._current_event = block.event_id
+        self.metrics.samples_read += len(block.values)
+
+        bin_set = self._bin_set(block.imt)
+        found = bin_set.find_many(block.values)
+
+        below = int(numpy.count_nonzero(found == bin_set.BELOW_RANGE))
+        above = int(numpy.count_nonzero(found == bin_set.ABOVE_RANGE))
+        self.metrics.samples_below_range += below
+        self.metrics.samples_above_range += above
+
+        keep = found >= 0
+        if not keep.any():
+            return
+        cells = numpy.asarray(block.area_peril_ids)[keep]
+        indices = found[keep]
+
+        # One pass over the pairs rather than one per value: the counts are what
+        # the probabilities are shares of, and they are the same counts the
+        # scalar path would reach by incrementing a dictionary per sample.
+        pairs, totals = numpy.unique(
+            numpy.stack((cells, indices)), axis=1, return_counts=True
+        )
+        for position in range(pairs.shape[1]):
+            cell = int(pairs[0, position])
+            key = (cell, block.imt)
+            counts = self._counts.setdefault(key, {})
+            index = int(pairs[1, position])
+            counts[index] = counts.get(index, 0) + int(totals[position])
+            self.metrics.cells_seen.add(cell)
+
+        self.metrics.samples_binned += int(keep.sum())
+        self.metrics.imts_seen.add(block.imt)
         self.metrics.peak_open_events = max(self.metrics.peak_open_events, 1)
 
     def _flush(self) -> Iterator[FootprintRow]:
