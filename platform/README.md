@@ -71,6 +71,11 @@ The interface is on <http://localhost:8080>, the API on
 <http://localhost:8000/api/docs/>, and the MinIO console on
 <http://localhost:9001>. Sign in as `analyst`, `modeller` or `reviewer`.
 
+To go from here to a reinsured loss -- the GEM release, a grid, a vulnerability
+set, a hazard calculation, the Oasis package, a portfolio, its financial
+structure and the run -- follow
+[docs/running-cass.md](docs/running-cass.md).
+
 For faster iteration, run the two halves outside Docker against the compose
 database:
 
