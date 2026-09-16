@@ -1,21 +1,42 @@
 # CASS platform developer commands.
 #
 # Section 12 requires that a fresh environment be buildable from
-# version-controlled configuration. These targets are that path, and the CI
-# workflow runs the same ones, so "works on my machine" and "passes in CI"
-# cannot drift apart.
+# version-controlled configuration. These targets are that path. The CI
+# workflow runs the same commands directly on Linux rather than through this
+# file, so a change here is only proven by running it on a clean machine.
 
+# The recipes are POSIX shell. Native Windows make falls back to cmd.exe when
+# it finds no sh.exe on PATH, and a stock Git for Windows install does not put
+# one there, so point it at the sh.exe Git ships. git --exec-path is
+# <git>/<mingw64|clangarm64>/libexec/git-core, three levels below it.
+ifeq ($(OS),Windows_NT)
+GIT_EXEC_PATH := $(shell git --exec-path)
+ifneq (,$(GIT_EXEC_PATH))
+SHELL := $(GIT_EXEC_PATH)/../../../bin/sh.exe
+endif
+PYTHON ?= python
+VENV_BIN := Scripts
+else
 SHELL := /bin/bash
+PYTHON ?= python3
+VENV_BIN := bin
+endif
+
+ifneq (posix,$(shell test -d . && echo posix))
+$(error These targets need a POSIX shell. On Windows install Git for Windows, or run make from WSL)
+endif
+
 .DEFAULT_GOAL := help
 
 BACKEND := backend
 FRONTEND := frontend
 COMPOSE := docker compose -f deploy/docker-compose.yml --env-file .env
 VENV := $(BACKEND)/.venv
-PY := $(VENV)/Scripts/python.exe
-ifeq (,$(wildcard $(VENV)/Scripts/python.exe))
-PY := $(VENV)/bin/python
-endif
+# The interpreter is chosen by platform, not by looking for it: this file is
+# read before setup-backend creates the virtualenv, so on a clean machine
+# there is nothing yet to find.
+VENV_PY := .venv/$(VENV_BIN)/python
+PY := $(BACKEND)/$(VENV_PY)
 
 .PHONY: help
 help: ## Show the available commands
@@ -29,7 +50,7 @@ setup: setup-backend setup-frontend env ## Prepare a clean machine for developme
 
 .PHONY: setup-backend
 setup-backend: ## Create the backend virtualenv and install every package
-	python -m venv $(VENV)
+	$(PYTHON) -m venv $(VENV)
 	$(PY) -m pip install --upgrade pip
 	$(PY) -m pip install -r $(BACKEND)/requirements-dev.txt
 	$(PY) -m pip install -e $(BACKEND)/packages/cass_core \
@@ -62,8 +83,7 @@ test: test-backend test-frontend ## Run both test suites
 
 .PHONY: test-backend
 test-backend: ## Backend unit, package and API tests
-	cd $(BACKEND) && .venv/Scripts/python.exe -m pytest -q 2>/dev/null \
-		|| cd $(BACKEND) && .venv/bin/python -m pytest -q
+	cd $(BACKEND) && $(VENV_PY) -m pytest -q
 
 .PHONY: test-frontend
 test-frontend: ## Frontend component and page tests
@@ -86,7 +106,7 @@ typecheck: ## TypeScript project references
 .PHONY: schema
 schema: ## Regenerate the OpenAPI schema, failing on any warning
 	cd $(BACKEND)/cass_api && \
-		DJANGO_SETTINGS_MODULE=cass.settings.test ../.venv/Scripts/python.exe manage.py \
+		DJANGO_SETTINGS_MODULE=cass.settings.test ../$(VENV_PY) manage.py \
 		spectacular --fail-on-warn --file ../../docs/openapi.yaml
 
 # -- running ----------------------------------------------------------------
@@ -126,7 +146,7 @@ seed: ## Load the demonstration project, model version and PiWind portfolio
 .PHONY: dev-api
 dev-api: ## Run the API against a local database, outside Docker
 	cd $(BACKEND)/cass_api && \
-		DJANGO_SETTINGS_MODULE=cass.settings.dev ../.venv/Scripts/python.exe manage.py runserver
+		DJANGO_SETTINGS_MODULE=cass.settings.dev ../$(VENV_PY) manage.py runserver
 
 .PHONY: dev-web
 dev-web: ## Run the Vite dev server with API proxying

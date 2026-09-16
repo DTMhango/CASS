@@ -43,7 +43,10 @@ platform/
 
 ## Getting started
 
-You need Python 3.11, Node 22 and Docker.
+You need Python 3.11, Node 22, Docker, Git and GNU make. On Windows, install
+make with `winget install ezwinports.make`; the Makefile finds the shell that
+Git for Windows ships, so it runs from PowerShell without WSL or a Linux
+distribution.
 
 ```bash
 cd platform
