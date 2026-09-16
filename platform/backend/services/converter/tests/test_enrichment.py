@@ -157,21 +157,63 @@ def test_a_summary_is_read_by_occupancy_and_macro_class(tmp_path):
     assert read.weight(OccupancyClass.COMMERCIAL, "CR-") == pytest.approx(0.5)
 
 
-def test_a_taxonomy_reported_both_as_a_total_and_by_settlement_is_refused(tmp_path):
-    """Summing both would count the same buildings twice.
+def national_summary(tmp_path, rows: str):
+    path = tmp_path / "Exposure_Summary_Adm0.csv"
+    path.write_text(
+        "ID_0,NAME_0,OCCUPANCY,BUILDINGS,BLDG_REPL_COST_USD\n" + rows, encoding="utf-8"
+    )
+    return path
 
-    GEM does not currently do this -- a taxonomy is one or the other -- which is
-    exactly why a later release that changed it would go unnoticed.
-    """
+
+def test_a_taxonomy_reported_as_a_total_and_by_settlement_is_read_as_published(tmp_path):
+    """China publishes one, and its TOTAL rows are not the urban and rural rows
+    over again -- they are the buildings that are neither. Summing all three is
+    what reproduces GEM's own national figure."""
     path = tmp_path / "Exposure_Summary_Taxonomy.csv"
     path.write_text(
         "OCCUPANCY,MACRO_TAXONOMY,TAXONOMY,SETTLEMENT,BUILDINGS,BLDG_REPL_COST_USD\n"
         "COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,TOTAL,10,1000\n"
-        "COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,URBAN,6,600\n",
+        "COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,URBAN,6,600\n"
+        "COM,MUR,MUR/LWAL/CDN+ERN/H:1/COM,RURAL,4,400\n",
         encoding="utf-8",
     )
-    with pytest.raises(EnrichmentError, match="count the same buildings twice"):
-        read_stock_prior(path, country_code="ID")
+
+    read = read_stock_prior(
+        path, country_code="CN", national=national_summary(tmp_path, "CHN,China,COM,20,2000\n")
+    )
+
+    assert read.weight(OccupancyClass.COMMERCIAL, "CR-") == pytest.approx(0.8)
+
+
+def test_a_summary_that_does_not_add_up_to_the_national_total_is_refused(tmp_path):
+    """Which is the check the old rule about settlement rows was reaching for:
+    a row counted twice moves the arithmetic, whatever shape the file is in."""
+    path = tmp_path / "Exposure_Summary_Taxonomy.csv"
+    path.write_text(
+        "OCCUPANCY,MACRO_TAXONOMY,TAXONOMY,SETTLEMENT,BUILDINGS,BLDG_REPL_COST_USD\n"
+        "COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,TOTAL,10,1000\n"
+        "COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,URBAN,10,1000\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(EnrichmentError, match="counting buildings the other is not"):
+        read_stock_prior(
+            path,
+            country_code="ID",
+            national=national_summary(tmp_path, "IDN,Indonesia,COM,10,1000\n"),
+        )
+
+
+def test_a_national_summary_that_cannot_be_read_stops_the_build(tmp_path):
+    path = tmp_path / "Exposure_Summary_Taxonomy.csv"
+    path.write_text(
+        "OCCUPANCY,MACRO_TAXONOMY,TAXONOMY,SETTLEMENT,BUILDINGS,BLDG_REPL_COST_USD\n"
+        "COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,TOTAL,10,1000\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(EnrichmentError, match="could not be checked"):
+        read_stock_prior(path, country_code="ID", national=tmp_path / "nothing-here.csv")
 
 
 def test_a_summary_for_another_country_is_refused(tmp_path):

@@ -25,7 +25,7 @@ from cass_converter.enrichment import (
     enrichment_from,
     read_stock_prior,
 )
-from cass_converter.gem import LossCategory
+from cass_converter.gem import LossCategory, catalogue, country_identity
 from cass_converter.model_build import (
     build_country,
     dictionary,
@@ -457,3 +457,97 @@ def test_the_build_records_which_weighting_produced_it(code, policy, bins):
     assert prior.uses_exact_weights
     assert prior.mapping_checksum
     assert build.sources["exposure_summary"] == prior.checksum
+
+
+# -- the whole release, not just the countries somebody happened to try ------------
+
+#: The countries GEM v2026.0.0 publishes in HAZUS classes rather than in its own
+#: building taxonomy. CASS cannot map an OED schedule onto them, and says so in
+#: the catalogue rather than failing part way through a build.
+HAZUS_COUNTRIES = {
+    "American_Samoa",
+    "Canada",
+    "Guam",
+    "Northern_Mariana_Islands",
+    "Puerto_Rico",
+    "US_Virgin_Islands",
+    "United_States",
+}
+
+
+@needs_gem
+def test_every_country_in_the_release_pairs_with_its_exposure():
+    """The two repositories name two countries differently -- Turkey is published
+    as Turkiye, Cape Verde as Cabo Verde -- and pairing them by folder name alone
+    left those countries unbuildable. A release that renames a third should fail
+    here rather than quietly drop it from what can be built."""
+    listed = catalogue(GEM_PATH, identify=True)
+
+    unidentified = {
+        item["country"]: item["problem"] for item in listed if not item["iso3"]
+    }
+
+    assert listed
+    assert unidentified == {}
+
+
+@needs_gem
+def test_only_the_hazus_countries_are_unbuildable():
+    """Whatever CASS cannot build, it says so before a country is chosen. The
+    parser used to read the occupancy as the fifth segment, which quietly cost
+    the 75 countries whose taxonomies state a roof or an irregularity first."""
+    listed = catalogue(GEM_PATH, identify=True)
+
+    refused = {item["country"] for item in listed if item["problem"]}
+
+    assert refused == HAZUS_COUNTRIES
+    assert all("HAZUS classes" in item["problem"] for item in listed if item["problem"])
+
+
+@needs_gem
+@pytest.mark.parametrize(
+    ("region", "country", "iso3"),
+    [
+        ("Europe", "Turkey", "TUR"),  # named Turkiye in the exposure repository
+        ("East_Asia", "China", "CHN"),  # reports settlement rows beside totals
+        ("Africa", "Zambia", "ZMB"),  # taxonomies state a wooden roof
+        ("Europe", "Greece", "GRC"),  # taxonomies state a soft storey
+    ],
+)
+def test_a_country_of_each_awkward_shape_builds(region, country, iso3, policy, bins):
+    """One per fault the release-wide sweep turned up."""
+    damage, intensity = bins
+    identity = country_identity(GEM_PATH, region=region, country=country)
+    assert identity.iso3 == iso3
+
+    written = enrichment_from(
+        {
+            "name": f"{identity.country_code.lower()}_acceptance",
+            "version": "0.1.0",
+            "country_code": identity.country_code,
+            "iso3": identity.iso3,
+            "design_eras": [
+                {"to_year": None, "design_levels": ["CDN", "CDL", "CDM", "CDH"],
+                 "reason": "Every level stays a candidate; this is a readability check."},
+            ],
+        }
+    )
+    models, prior, resolved = pilot_enrichment.load(
+        GEM_PATH, identity.country_code, chosen=written, region=region, folder=country
+    )
+    build = build_country(
+        enrichment=resolved,
+        models=models,
+        prior=prior,
+        intensity_bins=intensity,
+        damage_bins=damage,
+        policy=policy,
+    )
+
+    assert prior.uses_exact_weights
+    assert build.classes and build.functions
+    # The occupancy is the last segment, so every published function reaches an
+    # occupancy class and a schedule can resolve to it. Read as the fifth, the
+    # countries stating a roof or an irregularity reached none at all.
+    published = models[LossCategory.STRUCTURAL].functions
+    assert all(item.taxonomy.occupancy_class is not None for item in published)

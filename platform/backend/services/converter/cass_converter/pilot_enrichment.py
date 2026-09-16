@@ -39,7 +39,13 @@ from .enrichment import (
     read_stock_prior,
     read_taxonomy_mapping,
 )
-from .gem import LossCategory, VulnerabilityModel, read_country, stock_summary_path
+from .gem import (
+    LossCategory,
+    VulnerabilityModel,
+    national_summary_path,
+    read_country,
+    stock_summary_path,
+)
 
 #: Bumped with any change to a country's eras or overrides.
 PILOT_VERSION = "0.1.0-draft"
@@ -210,6 +216,7 @@ def load(
         country_code=chosen.country_code,
         weighting=chosen.weighting,
         iso3=chosen.iso3,
+        national=national_summary_path(base, region=region, country=name),
     )
     if use_published_mapping:
         mapping = read_taxonomy_mapping(base / MAPPING_PATH, iso3=chosen.iso3)

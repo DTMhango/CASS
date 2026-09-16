@@ -27,14 +27,14 @@ from cass_converter.gem import (
 )
 
 
-def document(category: str) -> bytes:
+def document(category: str, taxonomy: str = "CR/LFINF/CDL+ERM/H:2/COM") -> bytes:
     """One published vulnerability file, in the shape GEM writes them."""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <nrml xmlns="http://openquake.org/xmlns/nrml/0.5">
 <vulnerabilityModel id="vulnerability_model" assetCategory="buildings" \
 lossCategory="{category}">
 <description>Test Vulnerability Model</description>
-<vulnerabilityFunction id="CR/LFINF/CDL+ERM/H:2/COM" dist="BT">
+<vulnerabilityFunction id="{taxonomy}" dist="BT">
 <imls imt="PGA"> 0.05 0.1 0.2 0.4 </imls>
 <meanLRs>0.0001 0.01 0.2 0.8</meanLRs>
 <covLRs>3.0 1.5 0.8 0.3</covLRs>
@@ -136,9 +136,38 @@ def test_a_design_level_gem_does_not_use_is_refused():
         enrichment_from(invented)
 
 
-def test_an_enrichment_with_no_eras_is_refused():
-    with pytest.raises(EnrichmentError, match="no design eras"):
+def test_an_enrichment_with_no_eras_and_no_reason_is_refused():
+    with pytest.raises(EnrichmentError, match="it has to be decided"):
         enrichment_from({**WRITTEN, "design_eras": []})
+
+
+def test_an_enrichment_may_state_that_it_has_no_eras_and_why():
+    """An era table does nothing for a risk whose year is unknown, and a book
+    that states no years is the normal case. Writing a table nobody researched
+    and nothing will read is worse than saying the stock distribution stands."""
+    without = enrichment_from(
+        {
+            **WRITTEN,
+            "design_eras": [],
+            "no_design_eras_reason": (
+                "No location in this book states a year built, and nobody has "
+                "reviewed this country's code adoption."
+            ),
+        }
+    )
+
+    assert without.design_eras == ()
+    assert without.design_levels(2024) == ()
+    assert "nobody has reviewed" in without.no_design_eras_reason
+    # It survives the provenance dictionary, so a run records why.
+    assert enrichment_from(without.as_dict()).no_design_eras_reason == (
+        without.no_design_eras_reason
+    )
+
+
+def test_stating_eras_and_a_reason_for_having_none_is_refused():
+    with pytest.raises(EnrichmentError, match="One of them is not true"):
+        enrichment_from({**WRITTEN, "no_design_eras_reason": "The stock stands."})
 
 
 def test_an_unknown_weighting_basis_is_refused():
@@ -155,12 +184,18 @@ def test_the_country_name_and_version_are_required():
 
 # -- what the release holds --------------------------------------------------------
 
-def release(tmp_path, *, region: str = "Southeast_Asia", country: str = "Atlantis"):
+def release(
+    tmp_path,
+    *,
+    region: str = "Southeast_Asia",
+    country: str = "Atlantis",
+    taxonomy: str = "CR/LFINF/CDL+ERM/H:2/COM",
+):
     directory = tmp_path / "global_vulnerability_model" / region / country
     directory.mkdir(parents=True)
     for category in LossCategory:
         (directory / f"vulnerability_{category}.xml").write_bytes(
-            document(category.declared)
+            document(category.declared, taxonomy)
         )
     return tmp_path
 
@@ -218,15 +253,50 @@ def test_a_country_s_codes_are_read_from_its_stock_summary(tmp_path):
     assert (found["iso3"], found["country_code"], found["problem"]) == ("ISL", "IS", "")
 
 
-def test_a_country_with_no_stock_summary_is_listed_with_the_reason(tmp_path):
-    """GEM names Turkey's two folders differently, so the pair does not meet."""
+def test_the_two_repositories_meet_where_gem_names_a_country_differently(tmp_path):
+    """Turkey's functions are published under Turkey and its stock under
+    Turkiye. Pairing them only by folder name left the country unbuildable."""
     release(tmp_path, region="Europe", country="Turkey")
+    stock_summary(
+        tmp_path,
+        region="Europe",
+        country="Turkiye",
+        rows="TUR,Türkiye,COM,CR-,CR/LFINF/CDL+ERM/H:2/COM,TOTAL,1,100\n",
+    )
+
+    assert country_identity(tmp_path, region="Europe", country="Turkey") == CountryIdentity(
+        iso3="TUR", country_code="TR"
+    )
+    [found] = catalogue(tmp_path, identify=True)
+    assert (found["country"], found["iso3"], found["problem"]) == ("Turkey", "TUR", "")
+
+
+def test_a_country_with_no_stock_summary_at_all_is_listed_with_the_reason(tmp_path):
+    release(tmp_path, region="Europe", country="Ruritania")
 
     [found] = catalogue(tmp_path, identify=True)
 
-    assert found["country"] == "Turkey"
+    assert found["country"] == "Ruritania"
     assert found["iso3"] == ""
-    assert "no stock summary for Turkey" in found["problem"]
+    assert "no stock summary for Ruritania" in found["problem"]
+
+
+def test_a_country_published_in_another_alphabet_says_so_before_it_is_chosen(tmp_path):
+    """The United States and Canada are published in HAZUS classes, which CASS
+    cannot map an OED schedule onto. Saying so in the catalogue beats failing
+    part way through a build with an unreadable taxonomy string."""
+    release(tmp_path, region="North_America", country="Canada", taxonomy="C1H/HC/RES3")
+    stock_summary(
+        tmp_path,
+        region="North_America",
+        country="Canada",
+        rows="CAN,Canada,COM,CR-,C1H/HC/COM4,TOTAL,1,100\n",
+    )
+
+    [found] = catalogue(tmp_path, identify=True)
+
+    assert found["iso3"] == "CAN"
+    assert "HAZUS" in found["problem"]
 
 
 def test_a_code_outside_iso_3166_is_refused(tmp_path):

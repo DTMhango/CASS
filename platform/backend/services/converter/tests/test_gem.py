@@ -85,9 +85,33 @@ def test_a_height_band_is_not_read_as_a_storey_count():
     assert parse_taxonomy("CR/LDUAL/CDL+ERL/H:6-12/COM").storeys is None
 
 
-def test_a_string_with_the_wrong_number_of_segments_is_not_a_taxonomy():
+def test_a_string_with_too_few_segments_is_not_a_taxonomy():
     with pytest.raises(GemError, match="not a GEM taxonomy string"):
         parse_taxonomy("CR/LFINF/COM")
+
+
+@pytest.mark.parametrize(
+    ("text", "attributes"),
+    [
+        ("MUR+ADO/LWAL/CDN+ERN/H:1/RWO/RES", ("RWO",)),
+        ("CR/LFINF/CDL+ERL/H:4/IRI(SOS)/RES", ("IRI(SOS)",)),
+    ],
+)
+def test_attributes_between_the_height_and_the_occupancy_are_carried(text, attributes):
+    """GEM states a roof or an irregularity for three countries in four, and the
+    occupancy stays last. Reading it as the fifth segment gave those countries a
+    roof where their occupancy should be, so every risk reached no function."""
+    taxonomy = parse_taxonomy(text)
+
+    assert taxonomy.attributes == attributes
+    assert taxonomy.occupancy_class is OccupancyClass.RESIDENTIAL
+    assert taxonomy.text == text
+
+
+def test_a_hazus_class_is_refused_by_the_alphabet_it_is_written_in():
+    """The United States, Canada and their territories are published in it."""
+    with pytest.raises(GemError, match="HAZUS class"):
+        parse_taxonomy("C1H/HC/RES3")
 
 
 def test_an_unknown_occupancy_class_is_absent_rather_than_guessed():

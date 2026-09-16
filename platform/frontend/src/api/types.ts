@@ -888,6 +888,8 @@ export interface VulnerabilitySpecificationInput {
     name: string;
     version: string;
     weighting: string;
+    /** Why the set states no design eras. Empty where it states a table of them. */
+    no_design_eras_reason: string;
     design_eras: { to_year: number | null; design_levels: string[]; reason: string }[];
     open_questions: string[];
     notes: string;

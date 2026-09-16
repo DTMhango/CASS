@@ -515,10 +515,17 @@
   cursor: not-allowed;
 }
 
+/* Two lines at most: a long reason must not push the rest of the list off the
+   screen, and the whole of it is said where the option is acted on. */
 .combobox__detail {
   font-size: var(--text-xs);
   font-weight: 400;
   color: var(--grey-600);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 
 .combobox__empty {

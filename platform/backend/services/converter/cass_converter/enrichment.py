@@ -301,6 +301,7 @@ def read_stock_prior(
     country_code: str,
     weighting: Weighting = Weighting.VALUE,
     iso3: str = "",
+    national: str | pathlib.Path | None = None,
 ) -> StockPrior:
     """Read a GEM ``Exposure_Summary_Taxonomy.csv``.
 
@@ -313,6 +314,18 @@ def read_stock_prior(
     Given ``iso3``, every row that states a country must state that one. The
     mapping is read by the same code, so a summary for another country would
     weight one country's stock through another's mapping without failing.
+
+    Given ``national`` -- GEM's ``Exposure_Summary_Adm0.csv`` for the same
+    country -- what was summed here is checked against the totals GEM publishes
+    for it, so a row counted twice is caught by arithmetic rather than by a rule
+    about how the file is laid out. It replaces such a rule: this reader used to
+    refuse a taxonomy reported both as a total and split by settlement, on the
+    reasoning that summing both double-counts. China is published that way and
+    does not double-count -- its ``TOTAL`` rows are the buildings that are
+    neither urban nor rural, and summing all three reproduces GEM's national
+    figure to two buildings in 244 million. The structural rule refused the
+    country for a fault it does not have, and would have missed a real double
+    count reported any other way.
     """
     path = pathlib.Path(source)
     try:
@@ -331,13 +344,9 @@ def read_stock_prior(
             f"{path.name} is missing columns: {', '.join(missing)}."
         )
 
-    # A taxonomy is reported either as one TOTAL row or split into settlement
-    # classes, never both. Summing regardless is correct today and would
-    # double-count silently if a later release started publishing both, so the
-    # two shapes are counted and the overlap refused.
-    settlements: dict[tuple[str, str], set[str]] = {}
     shares: dict[tuple[str, str], list[float]] = {}
     per_taxonomy: dict[tuple[str, str], list[float]] = {}
+    counted: dict[str, list[float]] = {}
     wanted = iso3.strip().upper()
     for row in rows:
         stated = (row.get("ID_0") or "").strip().upper()
@@ -353,14 +362,6 @@ def read_stock_prior(
         if not occupancy or not macro:
             continue
 
-        seen = settlements.setdefault((occupancy, taxonomy), set())
-        seen.add((row.get("SETTLEMENT") or "").strip().upper())
-        if "TOTAL" in seen and len(seen) > 1:
-            raise EnrichmentError(
-                f"{path.name} reports {taxonomy!r} both as a total and split by "
-                "settlement. Summing both would count the same buildings twice."
-            )
-
         buildings = _number(row.get("BUILDINGS"))
         cost = _number(row.get("BLDG_REPL_COST_USD"))
 
@@ -368,10 +369,17 @@ def read_stock_prior(
         entry[0] += buildings
         entry[1] += cost
 
+        total = counted.setdefault(occupancy, [0.0, 0.0])
+        total[0] += buildings
+        total[1] += cost
+
         if taxonomy:
             detail = per_taxonomy.setdefault((occupancy, taxonomy), [0.0, 0.0])
             detail[0] += buildings
             detail[1] += cost
+
+    if national is not None:
+        _check_against_national(path, counted, national)
 
     return StockPrior(
         country_code=country_code.upper(),
@@ -383,6 +391,50 @@ def read_stock_prior(
             key: (value[0], value[1]) for key, value in per_taxonomy.items()
         },
     )
+
+
+#: How far a summed occupancy may sit from the national total GEM publishes for
+#: it before the summary is refused. A row counted twice moves it by far more;
+#: rounding in the published files moves it by parts in a million.
+NATIONAL_TOLERANCE = 1e-03
+
+
+def _check_against_national(
+    path: pathlib.Path,
+    counted: Mapping[str, Sequence[float]],
+    national: str | pathlib.Path,
+) -> None:
+    """Refuse a summary whose rows do not add up to GEM's own national totals."""
+    source = pathlib.Path(national)
+    try:
+        rows = list(
+            csv.DictReader(source.read_bytes().decode("utf-8-sig").splitlines())
+        )
+    except OSError as exc:
+        raise EnrichmentError(
+            f"{source.name} could not be read ({exc}), so the stock summary's rows "
+            "could not be checked against the totals GEM publishes for the country."
+        ) from exc
+
+    published: dict[str, float] = {}
+    for row in rows:
+        occupancy = (row.get("OCCUPANCY") or "").strip()
+        if occupancy:
+            published[occupancy] = published.get(occupancy, 0.0) + _number(
+                row.get("BLDG_REPL_COST_USD")
+            )
+
+    for occupancy, (_, cost) in sorted(counted.items()):
+        expected = published.get(occupancy)
+        if expected is None or expected <= 0.0:
+            continue
+        if abs(cost - expected) / expected > NATIONAL_TOLERANCE:
+            raise EnrichmentError(
+                f"{path.name} sums to {cost:,.0f} USD of {occupancy} buildings and "
+                f"{source.name} publishes {expected:,.0f} for the same country. One "
+                "of them is counting buildings the other is not, and a share of the "
+                "wrong denominator is a weight nobody can check."
+            )
 
 
 #: The columns of GEM's published mapping file.
@@ -770,6 +822,16 @@ class Enrichment:
     #: stock summary is refused if it names a different country.
     iso3: str = ""
     design_eras: tuple[DesignEra, ...] = ()
+    #: Why this enrichment states no eras, where it states none deliberately.
+    #:
+    #: An era table only does anything for a risk whose year is known, and a
+    #: book that states no years is the normal case rather than the exception.
+    #: Requiring a table anyway would mean writing one nobody has researched and
+    #: nothing will read, which is worse than saying plainly that the country's
+    #: stock distribution over design levels is what stands. So it can be said,
+    #: and it is a statement with a reason like any other assumption here --
+    #: never an empty table nobody noticed.
+    no_design_eras_reason: str = ""
     weighting: Weighting = Weighting.VALUE
     #: Candidates below this height are dropped. Unset by default. A model
     #: owner who knows the book is mid-rise commercial can use it to move the
@@ -913,6 +975,12 @@ class Enrichment:
                         f"which is what this enrichment expects of a building of "
                         f"{attributes.year_built}, so the prior decided it."
                     )
+            elif not self.design_eras:
+                notes.append(
+                    "This enrichment states no design eras, so the year was not "
+                    "used and the country's stock distribution over design levels "
+                    f"stands: {self.no_design_eras_reason}"
+                )
             else:
                 notes.append(
                     f"This enrichment states no design era covering "
@@ -1045,6 +1113,7 @@ class Enrichment:
                 }
                 for era in self.design_eras
             ],
+            "no_design_eras_reason": self.no_design_eras_reason,
             "open_questions": list(self.open_questions),
             "notes": self.notes,
             "enrichment_version": ENRICHMENT_VERSION,
@@ -1098,6 +1167,20 @@ def enrichment_from(document: Mapping[str, Any]) -> Enrichment:
             DesignEra(to_year=_optional_year(item.get("to_year"), position), design_levels=levels, reason=reason)
         )
 
+    without = str(document.get("no_design_eras_reason") or "").strip()
+    if eras and without:
+        raise EnrichmentError(
+            "This enrichment states design eras and also states why it has none. "
+            "One of them is not true, and which applied would be a matter of "
+            "reading the code."
+        )
+    if not eras and not without:
+        raise EnrichmentError(
+            "An enrichment with no design eras leaves every building with no design "
+            "level, and the mixture would be the whole national stock. That is a "
+            "reasonable thing to decide where no schedule states a year built -- but "
+            "it has to be decided: state it as no_design_eras_reason."
+        )
     _check_era_order(eras)
 
     try:
@@ -1115,6 +1198,7 @@ def enrichment_from(document: Mapping[str, Any]) -> Enrichment:
         country_code=_required(document, "country_code").upper(),
         iso3=str(document.get("iso3") or "").upper(),
         design_eras=tuple(eras),
+        no_design_eras_reason=without,
         weighting=weighting,
         minimum_storeys=_optional_int(document.get("minimum_storeys")),
         weight_overrides=dict(document.get("weight_overrides") or {}),
@@ -1125,11 +1209,10 @@ def enrichment_from(document: Mapping[str, Any]) -> Enrichment:
 
 
 def _check_era_order(eras: Sequence[DesignEra]) -> None:
+    # An enrichment that states no eras says why instead, which is checked
+    # before this; there is no order to check.
     if not eras:
-        raise EnrichmentError(
-            "An enrichment with no design eras leaves every building with no design "
-            "level, and the mixture would be the whole national stock."
-        )
+        return
     bounded = [era for era in eras if era.to_year is not None]
     years = [era.to_year for era in bounded]
     if years != sorted(years):

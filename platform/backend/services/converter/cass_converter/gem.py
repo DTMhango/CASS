@@ -40,6 +40,7 @@ import dataclasses
 import enum
 import hashlib
 import pathlib
+import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, BinaryIO
@@ -56,8 +57,11 @@ _NS = {"n": NRML_NAMESPACE}
 #: the discretiser knows how to integrate. Named rather than assumed.
 SUPPORTED_DISTRIBUTION = "BT"
 
-#: GEM taxonomy strings have five segments. The last is the occupancy class,
-#: which is the only one CASS reads structurally; the rest travel whole.
+#: The fewest segments a GEM taxonomy string has: material, lateral system,
+#: design, height and the occupancy class. More is normal -- GEM states further
+#: attributes between the height and the occupancy for a good part of the world
+#: -- so this is a minimum rather than a count, and the occupancy is read as the
+#: last segment rather than the fifth.
 TAXONOMY_SEGMENTS = 5
 
 
@@ -131,6 +135,13 @@ class Taxonomy:
     design: str
     height: str
     occupancy: str
+    #: Attributes GEM states between the height and the occupancy, where it
+    #: states any: a wooden roof (``RWO``) on an adobe house, a soft storey
+    #: (``IRI(SOS)``) in a concrete frame. CASS routes on none of them -- no OED
+    #: field says whether a building has a soft storey -- so they are carried
+    #: whole, and the taxonomies that hold them stay distinct candidates in a
+    #: mixture rather than being merged with the ones that do not.
+    attributes: tuple[str, ...] = ()
 
     @property
     def storeys(self) -> int | None:
@@ -157,21 +168,41 @@ class Taxonomy:
 
 
 def parse_taxonomy(text: str) -> Taxonomy:
-    """Split a GEM taxonomy string into its segments."""
+    """Split a GEM taxonomy string into the parts CASS routes on.
+
+    The first four segments and the last are fixed -- material, lateral system,
+    design, height, and the occupancy class at the end. Between them GEM may
+    state further attributes, and in v2026.0.0 it does for 75 countries: a
+    wooden roof, a soft storey. Reading the occupancy positionally rather than
+    as the last segment is what made those countries unreadable, and the failure
+    was not visible as a bad taxonomy -- it read the roof as the occupancy,
+    which matches no occupancy class, so every one of their risks reached no
+    function at all.
+    """
     segments = text.split("/")
-    if len(segments) != TAXONOMY_SEGMENTS:
+    if len(segments) < TAXONOMY_SEGMENTS:
         raise GemError(
-            f"{text!r} is not a GEM taxonomy string: expected "
+            f"{text!r} is not a GEM taxonomy string: expected at least "
             f"{TAXONOMY_SEGMENTS} segments separated by '/', found {len(segments)}."
+            + (
+                " It is a HAZUS class -- model building type, code level and "
+                "occupancy -- which is the alphabet GEM publishes the United "
+                "States, Canada and their territories in. CASS reads the GEM "
+                "building taxonomy, and mapping an OED schedule onto HAZUS "
+                "classes is a second set of assumptions nobody has written."
+                if len(segments) == 3
+                else ""
+            )
         )
-    material, lateral, design, height, occupancy = segments
+    material, lateral, design, height, *rest = segments
     return Taxonomy(
         text=text,
         material=material,
         lateral_system=lateral,
         design=design,
         height=height,
-        occupancy=occupancy,
+        occupancy=rest[-1],
+        attributes=tuple(rest[:-1]),
     )
 
 
@@ -365,6 +396,27 @@ def read_country(
     return models
 
 
+#: Countries the two GEM repositories name differently. The vulnerability model
+#: keeps the older English name and the exposure model has moved to the
+#: country's own -- and neither is derivable from the other, so the pairs are
+#: stated. Only these two differ in v2026.0.0, and
+#: ``test_every_country_in_the_release_pairs_with_its_exposure`` fails if a
+#: later release adds a third rather than leaving that country unbuildable.
+EXPOSURE_FOLDERS: Mapping[str, str] = {
+    "Cape_Verde": "Cabo_Verde",
+    "Turkey": "Turkiye",
+}
+
+
+def exposure_folder(root: str | pathlib.Path, *, region: str, country: str) -> str:
+    """The exposure repository's folder for a vulnerability repository's country."""
+    base = pathlib.Path(root) / "global_exposure_model" / region
+    if (base / country).is_dir():
+        return country
+    named = EXPOSURE_FOLDERS.get(country, "")
+    return named if named and (base / named).is_dir() else country
+
+
 def stock_summary_path(
     root: str | pathlib.Path, *, region: str, country: str
 ) -> pathlib.Path:
@@ -373,9 +425,18 @@ def stock_summary_path(
         pathlib.Path(root)
         / "global_exposure_model"
         / region
-        / country
+        / exposure_folder(root, region=region, country=country)
         / "summaries"
         / "Exposure_Summary_Taxonomy.csv"
+    )
+
+
+def national_summary_path(
+    root: str | pathlib.Path, *, region: str, country: str
+) -> pathlib.Path:
+    """Where GEM publishes a country's totals by occupancy, for checking against."""
+    return stock_summary_path(root, region=region, country=country).with_name(
+        "Exposure_Summary_Adm0.csv"
     )
 
 
@@ -425,6 +486,49 @@ def country_identity(
     return CountryIdentity(iso3=iso3, country_code=code)
 
 
+def check_taxonomy_alphabet(
+    root: str | pathlib.Path, *, region: str, country: str
+) -> None:
+    """Refuse a country whose functions are not named in the GEM taxonomy.
+
+    GEM publishes the United States, Canada and their territories in HAZUS
+    classes instead. They are read here, from the first function of the country's
+    structural file, so a country CASS cannot map is said to be unbuildable while
+    somebody is choosing one -- rather than part way through a build, as an
+    unreadable taxonomy string.
+
+    The reason is a sentence rather than the parser's full account of it,
+    because this one is read in a list of two hundred countries. A build states
+    the whole thing.
+    """
+    path = (
+        pathlib.Path(root)
+        / "global_vulnerability_model"
+        / region
+        / country
+        / f"vulnerability_{LossCategory.STRUCTURAL}.xml"
+    )
+    try:
+        head = path.read_bytes()[:8192].decode("utf-8", errors="replace")
+    except OSError as exc:
+        raise GemError(f"{path.name} could not be read for {country}: {exc}") from None
+    found = re.search(r'<vulnerabilityFunction\s+id="([^"]+)"', head)
+    if not found:
+        return
+    identifier = found.group(1)
+    try:
+        parse_taxonomy(identifier)
+    except GemError:
+        raise GemError(
+            f"GEM publishes this country's functions as HAZUS classes ({identifier}), "
+            "not in its own building taxonomy, and CASS cannot map an OED schedule "
+            "onto those."
+            if len(identifier.split("/")) == 3
+            else f"CASS cannot read this country's functions: {identifier!r} is not a "
+            "GEM taxonomy string."
+        ) from None
+
+
 def catalogue(
     root: str | pathlib.Path, *, identify: bool = False
 ) -> tuple[dict[str, Any], ...]:
@@ -464,16 +568,25 @@ def catalogue(
                 "loss_categories": categories,
             }
             if identify:
+                identity: CountryIdentity | None = None
+                problem = ""
                 try:
                     identity = country_identity(
                         root, region=region.name, country=country.name
                     )
-                except GemError as exc:
-                    entry.update(iso3="", country_code="", problem=str(exc))
-                else:
-                    entry.update(
-                        iso3=identity.iso3, country_code=identity.country_code, problem=""
+                    # Read after the codes, and reported beside them: a country
+                    # CASS knows the name of and cannot read the functions of is
+                    # a different thing from one it cannot identify at all.
+                    check_taxonomy_alphabet(
+                        root, region=region.name, country=country.name
                     )
+                except GemError as exc:
+                    problem = str(exc)
+                entry.update(
+                    iso3=identity.iso3 if identity else "",
+                    country_code=identity.country_code if identity else "",
+                    problem=problem,
+                )
             found.append(entry)
     return tuple(found)
 

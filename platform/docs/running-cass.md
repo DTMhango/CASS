@@ -135,12 +135,25 @@ every function — so the set's version follows it.
 
 The country's ISO codes are not typed. The alpha-3 is read from GEM's stock
 summary for the country and the alpha-2 follows from ISO 3166-1, so a set cannot
-be registered under another country's code. Cape Verde and Turkey are listed but
-cannot be built: GEM's two repositories name their folders differently
-(`Cabo_Verde`, `Turkiye`), so their functions have no stock summary to meet.
+be registered under another country's code.
+
+208 of the 215 countries GEM v2026.0.0 publishes can be built. The seven that
+cannot are the United States, Canada, Puerto Rico, the US Virgin Islands, Guam,
+American Samoa and the Northern Mariana Islands: GEM publishes them in HAZUS
+classes (`C1H/HC/RES3`) rather than in its own building taxonomy, and mapping an
+OED schedule onto those is a second set of assumptions nobody has written. They
+are listed with that reason rather than left out, and cannot be chosen.
 
 An era table that is out of order, ends before today, or names a design level
-GEM does not use is refused.
+GEM does not use is refused, and so is an era that states no reason.
+
+An era table only decides anything for a risk whose year built is stated; a risk
+without one carries the country's stock distribution over design levels either
+way. Where a book states no years, or nobody has researched the country's code
+history, the set can say so instead — "by the country's building stock alone",
+with the reason, which then travels with every model version built on the set.
+What it cannot be is blank: an empty table and a decision to have none look the
+same afterwards, and only one of them is a decision.
 
 A class that spans several shaking measures — which is every class a schedule
 reaches when it states no storey counts — is carried as one earthquake sub-peril

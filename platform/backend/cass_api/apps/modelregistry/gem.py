@@ -539,6 +539,12 @@ def _limitations(built: CountryBuild) -> str:
         "multi-IMT representation is approved, a risk reaching one of them is "
         "refused rather than approximated.",
     ]
+    if not built.enrichment.design_eras:
+        lines.append(
+            "- This set states no design eras, so a year built narrows nothing and "
+            "every risk carries the country's stock distribution over seismic design "
+            f"levels. Stated reason: {built.enrichment.no_design_eras_reason}"
+        )
     lines.extend(f"- {item}" for item in built.enrichment.open_questions)
     return "\n".join(lines)
 
