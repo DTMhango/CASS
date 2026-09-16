@@ -46,14 +46,19 @@ jobs:
                       -e backend/packages/cass_oed \
                       -e backend/packages/cass_extract \
                       -e backend/services/keys \
-                      -e backend/services/converter
+                      -e "backend/services/converter[hdf5]"
 
       - name: Lint
         run: ruff check backend
 
+      # The converter is installed with its hdf5 extra, which is what the
+      # shipped image installs, so the datastore reader and the vectorised
+      # binning are covered here rather than skipped until the weekly run.
+      # -rs lists whatever still skipped, so a green run says what it did not
+      # cover.
       - name: Test
         working-directory: platform/backend
-        run: pytest -q --cov --cov-report=term-missing
+        run: pytest -q -rs --cov --cov-report=term-missing
 
       # The OpenAPI schema is the contract the React application is written
       # against. Generating it with --fail-on-warn means a viewset that cannot

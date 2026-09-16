@@ -166,7 +166,10 @@ def test_binning_an_array_agrees_with_binning_one_value_at_a_time():
     value in the same bin -- including at the boundaries, where rounding to six
     significant figures is what decides which side a value falls.
     """
-    import numpy as np
+    # Skipped rather than imported, because the vectorised path is optional:
+    # numpy belongs to converting a calculation, not to describing a bin set.
+    # The file's other tests do not need it, so the skip is per test.
+    np = pytest.importorskip("numpy")
 
     from cass_converter import pilot_bins
 
@@ -198,7 +201,7 @@ def test_binning_an_array_agrees_with_binning_one_value_at_a_time():
 
 def test_a_block_counts_what_the_samples_would_have_counted():
     """``add_block`` is the twin of ``add``, and produces the same rows."""
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     from cass_converter import pilot_bins
     from cass_converter.footprint import (
