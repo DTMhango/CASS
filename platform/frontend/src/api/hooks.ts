@@ -24,6 +24,7 @@ import type {
   AreaPerilGridSummary,
   GemCatalogue,
   GridBuildResult,
+  GridEstimate,
   GridSpecificationInput,
   VulnerabilityBuildResult,
   GeocodingSensitivity,
@@ -672,6 +673,35 @@ export function useBuildVulnerabilitySet() {
       api.post<VulnerabilityBuildResult>("/vulnerability-sets/build/", specification),
     onSuccess: () =>
       client.invalidateQueries({ queryKey: ["vulnerability-sets"] }),
+  });
+}
+
+/**
+ * What the specification on the screen would generate, before it is built.
+ *
+ * Resolution is quadratic in cost and nothing about a number typed into a box
+ * says so, so the count follows the specification as it is written. The server
+ * answers rather than the browser, because it is the count the build guards
+ * against and two implementations of it would eventually disagree.
+ *
+ * Keyed on the parts that change the geometry, so editing a label or a reason
+ * asks nothing. ``keepPreviousData`` holds the last count on screen while the
+ * next is fetched: a number that blinks out on every keystroke is harder to
+ * read than one that is briefly a moment out of date.
+ */
+export function useGridEstimate(specification: GridSpecificationInput, enabled: boolean) {
+  const geometry = {
+    base_resolution_deg: specification.base_resolution_deg,
+    tiles: specification.tiles,
+    refinements: specification.refinements,
+  };
+  return useQuery({
+    queryKey: ["grid-estimate", geometry] as const,
+    queryFn: () => api.post<GridEstimate>("/grids/estimate/", geometry),
+    enabled,
+    placeholderData: (previous) => previous,
+    staleTime: Infinity,
+    retry: false,
   });
 }
 

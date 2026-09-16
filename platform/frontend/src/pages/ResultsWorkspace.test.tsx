@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ResultComparison, ResultSet } from "@/api/types";
 import { WorkingContextProvider } from "@/context/WorkingContext";
+import { choose } from "@/test/combobox";
 
 import { ResultsWorkspace } from "./ResultsWorkspace";
 
@@ -329,11 +330,10 @@ describe("ResultsWorkspace", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    const baseline = await screen.findByLabelText(/Baseline/);
-    await user.selectOptions(baseline, BASELINE.id);
+    await choose(user, await screen.findByLabelText(/Baseline/), /^Q2 baseline/);
 
-    const candidate = screen.getByLabelText(/Candidate/);
-    const options = within(candidate).getAllByRole("option").map((item) => item.textContent);
+    await user.click(screen.getByLabelText(/Candidate/));
+    const options = screen.getAllByRole("option").map((item) => item.textContent);
 
     expect(options).toContain(SAME_BASIS.label);
     // A ground-up against an insured, or two currencies, is a difference that
@@ -382,8 +382,7 @@ describe("ResultsWorkspace", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    const baseline = await screen.findByLabelText(/Baseline/);
-    await user.selectOptions(baseline, BASELINE.id);
+    await choose(user, await screen.findByLabelText(/Baseline/), /^Q2 baseline/);
 
     expect(
       await screen.findByText(/Nothing can be compared against this baseline/),
@@ -572,8 +571,8 @@ describe("ResultsWorkspace", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    await user.selectOptions(await screen.findByLabelText(/Baseline/), BASELINE.id);
-    await user.selectOptions(screen.getByLabelText(/Candidate/), SAME_BASIS.id);
+    await choose(user, await screen.findByLabelText(/Baseline/), /^Q2 baseline/);
+    await choose(user, screen.getByLabelText(/Candidate/), SAME_BASIS.label);
     await user.type(screen.getByLabelText(/Name this comparison/), "Release impact");
     await user.click(screen.getByRole("button", { name: "Compare" }));
 

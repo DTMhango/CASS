@@ -195,3 +195,99 @@ def test_the_count_is_estimated_before_any_cell_is_generated():
         {**SPECIFICATION, "base_resolution_deg": "0.01", "refinements": []}
     )
     assert grid_build.estimated_cells(finer) == 60_000
+
+
+# -- what it would cost, before it costs it ---------------------------------
+#
+# Resolution is quadratic and a number typed into a box does not say so. These
+# hold that the count a modeller sees while writing the specification is the
+# same count the build guards against, so nothing changes under them when they
+# press the button.
+
+def estimate(client, **changes):
+    return client.post(f"{API}/grids/estimate/", {**SPECIFICATION, **changes}, format="json")
+
+
+def test_the_count_is_answered_before_anything_is_built(client_for, modeller):
+    answer = estimate(client_for(modeller))
+
+    assert answer.status_code == 200, answer.data
+    # The same upper bound the guard uses: base cells, and the refined cells
+    # that will replace one of them.
+    assert answer.data["cells"] == 28
+    assert answer.data["cells_from_tiles"] == 24
+    assert answer.data["cells_by_refinement"] == [
+        {"name": "Metro Manila", "resolution_deg": "0.25", "cells": 4}
+    ]
+    assert answer.data["within_limit"] is True
+    assert not AreaPerilGrid.objects.filter(country_code="PH").exists()
+
+
+def test_a_finer_resolution_shows_what_it_would_cost(client_for, modeller):
+    """Halving the resolution quadruples the count, and it is visible at once."""
+    coarse = estimate(client_for(modeller), base_resolution_deg="0.5", refinements=[])
+    fine = estimate(client_for(modeller), base_resolution_deg="0.25", refinements=[])
+
+    assert coarse.data["cells"] == 24
+    assert fine.data["cells"] == 96
+
+
+def test_a_specification_over_the_limit_is_said_to_be_over_it(
+    client_for, modeller, settings
+):
+    settings.CASS_MAX_GRID_CELLS = 100
+
+    answer = estimate(client_for(modeller), base_resolution_deg="0.01", refinements=[])
+
+    assert answer.data["cells"] == 60_000
+    assert answer.data["limit"] == 100
+    assert answer.data["within_limit"] is False
+
+
+def test_a_half_written_specification_still_counts_what_it_can(client_for, modeller):
+    """It is answered while somebody is typing, so it cannot insist on a whole one."""
+    answer = estimate(
+        client_for(modeller),
+        country_code="",
+        version="",
+        label="",
+        tiles=[
+            SPECIFICATION["tiles"][0],
+            {"name": "Visayas", "min_latitude": "9", "max_latitude": "12"},
+        ],
+        refinements=[],
+    )
+
+    assert answer.status_code == 200, answer.data
+    assert answer.data["cells"] == 24
+    assert answer.data["counted_tiles"] == 1
+    assert answer.data["incomplete"] == 1
+
+
+def test_a_refinement_that_does_not_refine_is_named_while_it_can_be_changed(
+    client_for, modeller
+):
+    answer = estimate(
+        client_for(modeller),
+        refinements=[{**SPECIFICATION["refinements"][0], "resolution_deg": "1"}],
+    )
+
+    assert answer.status_code == 200
+    assert any("not finer" in problem for problem in answer.data["problems"])
+
+
+def test_a_backwards_extent_is_reported_rather_than_counted(client_for, modeller):
+    answer = estimate(
+        client_for(modeller),
+        tiles=[{**SPECIFICATION["tiles"][0], "max_latitude": "12"}],
+        refinements=[],
+    )
+
+    assert answer.data["cells"] == 0
+    assert any("empty" in problem for problem in answer.data["problems"])
+
+
+def test_estimating_a_grid_is_a_model_publisher_s_action(api):
+    refused = api.post(f"{API}/grids/estimate/", SPECIFICATION, format="json")
+
+    assert refused.status_code == 403

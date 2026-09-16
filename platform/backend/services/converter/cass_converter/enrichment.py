@@ -300,6 +300,7 @@ def read_stock_prior(
     *,
     country_code: str,
     weighting: Weighting = Weighting.VALUE,
+    iso3: str = "",
 ) -> StockPrior:
     """Read a GEM ``Exposure_Summary_Taxonomy.csv``.
 
@@ -308,6 +309,10 @@ def read_stock_prior(
     carry occupancy sub-classes the vulnerability model does not use, so
     matching them to a vulnerability taxonomy would be a second assumption on
     top of the one in ``macro_class``, with nothing gained.
+
+    Given ``iso3``, every row that states a country must state that one. The
+    mapping is read by the same code, so a summary for another country would
+    weight one country's stock through another's mapping without failing.
     """
     path = pathlib.Path(source)
     try:
@@ -333,7 +338,15 @@ def read_stock_prior(
     settlements: dict[tuple[str, str], set[str]] = {}
     shares: dict[tuple[str, str], list[float]] = {}
     per_taxonomy: dict[tuple[str, str], list[float]] = {}
+    wanted = iso3.strip().upper()
     for row in rows:
+        stated = (row.get("ID_0") or "").strip().upper()
+        if wanted and stated and stated != wanted:
+            raise EnrichmentError(
+                f"{path.name} describes {stated}, and this build is for {wanted}. "
+                "Weighting one country's stock through another's mapping would "
+                "produce a mixture that looks fine."
+            )
         occupancy = (row.get("OCCUPANCY") or "").strip()
         macro = (row.get("MACRO_TAXONOMY") or "").strip()
         taxonomy = (row.get("TAXONOMY") or "").strip()
@@ -752,9 +765,9 @@ class Enrichment:
     version: str
     country_code: str
     #: ISO 3166 alpha-3, because GEM's mapping file is keyed by it and the rest
-    #: of CASS is keyed by alpha-2. Stated rather than derived: there is no rule
-    #: that turns ID into IDN, only a table, and a wrong one would silently read
-    #: another country's mapping.
+    #: of CASS is keyed by alpha-2. A build from a written specification reads
+    #: both codes from the release rather than taking them as typed, and the
+    #: stock summary is refused if it names a different country.
     iso3: str = ""
     design_eras: tuple[DesignEra, ...] = ()
     weighting: Weighting = Weighting.VALUE

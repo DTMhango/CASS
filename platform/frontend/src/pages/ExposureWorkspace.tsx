@@ -40,6 +40,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
+  Combobox,
   EmptyState,
   Field,
   MetricTile,
@@ -285,21 +286,15 @@ function ProjectPicker() {
 
   return (
     <Field label="Project" htmlFor="project-picker">
-      <Select
+      <Combobox
         id="project-picker"
         value={context.projectId ?? ""}
-        onChange={(event) => {
-          const next = projects.find((item) => item.id === event.target.value);
-          context.setProject(next);
-        }}
-      >
-        <option value="">All projects I can see</option>
-        {projects.map((project) => (
-          <option key={project.id} value={project.id}>
-            {project.name}
-          </option>
-        ))}
-      </Select>
+        onChange={(value) => context.setProject(projects.find((item) => item.id === value))}
+        options={[
+          { value: "", label: "All projects I can see" },
+          ...projects.map((project) => ({ value: project.id, label: project.name })),
+        ]}
+      />
     </Field>
   );
 }

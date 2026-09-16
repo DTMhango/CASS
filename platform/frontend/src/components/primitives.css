@@ -427,6 +427,106 @@
   border-color: var(--status-error);
 }
 
+/* A value the platform works out rather than asks for, shown where the field
+   would be so the form still reads as one row. */
+.field__readout {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+}
+
+/* Combobox ---------------------------------------------------------------- */
+
+.combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.combobox__input {
+  padding-right: var(--space-8);
+  text-overflow: ellipsis;
+}
+
+/* The same chevron a native select draws, on a button the pointer can use. */
+.combobox__toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: var(--space-8);
+  padding: 0;
+  border: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background-color: transparent;
+  background-image: linear-gradient(45deg, transparent 50%, var(--grey-600) 50%),
+    linear-gradient(135deg, var(--grey-600) 50%, transparent 50%);
+  background-position: calc(100% - 14px) calc(50% - 2px), calc(100% - 9px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.combobox__toggle:disabled {
+  cursor: not-allowed;
+  background-image: linear-gradient(45deg, transparent 50%, var(--grey-500) 50%),
+    linear-gradient(135deg, var(--grey-500) 50%, transparent 50%);
+}
+
+.combobox__popup {
+  position: fixed;
+  z-index: 1000;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+}
+
+.combobox__list {
+  margin: 0;
+  padding: var(--space-1) 0;
+  list-style: none;
+}
+
+.combobox__option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.combobox__option[aria-selected="true"] {
+  font-weight: 600;
+  color: var(--kre-blue);
+}
+
+.combobox__option--active {
+  background: var(--kre-blue-subtle);
+}
+
+.combobox__option--disabled {
+  color: var(--grey-500);
+  cursor: not-allowed;
+}
+
+.combobox__detail {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--grey-600);
+}
+
+.combobox__empty {
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--grey-600);
+}
+
 /* Disclosure -------------------------------------------------------------- */
 
 .disclosure {

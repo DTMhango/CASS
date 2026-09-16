@@ -20,10 +20,10 @@ import {
 import {
   Button,
   Card,
+  Combobox,
   EmptyState,
   Field,
   Notice,
-  Select,
   TextInput,
 } from "@/components/primitives";
 import { formatCount } from "@/lib/format";
@@ -69,33 +69,30 @@ export function AssembleModelVersion() {
         <>
           <div className="grid-builder__row">
             <Field label="Grid" htmlFor="assemble-grid" required>
-              <Select
+              <Combobox
                 id="assemble-grid"
+                placeholder="Choose a grid"
                 value={grid}
-                onChange={(event) => setGrid(event.target.value)}
-              >
-                <option value="">Choose a grid</option>
-                {grids.data?.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.reference} — {formatCount(item.cell_count)} cells
-                  </option>
-                ))}
-              </Select>
+                onChange={setGrid}
+                options={(grids.data ?? []).map((item) => ({
+                  value: item.id,
+                  label: item.reference,
+                  detail: `${formatCount(item.cell_count)} cells`,
+                }))}
+              />
             </Field>
             <Field label="Vulnerability set" htmlFor="assemble-vulnerability" required>
-              <Select
+              <Combobox
                 id="assemble-vulnerability"
+                placeholder="Choose a vulnerability set"
                 value={vulnerabilitySet}
-                onChange={(event) => setVulnerabilitySet(event.target.value)}
-              >
-                <option value="">Choose a vulnerability set</option>
-                {sets.data?.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.country_code} {item.version} —{" "}
-                    {formatCount(item.function_count)} functions
-                  </option>
-                ))}
-              </Select>
+                onChange={setVulnerabilitySet}
+                options={(sets.data ?? []).map((item) => ({
+                  value: item.id,
+                  label: `${item.country_code} ${item.version}`,
+                  detail: `${formatCount(item.function_count)} functions`,
+                }))}
+              />
             </Field>
           </div>
 

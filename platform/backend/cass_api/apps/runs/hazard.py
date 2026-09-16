@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import io
 import pathlib
+import re
 import tempfile
 import time
 from typing import Any
@@ -338,11 +339,13 @@ def _monitor(
     calculation_id = int(hazard_run.openquake_calculation_id)
     waited = 0.0
     last = None
+    read = 0
 
     while True:
         last = engine.status(calculation_id)
         if last.state.is_terminal:
             break
+        read = _follow(hazard_run.run, engine, calculation_id, last, read)
         if timeout is not None and waited >= timeout:
             raise HazardExecutionError(
                 f"OpenQuake calculation {calculation_id} was still "
@@ -369,6 +372,54 @@ def _monitor(
         metrics={"raw_state": last.raw_state},
     )
     return {"state": str(last.state), "raw_state": last.raw_state}
+
+
+#: OpenQuake's own progress line, as ``baselib.parallel`` writes it:
+#: ``classical  35% [128 submitted, 12 queued]``. Read from the start of the
+#: message and anchored on the bracketed counts, so neither the phase picks up
+#: the log's own timestamp nor a line that merely mentions a percentage is
+#: mistaken for progress.
+_PERCENT = re.compile(
+    r"^\s*(?P<phase>\w[\w .-]*?)\s+(?P<percent>\d{1,3})%\s+\[\s*\d+\s+submitted"
+)
+
+
+def _follow(run, engine, calculation_id: int, job, read: int) -> int:
+    """Record how far into the calculation the engine says it has got.
+
+    The status endpoint answers with a state and a description and no counts,
+    so the log is the only progress OpenQuake offers. Each poll asks for the
+    entries it has not read yet -- the engine takes a line offset, so this stays
+    one small request however long the calculation runs -- and keeps the last
+    percentage in them.
+
+    That percentage restarts for every phase, so the phase name is kept with
+    it. A bar that fills three times is unreadable; "classical 35%", then
+    "computing gmfs 8%", is the calculation as the engine describes it.
+
+    Never allowed to disturb the run. Progress is a courtesy to whoever is
+    watching, and a monitor that abandoned a ten-hour calculation because a log
+    request timed out would have cost far more than it showed.
+    """
+    try:
+        entries = engine.log_entries(calculation_id, start=read)
+    except Exception:  # pragma: no cover - defended above, not diagnosed here
+        return read
+
+    read += len(entries)
+    for entry in reversed(entries):
+        found = _PERCENT.search(entry[-1] if entry else "")
+        if found:
+            run.record_stage_progress(
+                int(found.group("percent")) / 100, found.group("phase").strip()
+            )
+            return read
+
+    # No line of its own, but a build of the engine that counts tasks in its
+    # status would still be reporting something.
+    if job.progress is not None:
+        run.record_stage_progress(job.progress, job.message or "")
+    return read
 
 
 def _export(hazard_run: HazardRun, engine, actor) -> dict[str, Any]:

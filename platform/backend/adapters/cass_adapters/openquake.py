@@ -345,8 +345,15 @@ class OpenQuakeAdapter(EngineAdapter):
             raw_state=raw,
         )
 
-    def log(self, calculation_id: int, *, start: int = 0, stop: int = 0) -> list[str]:
-        """Calculation log lines, as the engine holds them.
+    def log_entries(
+        self, calculation_id: int, *, start: int = 0, stop: int = 0
+    ) -> list[list[str]]:
+        """Calculation log entries in their fields: timestamp, level, process, message.
+
+        Kept apart from the joined lines below because a reader of the log and a
+        reader of one field of it want different things. The engine writes its
+        progress in the message, and a caller looking for it should not have to
+        find where the timestamp ended.
 
         ``stop`` of zero means "to the end", which is the engine's convention
         rather than this adapter's.
@@ -357,10 +364,16 @@ class OpenQuakeAdapter(EngineAdapter):
         body = json_body(response)
         if not isinstance(body, list):
             return []
-        # Each entry is [timestamp, level, process, message].
         return [
-            " ".join(str(part) for part in entry) if isinstance(entry, list) else str(entry)
+            [str(part) for part in entry] if isinstance(entry, list) else [str(entry)]
             for entry in body
+        ]
+
+    def log(self, calculation_id: int, *, start: int = 0, stop: int = 0) -> list[str]:
+        """Calculation log lines, assembled for reading."""
+        return [
+            " ".join(entry)
+            for entry in self.log_entries(calculation_id, start=start, stop=stop)
         ]
 
     def traceback(self, calculation_id: int) -> list[str]:

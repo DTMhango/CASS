@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ImportResults, Project, ReviewQueue } from "@/api/types";
 import { WorkingContextProvider } from "@/context/WorkingContext";
+import { choose } from "@/test/combobox";
 
 import { ImportReview } from "./ImportReview";
 
@@ -506,10 +507,8 @@ describe("ImportReview", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    // The select renders with its placeholder before the catalogue arrives,
-    // so wait for the option rather than for the control.
-    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
-    await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
+    // Opened before the catalogue may have arrived; choosing waits for the option.
+    await choose(user, await screen.findByLabelText(/Compare against/), "id-eq-0.1.0-sa");
 
     expect(await screen.findByText(/65\.0% of the selection/)).toBeInTheDocument();
     expect(
@@ -521,10 +520,8 @@ describe("ImportReview", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    // The select renders with its placeholder before the catalogue arrives,
-    // so wait for the option rather than for the control.
-    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
-    await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
+    // Opened before the catalogue may have arrived; choosing waits for the option.
+    await choose(user, await screen.findByLabelText(/Compare against/), "id-eq-0.1.0-sa");
 
     const row = (await screen.findByText(/equal location v1/)).closest("th");
     expect(row).not.toBeNull();
@@ -536,10 +533,8 @@ describe("ImportReview", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    // The select renders with its placeholder before the catalogue arrives,
-    // so wait for the option rather than for the control.
-    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
-    await user.selectOptions(screen.getByLabelText(/Compare against/), MODEL_ID);
+    // Opened before the catalogue may have arrived; choosing waits for the option.
+    await choose(user, await screen.findByLabelText(/Compare against/), "id-eq-0.1.0-sa");
 
     expect(
       await screen.findByText(/allocation assumption changes nothing here/),
@@ -551,8 +546,7 @@ describe("ImportReview", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    await screen.findAllByRole("option", { name: "id-eq-0.1.0-sa" });
-    await user.selectOptions(screen.getByLabelText(/Test against/), MODEL_ID);
+    await choose(user, await screen.findByLabelText(/Test against/), "id-eq-0.1.0-sa");
 
     expect(await screen.findByText("Reach another cell")).toBeInTheDocument();
     // The buffers are assumptions, so the card states them.

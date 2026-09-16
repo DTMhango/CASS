@@ -52,6 +52,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
+  Combobox,
   Disclosure,
   EmptyState,
   Field,
@@ -124,17 +125,15 @@ export function ImportReview({ embedded = false }: { embedded?: boolean } = {}) 
         description="Eligibility, missing model inputs and the review backlog"
         actions={
           <Field label="Import" htmlFor="import-select">
-            <Select
+            <Combobox
               id="import-select"
               value={batchId ?? ""}
-              onChange={(event) => setSelected(event.target.value as UUID)}
-            >
-              {imports.data.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.source_filename || "Imported spreadsheet"}
-                </option>
-              ))}
-            </Select>
+              onChange={(value) => setSelected(value as UUID)}
+              options={imports.data.map((item) => ({
+                value: item.id,
+                label: item.source_filename || "Imported spreadsheet",
+              }))}
+            />
           </Field>
         }
       />
@@ -202,18 +201,13 @@ function GeocodingSensitivityCard({ batchId }: { batchId: UUID }) {
         htmlFor="geocoding-model"
         hint="A model version, because the answer depends on how fine its grid is."
       >
-        <Select
+        <Combobox
           id="geocoding-model"
+          placeholder="Select a model version"
           value={modelId}
-          onChange={(event) => setModelId(event.target.value)}
-        >
-          <option value="">Select a model version</option>
-          {models.data?.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.reference}
-            </option>
-          ))}
-        </Select>
+          onChange={setModelId}
+          options={(models.data ?? []).map((item) => ({ value: item.id, label: item.reference }))}
+        />
       </Field>
 
       {report.isLoading ? <Spinner label="Trying each geocode across its area" /> : null}
@@ -324,18 +318,13 @@ function AllocationScenarios({ batchId }: { batchId: UUID }) {
         htmlFor="scenario-model"
         hint="A model version, because the comparison needs its area-peril grid."
       >
-        <Select
+        <Combobox
           id="scenario-model"
+          placeholder="Select a model version"
           value={modelId}
-          onChange={(event) => setModelId(event.target.value)}
-        >
-          <option value="">Select a model version</option>
-          {models.data?.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.reference}
-            </option>
-          ))}
-        </Select>
+          onChange={setModelId}
+          options={(models.data ?? []).map((item) => ({ value: item.id, label: item.reference }))}
+        />
       </Field>
 
       {!modelId ? (
@@ -598,18 +587,15 @@ function PromotionPanel({
               htmlFor="promote-country"
               hint="A model version covers one country, so a business with sites in two is excluded from both rather than split."
             >
-              <Select
+              <Combobox
                 id="promote-country"
                 value={country}
-                onChange={(event) => setCountry(event.target.value)}
-              >
-                <option value="">Every country in the import</option>
-                {countries.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
-                  </option>
-                ))}
-              </Select>
+                onChange={setCountry}
+                options={[
+                  { value: "", label: "Every country in the import" },
+                  ...countries.map((code) => ({ value: code, label: code })),
+                ]}
+              />
             </Field>
 
             <Field
@@ -636,21 +622,22 @@ function PromotionPanel({
               htmlFor="promote-split"
               hint="Used only where a risk states a total with no component breakdown."
             >
-              <Select
+              <Combobox
                 id="promote-split"
                 value={split}
-                onChange={(event) => setSplit(event.target.value)}
-              >
-                <option value="">
-                  {catalogue.data?.default_coverage_split ?? "Platform default"}
-                </option>
-                {catalogue.data?.coverage_splits?.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}
-                    {item.approved ? " — approved prior" : ""}
-                  </option>
-                ))}
-              </Select>
+                onChange={setSplit}
+                options={[
+                  {
+                    value: "",
+                    label: catalogue.data?.default_coverage_split ?? "Platform default",
+                  },
+                  ...(catalogue.data?.coverage_splits ?? []).map((item) => ({
+                    value: item.name,
+                    label: item.name,
+                    detail: item.approved ? "Approved prior" : undefined,
+                  })),
+                ]}
+              />
             </Field>
 
             <Field
@@ -658,21 +645,22 @@ function PromotionPanel({
               htmlFor="promote-occupancy"
               hint="Used only where a risk names none. A reported occupancy is never overwritten."
             >
-              <Select
+              <Combobox
                 id="promote-occupancy"
                 value={occupancy}
-                onChange={(event) => setOccupancy(event.target.value)}
-              >
-                <option value="">
-                  {catalogue.data?.default_occupancy ?? "Platform default"}
-                </option>
-                {catalogue.data?.occupancy_assumptions?.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}
-                    {item.approved ? " — approved prior" : ""}
-                  </option>
-                ))}
-              </Select>
+                onChange={setOccupancy}
+                options={[
+                  {
+                    value: "",
+                    label: catalogue.data?.default_occupancy ?? "Platform default",
+                  },
+                  ...(catalogue.data?.occupancy_assumptions ?? []).map((item) => ({
+                    value: item.name,
+                    label: item.name,
+                    detail: item.approved ? "Approved prior" : undefined,
+                  })),
+                ]}
+              />
             </Field>
           </div>
 

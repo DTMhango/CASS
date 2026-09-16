@@ -62,6 +62,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
+  Combobox,
   Disclosure,
   Field,
   MetricTile,
@@ -469,17 +470,12 @@ function ConfigurePanel({ model }: { model: HazardModel }) {
           htmlFor="hazard-grid"
           hint="Ground motion is computed at the centre of each cell."
         >
-          <Select
+          <Combobox
             id="hazard-grid"
             value={grid ?? ""}
-            onChange={(event) => setGridId(event.target.value as UUID)}
-          >
-            {grids.data?.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.reference}
-              </option>
-            ))}
-          </Select>
+            onChange={(value) => setGridId(value as UUID)}
+            options={(grids.data ?? []).map((item) => ({ value: item.id, label: item.reference }))}
+          />
         </Field>
         <Field
           label="Region"

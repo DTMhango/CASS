@@ -11,6 +11,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { choose } from "@/test/combobox";
+
 import { AssembleModelVersion } from "./AssembleModelVersion";
 
 let posted: Record<string, unknown>[] = [];
@@ -98,8 +100,8 @@ describe("AssembleModelVersion", () => {
     const user = userEvent.setup();
     renderCard();
 
-    await user.selectOptions(await screen.findByLabelText(/^Grid/), "g1");
-    await user.selectOptions(screen.getByLabelText(/^Vulnerability set/), "v1");
+    await choose(user, await screen.findByLabelText(/^Grid/), /ph-grid-0\.1\.0/);
+    await choose(user, screen.getByLabelText(/^Vulnerability set/), /PH 0\.1\.0-gem/);
     await user.type(screen.getByLabelText(/^Model version/), "0.1.0");
     await user.click(
       screen.getByRole("button", { name: "Assemble the model version" }),
@@ -117,8 +119,8 @@ describe("AssembleModelVersion", () => {
     const user = userEvent.setup();
     renderCard();
 
-    await user.selectOptions(await screen.findByLabelText(/^Grid/), "g1");
-    await user.selectOptions(screen.getByLabelText(/^Vulnerability set/), "v1");
+    await choose(user, await screen.findByLabelText(/^Grid/), /ph-grid-0\.1\.0/);
+    await choose(user, screen.getByLabelText(/^Vulnerability set/), /PH 0\.1\.0-gem/);
     await user.type(screen.getByLabelText(/^Model version/), "0.1.0");
     await user.click(
       screen.getByRole("button", { name: "Assemble the model version" }),
@@ -135,8 +137,8 @@ describe("AssembleModelVersion", () => {
     const user = userEvent.setup();
     renderCard();
 
-    await user.selectOptions(await screen.findByLabelText(/^Grid/), "g1");
-    await user.selectOptions(screen.getByLabelText(/^Vulnerability set/), "v1");
+    await choose(user, await screen.findByLabelText(/^Grid/), /ph-grid-0\.1\.0/);
+    await choose(user, screen.getByLabelText(/^Vulnerability set/), /PH 0\.1\.0-gem/);
     await user.type(screen.getByLabelText(/^Model version/), "0.1.0");
     await user.click(
       screen.getByRole("button", { name: "Assemble the model version" }),

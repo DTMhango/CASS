@@ -49,7 +49,7 @@ from django.db import transaction
 
 from cass_converter import pilot_bins, pilot_enrichment
 from cass_converter.enrichment import Enrichment, EnrichmentError, enrichment_from
-from cass_converter.gem import GemError
+from cass_converter.gem import GemError, country_identity
 from cass_converter.model_build import (
     BASELINE,
     CountryBuild,
@@ -433,13 +433,14 @@ def register_from_specification(
     local expertise rather than a property of the platform. This takes them as a
     document -- with the reason for each era, because that is what a reviewer
     argues with -- alongside where GEM publishes the country in the release.
+
+    The country's codes are not the specification's to state. They are read
+    from the release for the folder it names, so choosing Indonesia cannot
+    register Indonesian functions under Zambia's code and weight them through
+    Zambia's mapping. A specification that states codes anyway is held to them.
     """
     if not isinstance(document, dict):
         raise GemRegistrationError("A vulnerability specification must be an object.")
-    try:
-        written = enrichment_from(document.get("enrichment") or {})
-    except EnrichmentError as exc:
-        raise GemRegistrationError(str(exc)) from None
 
     release = document.get("gem") or {}
     region = str(release.get("region") or "").strip()
@@ -449,12 +450,26 @@ def register_from_specification(
             "The specification must say where GEM publishes this country: the region "
             "and country folder in the release, which the catalogue lists."
         )
-    if not written.iso3:
-        raise GemRegistrationError(
-            "The enrichment must state the country's ISO alpha-3 code. GEM's taxonomy "
-            "mapping file is keyed by it, and there is no rule that derives it -- only "
-            "a table, and a wrong one would read another country's mapping."
-        )
+    try:
+        identity = country_identity(root, region=region, country=folder)
+    except GemError as exc:
+        raise GemRegistrationError(str(exc)) from None
+
+    stated = dict(document.get("enrichment") or {})
+    for key, known in (("country_code", identity.country_code), ("iso3", identity.iso3)):
+        given = str(stated.get(key) or "").strip().upper()
+        if given and given != known:
+            raise GemRegistrationError(
+                f"GEM publishes {folder.replace('_', ' ')} as {identity.iso3} "
+                f"({identity.country_code}), and the enrichment states {key} {given}. "
+                "The codes follow the country chosen; leave them out and they are read "
+                "from the release."
+            )
+        stated[key] = known
+    try:
+        written = enrichment_from(stated)
+    except EnrichmentError as exc:
+        raise GemRegistrationError(str(exc)) from None
 
     stated = str(
         document.get("imt_representation") or IMTRepresentation.CORRELATED_CHANNELS

@@ -65,9 +65,12 @@ Then bring up the control plane and seed a demonstration workspace:
 
 ```bash
 make up
-make migrate
 make seed
 ```
+
+The API applies database migrations each time it starts, and `make up` returns
+once it has and is serving, so there is no separate migration step -- after a
+rebuild as much as on a first install.
 
 The interface is on <http://localhost:8080>, the API on
 <http://localhost:8000>, its documentation on

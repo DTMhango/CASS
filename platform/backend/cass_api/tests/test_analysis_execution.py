@@ -825,6 +825,56 @@ def test_repeated_identical_engine_observations_do_not_bury_the_stage_history(
     assert raw_states.count("INPUTS_GENERATION_STARTED") == 1
 
 
+def test_sub_tasks_completing_move_the_run_when_the_state_word_does_not(
+    analysis_run, analyst
+):
+    """The stretch an analyst watches is one status word and a long wait.
+
+    Which is why the fraction is kept on the run rather than in the history it
+    is deliberately not allowed to fill.
+    """
+    from apps.runs.services import _note
+    from cass_adapters.base import EngineJob, EngineState
+
+    run = analysis_run.run
+    run.transition(RunState.QUEUED, actor=analyst)
+    run.transition(RunState.RUNNING, actor=analyst)
+
+    def observed(fraction):
+        return EngineJob(
+            engine_job_id="7",
+            state=EngineState.RUNNING,
+            progress=fraction,
+            raw_state="RUN_STARTED",
+        )
+
+    _note(run, "losses", observed(0.25), analyst)
+    _note(run, "losses", observed(0.75), analyst)
+
+    run.refresh_from_db()
+    assert run.stage_progress == 0.75
+    assert run.stage_progress_label == "sub-tasks"
+    assert run.events.filter(stage="losses").count() == 1
+
+
+def test_a_run_still_going_reports_how_long_it_has_been_running(
+    api, analysis_run, analyst
+):
+    """A monitor whose clock is blank while the run goes is blank when it counts."""
+    run = analysis_run.run
+    run.transition(RunState.QUEUED, actor=analyst)
+    run.transition(RunState.RUNNING, actor=analyst)
+    Run.objects.filter(pk=run.pk).update(
+        started_at=timezone.now() - dt.timedelta(minutes=3)
+    )
+
+    shown = api.get(f"{API}/runs/{run.id}/").data
+
+    # The duration is the record of a finished run, and this one is not.
+    assert shown["duration_seconds"] is None
+    assert 175 <= shown["elapsed_seconds"] <= 190
+
+
 # -- submitting through the API ---------------------------------------------
 
 @pytest.fixture()

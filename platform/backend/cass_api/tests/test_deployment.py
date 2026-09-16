@@ -13,6 +13,7 @@ did not run.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -53,6 +54,30 @@ def test_the_scheduler_runs_exactly_once():
 
     assert beat.get("deploy", {}).get("replicas", 1) == 1
     assert "beat" in beat["command"]
+
+
+def test_the_api_migrates_before_it_serves_and_nothing_else_migrates():
+    """A rebuilt stack must not run new code against the old schema.
+
+    The API's image migrates and then starts gunicorn, and only if the migration
+    succeeded. The worker and the scheduler run that image too, so each has to
+    replace its command -- or it would migrate as well, racing the API over one
+    schema -- and wait for the API to be healthy, which it cannot be until the
+    migration has finished and gunicorn is serving.
+    """
+    dockerfile = (IMAGES / "Dockerfile.api").read_text(encoding="utf-8").replace("\\\n", "")
+    command = json.loads(re.search(r"^CMD (\[.*\])\s*$", dockerfile, re.MULTILINE).group(1))
+    declared = services()
+
+    assert re.search(r"manage\.py migrate\b.*&&.*\bgunicorn\b", command[-1]), command
+    assert "command" not in declared["api"], "the API's command would skip the migration"
+    for name in CONTROL_PLANE:
+        if name == "api":
+            continue
+        service = declared[name]
+        assert service.get("command"), f"{name} would run the API's command and migrate"
+        assert "migrate" not in " ".join(service["command"]), name
+        assert service["depends_on"]["api"]["condition"] == "service_healthy", name
 
 
 def test_every_setting_the_uploads_and_metrics_read_reaches_the_containers():

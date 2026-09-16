@@ -214,6 +214,45 @@ class AreaPerilGridViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @extend_schema(
+        request=inline_serializer(
+            name="GridEstimateRequest",
+            fields={
+                "base_resolution_deg": serializers.CharField(required=False),
+                "tiles": serializers.ListField(child=serializers.DictField(), required=False),
+                "refinements": serializers.ListField(
+                    child=serializers.DictField(), required=False
+                ),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name="GridEstimate",
+                fields={
+                    "cells": serializers.IntegerField(),
+                    "cells_from_tiles": serializers.IntegerField(),
+                    "cells_by_refinement": serializers.ListField(child=serializers.DictField()),
+                    "limit": serializers.IntegerField(),
+                    "within_limit": serializers.BooleanField(),
+                    "problems": serializers.ListField(child=serializers.CharField()),
+                },
+            )
+        },
+    )
+    @action(detail=False, methods=["post"], url_path="estimate")
+    def estimate(self, request, version=None):
+        """How many cells a specification would generate, before it is built.
+
+        The same count ``build`` guards against, answered while the
+        specification is still being written. Nothing is created, registered or
+        changed, so nothing is audited: this reads a document the caller is
+        holding and does arithmetic on it.
+        """
+        try:
+            return Response(grid_build.estimate(request.data))
+        except grid_build.GridBuildError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class VulnerabilitySetViewSet(viewsets.ModelViewSet):
     queryset = VulnerabilitySet.objects.all()
@@ -238,7 +277,9 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
 
         Read from the release each time rather than from a list inside CASS. A
         compiled-in list would be wrong the first time GEM published another
-        country, which is exactly when somebody would be looking at it.
+        country, which is exactly when somebody would be looking at it. Each
+        country carries the ISO codes its stock summary states, or the reason
+        they cannot be read.
         """
         root = gem_location.current_root()
         if not root:
@@ -246,7 +287,7 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
                 {"detail": gem_location.NOT_CONFIGURED}, status=status.HTTP_409_CONFLICT
             )
         try:
-            countries = gem_release.catalogue(root)
+            countries = gem_release.catalogue(root, identify=True)
         except gem_release.GemError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response({"release": root, "countries": list(countries)})
@@ -277,7 +318,9 @@ class VulnerabilitySetViewSet(viewsets.ModelViewSet):
         The enrichment -- which design eras a country had, what each implies and
         why -- is local expertise rather than a property of the platform, so it
         is stated here rather than compiled in. The candidate sets and weights
-        remain GEM's.
+        remain GEM's, and so do the country's codes: they are read from the
+        release for the country named, and an enrichment stating others is
+        refused.
         """
         root = gem_location.current_root()
         if not root:

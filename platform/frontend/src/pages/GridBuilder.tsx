@@ -16,12 +16,13 @@
  * compares between versions, and a float would quietly change them.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ApiError } from "@/api/client";
-import { useBuildGrid, useGrids } from "@/api/hooks";
+import { useBuildGrid, useGridEstimate, useGrids } from "@/api/hooks";
 import type {
   GridArea,
+  GridEstimate,
   GridRefinement,
   GridSpecificationInput,
 } from "@/api/types";
@@ -61,11 +62,40 @@ const EMPTY: GridSpecificationInput = {
   notes: "",
 };
 
+/** The four fields an area needs before anything can be counted inside it. */
+const CORNERS = ["min_latitude", "max_latitude", "min_longitude", "max_longitude"] as const;
+
+/**
+ * A value a moment after somebody stops changing it.
+ *
+ * The count is worth a request; the count of every intermediate number typed on
+ * the way to "0.05" is not.
+ */
+function useSettled<T>(value: T, delay = 400): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSettled(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [value, delay]);
+  return settled;
+}
+
 export function GridBuilder() {
   const grids = useGrids();
   const build = useBuildGrid();
   const [specification, setSpecification] = useState<GridSpecificationInput>(EMPTY);
   const [questions, setQuestions] = useState("");
+
+  // What the specification on the screen would generate, kept in step with it.
+  const settled = useSettled(specification);
+  const countable =
+    settled.base_resolution_deg.trim() !== "" &&
+    settled.tiles.some((tile) => CORNERS.every((corner) => tile[corner].trim() !== ""));
+  const estimate = useGridEstimate(settled, countable);
+
+  // Only where the count is in and says so: an estimate that failed to arrive
+  // must not stand between a modeller and a build the server would accept.
+  const overLimit = estimate.data?.estimated === true && !estimate.data.within_limit;
 
   const refusal = build.error as ApiError | null;
   const built = build.data;
@@ -174,6 +204,8 @@ export function GridBuilder() {
         </Field>
       </div>
 
+      <Cost estimate={estimate.data} countable={countable} />
+
       <h3 className="grid-builder__heading">Tiles</h3>
       <p className="muted">
         What is modelled. A domain stated as its tiles spends no calculation on
@@ -266,7 +298,12 @@ export function GridBuilder() {
                 .filter(Boolean),
             })
           }
-          disabled={!ready || build.isPending}
+          disabled={!ready || build.isPending || overLimit}
+          title={
+            overLimit
+              ? "This specification is over the cell limit, and the build would refuse it."
+              : undefined
+          }
         >
           {build.isPending ? "Building" : "Build the grid"}
         </Button>
@@ -299,6 +336,76 @@ export function GridBuilder() {
         <EmptyState title="No grid is registered yet" />
       )}
     </Card>
+  );
+}
+
+/**
+ * What the specification would generate, while it can still be changed.
+ *
+ * The cost of a resolution is invisible in the box it is typed into: a tenth of
+ * a degree over Indonesia is tens of thousands of cells and a hundredth is five
+ * million, and the only way to find out used to be to press the button and wait
+ * for a refusal. This is the same count the build guards against, so nothing
+ * moves underneath a specification this calls buildable.
+ *
+ * It is a count, not a duration. What a finer grid actually costs is paid later
+ * -- in the hazard calculation and the loss run -- and this platform has no
+ * honest basis yet for putting a time on that.
+ */
+function Cost({
+  estimate,
+  countable,
+}: {
+  estimate: GridEstimate | undefined;
+  countable: boolean;
+}) {
+  if (!countable || !estimate?.estimated) {
+    return (
+      <p className="grid-builder__cost muted">
+        A base resolution and one complete tile are enough to count what this would
+        generate.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid-builder__cost">
+      <p className="grid-builder__count">
+        {formatCount(estimate.cells)} cells
+        {estimate.is_upper_bound ? " at most" : ""}
+      </p>
+      <p className="muted">
+        {formatCount(estimate.cells_from_tiles)} at the base resolution
+        {estimate.cells_by_refinement.map(
+          (item) =>
+            `, ${formatCount(item.cells)} in ${item.name} at ${item.resolution_deg}°`,
+        )}
+        {estimate.is_upper_bound
+          ? ". Refined cells replace the base cells beneath them, and both are counted here."
+          : "."}
+        {estimate.incomplete > 0
+          ? ` ${estimate.incomplete} area${estimate.incomplete === 1 ? " is" : "s are"} not counted, being still unfinished.`
+          : ""}
+      </p>
+
+      {estimate.within_limit ? null : (
+        <Notice tone="warning" title="More cells than this installation builds">
+          The limit is {formatCount(estimate.limit)}. Resolution is quadratic: halving
+          it quadruples the count. Coarsen the base resolution, narrow the tiles, or
+          refine a smaller area.
+        </Notice>
+      )}
+
+      {estimate.problems.length > 0 ? (
+        <Notice tone="warning" title="The build would refuse this">
+          <ul className="grid-builder__problems">
+            {estimate.problems.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+        </Notice>
+      ) : null}
+    </div>
   );
 }
 

@@ -34,6 +34,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
+  Combobox,
   Field,
   Notice,
   PageHeader,
@@ -205,39 +206,34 @@ export function AnalysisBuilder() {
             htmlFor="builder-exposure"
             hint="Only published versions may be used, so the input is fixed for the life of the run."
           >
-            <Select
+            <Combobox
               id="builder-exposure"
+              placeholder="Select a portfolio"
               value={context.exposureId ?? ""}
-              onChange={(event) =>
-                context.setExposure(exposures?.find((item) => item.id === event.target.value))
+              onChange={(value) =>
+                context.setExposure(exposures?.find((item) => item.id === value))
               }
-            >
-              <option value="">Select a portfolio</option>
-              {exposures?.map((item) => (
-                <option key={item.id} value={item.id} disabled={!item.is_usable_by_runs}>
-                  {item.name} v{item.version}
-                  {item.is_usable_by_runs ? "" : " (draft)"}
-                </option>
-              ))}
-            </Select>
+              options={(exposures ?? []).map((item) => ({
+                value: item.id,
+                label: `${item.name} v${item.version}`,
+                detail: item.is_usable_by_runs ? undefined : "Draft: publish it to use it in a run",
+                disabled: !item.is_usable_by_runs,
+              }))}
+            />
           </Field>
 
           <Field label="Model version" htmlFor="builder-model">
-            <Select
+            <Combobox
               id="builder-model"
+              placeholder="Select a model version"
               value={context.modelId ?? ""}
-              onChange={(event) =>
-                context.setModel(models?.find((item) => item.id === event.target.value))
-              }
-            >
-              <option value="">Select a model version</option>
-              {models?.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.reference}
-                  {item.is_research_prototype ? " (research only)" : ""}
-                </option>
-              ))}
-            </Select>
+              onChange={(value) => context.setModel(models?.find((item) => item.id === value))}
+              options={(models ?? []).map((item) => ({
+                value: item.id,
+                label: item.reference,
+                detail: item.is_research_prototype ? "Research only" : undefined,
+              }))}
+            />
           </Field>
 
           <Field
@@ -245,24 +241,25 @@ export function AnalysisBuilder() {
             htmlFor="builder-assumptions"
             hint="How unknown construction, height and design are weighted. The keys and the insured value are the same under every set; only the damage behind them moves."
           >
-            <Select
+            <Combobox
               id="builder-assumptions"
               value={chosenSet?.id ?? ""}
-              onChange={(event) => setAssumptionSet(event.target.value)}
+              onChange={setAssumptionSet}
               disabled={!model?.assumption_sets?.length}
-            >
-              <option value="">
-                {model?.assumption_sets?.length
-                  ? "Baseline weights the model was built with"
-                  : "This model version carries no assumption sets"}
-              </option>
-              {model?.assumption_sets?.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                  {item.approved ? "" : " (not approved: research output)"}
-                </option>
-              ))}
-            </Select>
+              options={[
+                {
+                  value: "",
+                  label: model?.assumption_sets?.length
+                    ? "Baseline weights the model was built with"
+                    : "This model version carries no assumption sets",
+                },
+                ...(model?.assumption_sets ?? []).map((item) => ({
+                  value: item.id,
+                  label: item.label,
+                  detail: item.approved ? undefined : "Not approved: research output",
+                })),
+              ]}
+            />
           </Field>
 
           <Field

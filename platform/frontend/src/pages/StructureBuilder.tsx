@@ -31,7 +31,7 @@ import type {
   FinancialStructureSummary,
   PolicyLayerInput,
 } from "@/api/types";
-import { Button, Card, Field, Notice, Select, TextInput } from "@/components/primitives";
+import { Button, Card, Combobox, Field, Notice, Select, TextInput } from "@/components/primitives";
 
 import "./GridBuilder.css";
 
@@ -164,14 +164,13 @@ function PolicyForm({ exposure, accounts }: { exposure: ExposureVersion; account
       <Refused error={add.error} />
       <div className="grid-builder__row">
         <Field label="Account" htmlFor="policy-account" required>
-          <Select id="policy-account" value={account} onChange={(event) => setAccount(event.target.value)}>
-            <option value="">Choose an account</option>
-            {accounts.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </Select>
+          <Combobox
+            id="policy-account"
+            placeholder="Choose an account"
+            value={account}
+            onChange={setAccount}
+            options={accounts.map((item) => ({ value: item, label: item }))}
+          />
         </Field>
         <Field label="Policy reference" htmlFor="policy-reference" required>
           <TextInput id="policy-reference" value={policy} onChange={(event) => setPolicy(event.target.value)} />
@@ -464,35 +463,29 @@ function ContractForm({
         ? scope.map((row, index) => (
             <div className="grid-builder__row" key={index}>
               <Field label={`Risk ${index + 1} account`} htmlFor={`scope-${index}-account`}>
-                <Select
+                <Combobox
                   id={`scope-${index}-account`}
+                  placeholder="Choose an account"
                   value={row.account}
-                  onChange={(event) => setScopeRow(index, { account: event.target.value, location: "" })}
-                >
-                  <option value="">Choose an account</option>
-                  {accounts.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </Select>
+                  onChange={(value) => setScopeRow(index, { account: value, location: "" })}
+                  options={accounts.map((item) => ({ value: item, label: item }))}
+                />
               </Field>
               {type !== "SS" || riskLevel === "LOC" ? (
                 <Field label={`Risk ${index + 1} location`} htmlFor={`scope-${index}-location`}>
-                  <Select
+                  <Combobox
                     id={`scope-${index}-location`}
+                    placeholder={type === "SS" ? "Choose a location" : undefined}
                     value={row.location ?? ""}
-                    onChange={(event) => setScopeRow(index, { location: event.target.value })}
-                  >
-                    <option value="">{type === "SS" ? "Choose a location" : "The whole account"}</option>
-                    {locations
-                      .filter((item) => item.account === row.account)
-                      .map((item) => (
-                        <option key={item.location} value={item.location}>
-                          {item.location}
-                        </option>
-                      ))}
-                  </Select>
+                    onChange={(value) => setScopeRow(index, { location: value })}
+                    options={[
+                      // A surplus share at location level must name one; other contracts may take the whole account.
+                      ...(type === "SS" ? [] : [{ value: "", label: "The whole account" }]),
+                      ...locations
+                        .filter((item) => item.account === row.account)
+                        .map((item) => ({ value: item.location, label: item.location })),
+                    ]}
+                  />
                 </Field>
               ) : null}
               {type === "SS" && riskLevel === "POL" ? (

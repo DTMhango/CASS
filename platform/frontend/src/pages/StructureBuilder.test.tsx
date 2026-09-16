@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExposureVersion, FinancialStructureSummary } from "@/api/types";
+import { choose } from "@/test/combobox";
 
 import { StructureBuilder } from "./StructureBuilder";
 
@@ -100,8 +101,7 @@ describe("StructureBuilder", () => {
     const user = userEvent.setup();
     renderBuilder(DRAFT);
 
-    await screen.findByRole("option", { name: "ACC-1" });
-    await user.selectOptions(screen.getAllByLabelText(/^Account/)[0]!, "ACC-1");
+    await choose(user, (await screen.findAllByLabelText(/^Account/))[0]!, "ACC-1");
     await user.type(screen.getByLabelText(/^Policy reference/), "POL-1");
     await user.type(screen.getByLabelText(/^Layer 1 limit/), "5000000");
     await user.click(screen.getByRole("button", { name: "Add a layer" }));
@@ -145,12 +145,11 @@ describe("StructureBuilder", () => {
     const user = userEvent.setup();
     renderBuilder(DRAFT);
 
-    await screen.findAllByRole("option", { name: "ACC-1" });
-    await user.selectOptions(screen.getByLabelText(/^Contract type/), "SS");
+    await user.selectOptions(await screen.findByLabelText(/^Contract type/), "SS");
     expect(screen.queryByLabelText(/^Covers/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Name a risk" }));
-    await user.selectOptions(screen.getByLabelText(/^Risk 1 account/), "ACC-1");
-    await user.selectOptions(screen.getByLabelText(/^Risk 1 location/), "LOC-1");
+    await choose(user, screen.getByLabelText(/^Risk 1 account/), "ACC-1");
+    await choose(user, screen.getByLabelText(/^Risk 1 location/), "LOC-1");
     await user.type(screen.getByLabelText(/^Risk 1 ceded share/), "0.4");
     await user.click(screen.getByRole("button", { name: "Write the contract" }));
 

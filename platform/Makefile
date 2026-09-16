@@ -111,13 +111,25 @@ schema: ## Regenerate the OpenAPI schema, failing on any warning
 
 # -- running ----------------------------------------------------------------
 
+# The API applies migrations when it starts, and both targets return only once
+# it is serving, so a seed or a first request never meets an unmigrated schema.
+#
+# The scheduler is part of the control plane: it runs the API's image, so an up
+# that rebuilt the image without recreating it would leave it on the old code.
+#
+# up-engines cannot pass --wait to its own up. The keys and converter images
+# prove their package imports and exit 0, which --wait reports as a failure, so
+# it starts everything and then waits on the control plane alone.
+CONTROL_PLANE := api worker beat
+
 .PHONY: up
-up: ## Start the control plane (no engines)
-	$(COMPOSE) up -d --build postgres redis minio minio-init api worker frontend
+up: ## Start the control plane (no engines), once migrated and serving
+	$(COMPOSE) up -d --build --wait postgres redis minio minio-init $(CONTROL_PLANE) frontend
 
 .PHONY: up-engines
 up-engines: ## Start everything, including OpenQuake and Oasis
 	$(COMPOSE) --profile engines up -d --build
+	$(COMPOSE) up -d --wait $(CONTROL_PLANE)
 
 .PHONY: down
 down: ## Stop the stack, keeping volumes
@@ -132,15 +144,18 @@ logs: ## Follow the API and worker logs
 	$(COMPOSE) logs -f api worker
 
 .PHONY: migrate
-migrate: ## Apply database migrations
+migrate: ## Apply migrations now; the API also applies them whenever it starts
 	$(COMPOSE) run --rm api python manage.py migrate
 
+# Both need a migrated schema, which the API provides by starting.
 .PHONY: superuser
 superuser: ## Create a platform administrator
+	$(COMPOSE) up -d --wait api
 	$(COMPOSE) run --rm api python manage.py createsuperuser
 
 .PHONY: seed
 seed: ## Load the demonstration project, model version and PiWind portfolio
+	$(COMPOSE) up -d --wait api
 	$(COMPOSE) run --rm api python manage.py seed_demo
 
 .PHONY: dev-api

@@ -128,6 +128,86 @@ def estimated_cells(specification: grids.GridSpecification) -> int:
     return total
 
 
+def estimate(document: Any) -> dict[str, Any]:
+    """What a specification would generate, before anything is generated.
+
+    Resolution is quadratic in cost and a modeller cannot see that from a
+    number typed into a box: 0.1 degrees over Indonesia is tens of thousands of
+    cells and 0.01 is millions, and until now the only way to find out which
+    was to press the button. This answers the same question ``build`` asks
+    itself, so a specification this calls within the limit is one that builds.
+
+    Written for a specification still being typed, so it refuses almost
+    nothing. An area still missing a corner is left out of the count and
+    reported as incomplete rather than turning the whole answer into an error,
+    and a contradiction the build would refuse -- a refinement no finer than the
+    base -- is named while the person is still in a position to change it.
+    """
+    if not isinstance(document, dict):
+        raise GridBuildError("A grid specification must be an object.")
+
+    problems: list[str] = []
+    incomplete = 0
+
+    base = _resolution_or_none(document, "base_resolution_deg", "The base resolution", problems)
+
+    cells_from_tiles = 0
+    counted_tiles = 0
+    for position, item in enumerate(_items(document, "tiles", required=False), start=1):
+        stated = len(problems)
+        box = _box_or_none(item, f"Tile {_name_of(item, 'Tile', position)!r}", problems)
+        if box is None:
+            # An area is either wrong, and named above, or simply not finished
+            # being typed. Never reported as both.
+            if len(problems) == stated:
+                incomplete += 1
+            continue
+        counted_tiles += 1
+        if base is not None:
+            cells_from_tiles += _cells_in(box, base)
+
+    by_refinement: list[dict[str, Any]] = []
+    for position, item in enumerate(_items(document, "refinements", required=False), start=1):
+        name = _name_of(item, "Refinement", position)
+        stated = len(problems)
+        box = _box_or_none(item, f"Refinement {name!r}", problems)
+        resolution = _resolution_or_none(
+            item, "resolution_deg", f"Refinement {name!r}", problems
+        )
+        if box is None or resolution is None:
+            if len(problems) == stated:
+                incomplete += 1
+            continue
+        if base is not None and resolution >= base:
+            problems.append(
+                f"Refinement {name!r} is at {resolution} degrees, which is not finer "
+                f"than the base {base}. A refinement that does not refine is a "
+                "specification error."
+            )
+        by_refinement.append(
+            {"name": name, "resolution_deg": str(resolution), "cells": _cells_in(box, resolution)}
+        )
+
+    cells = cells_from_tiles + sum(item["cells"] for item in by_refinement)
+    limit = maximum_cells()
+    return {
+        "cells": cells,
+        "cells_from_tiles": cells_from_tiles,
+        "cells_by_refinement": by_refinement,
+        "counted_tiles": counted_tiles,
+        "incomplete": incomplete,
+        "problems": problems,
+        "limit": limit,
+        "within_limit": cells <= limit,
+        # The same upper bound the build guards against, so the two can never
+        # disagree about whether a specification is buildable. It counts a
+        # refined cell and the base cell it replaces, which overstates by the
+        # area of the refinements and never understates.
+        "is_upper_bound": bool(by_refinement),
+        "estimated": base is not None and counted_tiles > 0,
+    }
+
+
 @transaction.atomic
 def build(document: Any, *, actor=None) -> tuple[AreaPerilGrid, dict[str, Any]]:
     """Build and register the grid a specification describes.
@@ -297,6 +377,49 @@ def _box(document: dict[str, Any], what: str) -> grids.Box:
         )
     except grids.GridSpecificationError as exc:
         raise GridBuildError(f"{what}: {exc}") from None
+
+
+def _name_of(item: dict[str, Any], what: str, position: int) -> str:
+    """What to call an area in a count, including one not yet named."""
+    name = item.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else f"{what} {position}"
+
+
+def _box_or_none(
+    item: dict[str, Any], what: str, problems: list[str]
+) -> grids.Box | None:
+    """One area's box, where it has one yet.
+
+    A box still being typed is absent, and an impossible one -- a latitude range
+    that runs backwards -- is a mistake worth saying out loud straight away
+    rather than at the end. The two are not the same thing and are not reported
+    as though they were.
+    """
+    corners = ("min_latitude", "max_latitude", "min_longitude", "max_longitude")
+    if any(item.get(corner) in (None, "") for corner in corners):
+        return None
+    try:
+        return _box(item, what)
+    except GridBuildError as exc:
+        problems.append(str(exc))
+        return None
+
+
+def _resolution_or_none(
+    item: dict[str, Any], name: str, what: str, problems: list[str]
+) -> Decimal | None:
+    """A resolution, where one has been typed and could be a resolution."""
+    if item.get(name) in (None, ""):
+        return None
+    try:
+        resolution = _decimal(item, name, what)
+    except GridBuildError as exc:
+        problems.append(str(exc))
+        return None
+    if resolution <= 0:
+        problems.append(f"{what} must be positive.")
+        return None
+    return resolution
 
 
 def _cells_in(box: grids.Box, resolution: Decimal) -> int:

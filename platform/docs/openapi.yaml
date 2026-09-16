@@ -3237,6 +3237,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/GridBuildResult'
           description: ''
+  /api/v1/grids/estimate/:
+    post:
+      operationId: api_v1_grids_estimate_create
+      description: |-
+        How many cells a specification would generate, before it is built.
+
+        The same count ``build`` guards against, answered while the
+        specification is still being written. Nothing is created, registered or
+        changed, so nothing is audited: this reads a document the caller is
+        holding and does arithmetic on it.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GridEstimateRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GridEstimateRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GridEstimateRequestRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GridEstimate'
+          description: ''
   /api/v1/hazard-benchmarks/:
     get:
       operationId: api_v1_hazard_benchmarks_list
@@ -6187,7 +6220,9 @@ paths:
         The enrichment -- which design eras a country had, what each implies and
         why -- is local expertise rather than a property of the platform, so it
         is stated here rather than compiled in. The candidate sets and weights
-        remain GEM's.
+        remain GEM's, and so do the country's codes: they are read from the
+        release for the country named, and an enrichment stating others is
+        refused.
       tags:
       - api
       requestBody:
@@ -6220,7 +6255,9 @@ paths:
 
         Read from the release each time rather than from a list inside CASS. A
         compiled-in list would be wrong the first time GEM published another
-        country, which is exactly when somebody would be looking at it.
+        country, which is exactly when somebody would be looking at it. Each
+        country carries the ISO codes its stock summary states, or the reason
+        they cannot be read.
       tags:
       - api
       security:
@@ -7710,6 +7747,49 @@ components:
       required:
       - grid
       - summary
+    GridEstimate:
+      type: object
+      properties:
+        cells:
+          type: integer
+        cells_from_tiles:
+          type: integer
+        cells_by_refinement:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        limit:
+          type: integer
+        within_limit:
+          type: boolean
+        problems:
+          type: array
+          items:
+            type: string
+      required:
+      - cells
+      - cells_by_refinement
+      - cells_from_tiles
+      - limit
+      - problems
+      - within_limit
+    GridEstimateRequestRequest:
+      type: object
+      properties:
+        base_resolution_deg:
+          type: string
+          minLength: 1
+        tiles:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        refinements:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
     GridSpecificationRequestRequest:
       type: object
       properties:
@@ -10227,6 +10307,14 @@ components:
           type: number
           format: double
           readOnly: true
+        stage_progress:
+          type: number
+          format: double
+          readOnly: true
+          nullable: true
+        stage_progress_label:
+          type: string
+          readOnly: true
         pipeline:
           type: array
           items:
@@ -10259,6 +10347,16 @@ components:
           type: integer
           readOnly: true
           nullable: true
+        elapsed_seconds:
+          type: integer
+          nullable: true
+          description: |-
+            Time on the clock now, beside the ``duration_seconds`` finally kept.
+
+            Both are sent. The duration is the record of a finished run, and this is
+            what a monitor shows while it is still going, measured on the server so
+            a browser's own clock cannot tell the analyst a different story.
+          readOnly: true
         peak_memory_mb:
           type: integer
           readOnly: true
@@ -10305,6 +10403,7 @@ components:
       - correlation_id
       - created_at
       - duration_seconds
+      - elapsed_seconds
       - execution_profile
       - failure_detail
       - failure_stage
@@ -10328,6 +10427,8 @@ components:
       - settings_hash
       - stage
       - stage_label
+      - stage_progress
+      - stage_progress_label
       - started_at
       - state
     RunExceptionRequestRequest:

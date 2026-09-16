@@ -11,7 +11,7 @@
  * workers actually follow.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
@@ -56,14 +56,52 @@ import { formatBytes, formatDateTime, formatDuration, formatMoney } from "@/lib/
 
 import "./RunMonitor.css";
 
+/**
+ * A clock that ticks while something on the page is still moving.
+ *
+ * The server says how long a run has been going and the queries refresh every
+ * few seconds; this fills the seconds in between, so an analyst watching a run
+ * sees a clock rather than a number that jumps.
+ */
+function useTicker(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+/**
+ * How long the run has been going, counted on from what the server last said.
+ *
+ * Measured from the server's own figure rather than from the start time and
+ * this browser's clock: the two are not the same, and a monitor that quietly
+ * told an analyst a run had been going for an hour longer than it had would be
+ * worse than the blank it replaces.
+ */
+function elapsed(run: Run, fetchedAt: number, now: number): number | null {
+  if (run.elapsed_seconds === null) return null;
+  if (run.finished_at) return run.elapsed_seconds;
+  return run.elapsed_seconds + Math.max(0, Math.round((now - fetchedAt) / 1_000));
+}
+
+/** A run that has started and not finished is one whose clock is still going. */
+function isRunning(run: Run): boolean {
+  return run.started_at !== null && run.finished_at === null;
+}
+
 export function RunMonitor() {
   const { runId } = useParams();
   const context = useWorkingContext();
-  const { data: runs, isLoading } = useRuns(context.projectId);
-  const { data: run } = useRun(runId);
+  const runs = useRuns(context.projectId);
+  const run = useRun(runId);
+  const ticking = useTicker((runs.data ?? []).some(isRunning));
 
-  if (runId && run) return <RunDetail run={run} />;
-  if (isLoading) return <Spinner label="Loading runs" />;
+  if (runId && run.data) return <RunDetail run={run.data} fetchedAt={run.dataUpdatedAt} />;
+  if (runs.isLoading) return <Spinner label="Loading runs" />;
 
   return (
     <>
@@ -71,7 +109,7 @@ export function RunMonitor() {
         title="Run monitor"
         description="Every hazard, conversion and analysis run, with the stage it reached and the evidence it produced. Work continues whether or not this page stays open."
       />
-      {runs && runs.length > 0 ? (
+      {runs.data && runs.data.length > 0 ? (
         <Card padded={false}>
           <table className="data-table">
             <thead>
@@ -85,7 +123,7 @@ export function RunMonitor() {
               </tr>
             </thead>
             <tbody>
-              {runs.map((item) => (
+              {runs.data.map((item) => (
                 <tr key={item.id}>
                   <th scope="row">
                     <Link to={`/runs/${item.id}`}>{item.label || item.id.slice(0, 8)}</Link>
@@ -95,7 +133,9 @@ export function RunMonitor() {
                     <RunStateBadge state={item.state} size="sm" />
                   </td>
                   <td className="muted">{item.stage_label || "—"}</td>
-                  <td className="numeric">{formatDuration(item.duration_seconds)}</td>
+                  <td className="numeric">
+                    {formatDuration(elapsed(item, runs.dataUpdatedAt, ticking))}
+                  </td>
                   <td className="muted">{formatDateTime(item.started_at)}</td>
                 </tr>
               ))}
@@ -114,7 +154,8 @@ export function RunMonitor() {
   );
 }
 
-function RunDetail({ run }: { run: Run }) {
+function RunDetail({ run, fetchedAt }: { run: Run; fetchedAt: number }) {
+  const ticking = useTicker(isRunning(run));
   const cancel = useCancelRun(run.id);
   const retry = useRetryRun(run.id);
   const { data: events } = useRunEvents(run.id, run.is_active);
@@ -212,7 +253,9 @@ function RunDetail({ run }: { run: Run }) {
             <RunFact term="Queued">{formatDateTime(run.queued_at)}</RunFact>
             <RunFact term="Started">{formatDateTime(run.started_at)}</RunFact>
             <RunFact term="Finished">{formatDateTime(run.finished_at)}</RunFact>
-            <RunFact term="Elapsed">{formatDuration(run.duration_seconds)}</RunFact>
+            <RunFact term="Elapsed">
+              {formatDuration(elapsed(run, fetchedAt, ticking))}
+            </RunFact>
             <RunFact term="Peak memory">
               {run.peak_memory_mb ? `${run.peak_memory_mb} MB` : "—"}
             </RunFact>
@@ -575,13 +618,21 @@ function Pipeline({ run }: { run: Run }) {
 
   return (
     <ol className="pipeline">
-      {run.pipeline.map((stage, index) => (
-        <PipelineStep
-          key={stage.key}
-          stage={stage}
-          status={stepStatus(index, currentIndex, run)}
-        />
-      ))}
+      {run.pipeline.map((stage, index) => {
+        const status = stepStatus(index, currentIndex, run);
+        return (
+          <PipelineStep
+            key={stage.key}
+            stage={stage}
+            status={status}
+            // The engine's own position, and only on the stage it is working
+            // in: the calculation stages are where the hours go, and the stage
+            // list says nothing at all for the whole of one.
+            progress={status === "current" ? run.stage_progress : null}
+            progressLabel={run.stage_progress_label}
+          />
+        );
+      })}
     </ol>
   );
 }
@@ -598,7 +649,17 @@ function stepStatus(index: number, currentIndex: number, run: Run): StepStatus {
   return "current";
 }
 
-function PipelineStep({ stage, status }: { stage: PipelineStage; status: StepStatus }) {
+function PipelineStep({
+  stage,
+  status,
+  progress,
+  progressLabel,
+}: {
+  stage: PipelineStage;
+  status: StepStatus;
+  progress?: number | null;
+  progressLabel?: string;
+}) {
   const tone = {
     done: "ok",
     current: "running",
@@ -624,11 +685,45 @@ function PipelineStep({ stage, status }: { stage: PipelineStage; status: StepSta
           ) : null}
         </p>
         <p className="pipeline__description">{stage.description}</p>
+        {progress === null || progress === undefined ? null : (
+          <StageProgress fraction={progress} label={progressLabel ?? ""} />
+        )}
       </div>
       <StatusBadge tone={tone[status]} size="sm">
         {status}
       </StatusBadge>
     </li>
+  );
+}
+
+/**
+ * How far into the stage the engine says it is.
+ *
+ * Shown with the name of what is being counted, never as a bare bar. OpenQuake
+ * reports a percentage for each phase of a calculation and starts again at zero
+ * for the next one, so "72%" alone would tell an analyst the run was nearly
+ * done three separate times. "72% · classical" is what the engine actually
+ * said. It is a position, not a prediction: nothing here estimates a finish.
+ */
+function StageProgress({ fraction, label }: { fraction: number; label: string }) {
+  const percent = Math.round(fraction * 100);
+  const described = label ? `${percent}% through ${label}` : `${percent}% through this stage`;
+
+  return (
+    <p className="stage-progress">
+      <span
+        className="stage-progress__track"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={described}
+      >
+        <span className="stage-progress__fill" style={{ width: `${percent}%` }} />
+      </span>
+      <span className="stage-progress__figure numeric">{percent}%</span>
+      {label ? <span className="muted stage-progress__label">{label}</span> : null}
+    </p>
   );
 }
 

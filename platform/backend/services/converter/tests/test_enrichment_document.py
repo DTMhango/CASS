@@ -16,8 +16,15 @@ from __future__ import annotations
 
 import pytest
 
+from cass_converter import iso3166
 from cass_converter.enrichment import EnrichmentError, Weighting, enrichment_from
-from cass_converter.gem import GemError, LossCategory, catalogue
+from cass_converter.gem import (
+    CountryIdentity,
+    GemError,
+    LossCategory,
+    catalogue,
+    country_identity,
+)
 
 
 def document(category: str) -> bytes:
@@ -182,3 +189,63 @@ def test_a_folder_with_no_vulnerability_files_is_not_a_country(tmp_path):
 def test_a_release_that_is_not_one_is_refused(tmp_path):
     with pytest.raises(GemError, match="not a directory"):
         catalogue(tmp_path / "nothing-here")
+
+
+def stock_summary(root, *, region: str, country: str, rows: str) -> None:
+    folder = root / "global_exposure_model" / region / country / "summaries"
+    folder.mkdir(parents=True)
+    (folder / "Exposure_Summary_Taxonomy.csv").write_text(
+        "ID_0,NAME_0,OCCUPANCY,MACRO_TAXONOMY,TAXONOMY,SETTLEMENT,BUILDINGS,BLDG_REPL_COST_USD\n"
+        + rows,
+        encoding="utf-8",
+    )
+
+
+def test_a_country_s_codes_are_read_from_its_stock_summary(tmp_path):
+    """GEM states the alpha-3; the alpha-2 is ISO 3166-1's, not somebody's typing."""
+    release(tmp_path, region="Europe", country="Iceland")
+    stock_summary(
+        tmp_path,
+        region="Europe",
+        country="Iceland",
+        rows="ISL,Iceland,COM,CR+,CR/LFINF/CDH+ERH/H:2/COM,TOTAL,1,100\n",
+    )
+
+    assert country_identity(tmp_path, region="Europe", country="Iceland") == CountryIdentity(
+        iso3="ISL", country_code="IS"
+    )
+    [found] = catalogue(tmp_path, identify=True)
+    assert (found["iso3"], found["country_code"], found["problem"]) == ("ISL", "IS", "")
+
+
+def test_a_country_with_no_stock_summary_is_listed_with_the_reason(tmp_path):
+    """GEM names Turkey's two folders differently, so the pair does not meet."""
+    release(tmp_path, region="Europe", country="Turkey")
+
+    [found] = catalogue(tmp_path, identify=True)
+
+    assert found["country"] == "Turkey"
+    assert found["iso3"] == ""
+    assert "no stock summary for Turkey" in found["problem"]
+
+
+def test_a_code_outside_iso_3166_is_refused(tmp_path):
+    release(tmp_path)
+    stock_summary(
+        tmp_path,
+        region="Southeast_Asia",
+        country="Atlantis",
+        rows="ATL,Atlantis,COM,CR-,CR/LFINF/CDL+ERM/H:2/COM,TOTAL,1,100\n",
+    )
+
+    with pytest.raises(GemError, match="not an ISO 3166-1 alpha-3 code"):
+        country_identity(tmp_path, region="Southeast_Asia", country="Atlantis")
+
+
+def test_iso_3166_maps_each_alpha_3_to_one_alpha_2():
+    assert iso3166.alpha_2("idn") == "ID"
+    assert iso3166.alpha_2("XKX") == "XK"
+    assert iso3166.alpha_2("ATL") == ""
+    codes = list(iso3166.ALPHA_2.values())
+    assert len(codes) == len(set(codes))
+    assert all(len(code) == 2 and code.isupper() for code in codes)

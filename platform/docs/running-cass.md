@@ -73,12 +73,16 @@ mounted read-only rather than baked into an image.
 
 ```bash
 make up-engines     # everything, including OpenQuake and Oasis
-make migrate
 make seed           # a demonstration project and the PiWind portfolio
 ```
 
 `make up` starts the control plane alone, which is enough for everything except
 running a calculation. Use `up-engines` for a real run.
+
+The API applies database migrations each time it starts, before it serves, and
+both commands return only once it is serving. After changing the code, run
+`make up-engines` again: it rebuilds the images CASS builds, recreates the
+containers whose image changed, and migrates. Your data is kept.
 
 - Interface: <http://localhost:8080>
 - API and its documentation: <http://localhost:8000>, `/api/docs/`
@@ -114,10 +118,13 @@ are quick. The third is the calculation.
 named refinements and the reason for each — and post it. CASS generates the
 cells and registers the grid as a draft.
 
-A specification that would exceed the installation's cell limit is refused with
-its own count, before anything is generated.
+The screen counts the cells as you write, so the cost of a resolution is visible
+before you build: cost is quadratic, and halving the resolution quadruples the
+count. A specification over the installation's cell limit is said to be over it
+there, and refused with its own count if it is posted anyway.
 
-*API:* `POST /api/v1/grids/build/`
+*API:* `POST /api/v1/grids/build/`, and `POST /api/v1/grids/estimate/` for the
+count on its own.
 
 ### 5. Build a vulnerability set
 
@@ -125,6 +132,12 @@ its own count, before anything is generated.
 enrichment: the design eras and the reason for each. The enrichment is posted
 with the build rather than compiled in, because it is the assumption behind
 every function — so the set's version follows it.
+
+The country's ISO codes are not typed. The alpha-3 is read from GEM's stock
+summary for the country and the alpha-2 follows from ISO 3166-1, so a set cannot
+be registered under another country's code. Cape Verde and Turkey are listed but
+cannot be built: GEM's two repositories name their folders differently
+(`Cabo_Verde`, `Turkiye`), so their functions have no stock summary to meet.
 
 An era table that is out of order, ends before today, or names a design level
 GEM does not use is refused.
@@ -376,3 +389,9 @@ affects.
 Logs: `make logs` follows the API and worker. Every run also carries its own
 event log on the **Runs** screen, and a correlation ID that travels into the
 worker's structured logs.
+
+While a run is going, the **Runs** screen shows the clock running and, on the
+stage it is in, how far through the engine says it is — OpenQuake's own
+percentage for the phase it names, Oasis's completed sub-tasks. Neither is a
+time remaining: nothing here predicts when a calculation will finish. The
+timing note in step 6 is the only guide to that.

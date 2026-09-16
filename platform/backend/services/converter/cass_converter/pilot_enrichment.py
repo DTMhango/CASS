@@ -39,7 +39,7 @@ from .enrichment import (
     read_stock_prior,
     read_taxonomy_mapping,
 )
-from .gem import LossCategory, VulnerabilityModel, read_country
+from .gem import LossCategory, VulnerabilityModel, read_country, stock_summary_path
 
 #: Bumped with any change to a country's eras or overrides.
 PILOT_VERSION = "0.1.0-draft"
@@ -206,14 +206,10 @@ def load(
         categories=categories,
     )
     prior = read_stock_prior(
-        base
-        / "global_exposure_model"
-        / region
-        / name
-        / "summaries"
-        / "Exposure_Summary_Taxonomy.csv",
+        stock_summary_path(base, region=region, country=name),
         country_code=chosen.country_code,
         weighting=chosen.weighting,
+        iso3=chosen.iso3,
     )
     if use_published_mapping:
         mapping = read_taxonomy_mapping(base / MAPPING_PATH, iso3=chosen.iso3)

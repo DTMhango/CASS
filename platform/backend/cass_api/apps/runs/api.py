@@ -51,13 +51,16 @@ class RunSerializer(serializers.ModelSerializer):
     may_publish_results = serializers.BooleanField(read_only=True)
     is_active = serializers.BooleanField(read_only=True)
     pipeline = serializers.SerializerMethodField()
+    elapsed_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Run
         fields = [
             "id", "kind", "project", "label", "state", "stage", "stage_label",
-            "progress", "pipeline", "execution_profile", "correlation_id",
+            "progress", "stage_progress", "stage_progress_label",
+            "pipeline", "execution_profile", "correlation_id",
             "queued_at", "started_at", "finished_at", "duration_seconds",
+            "elapsed_seconds",
             "peak_memory_mb", "failure_stage", "failure_summary", "failure_detail",
             "gate_summary", "gate_detail", "manifest",
             "settings_hash", "retry_of", "may_retry", "may_publish_results",
@@ -67,6 +70,15 @@ class RunSerializer(serializers.ModelSerializer):
 
     def get_stage_label(self, obj) -> str:
         return obj.stage_label()
+
+    def get_elapsed_seconds(self, obj) -> int | None:
+        """Time on the clock now, beside the ``duration_seconds`` finally kept.
+
+        Both are sent. The duration is the record of a finished run, and this is
+        what a monitor shows while it is still going, measured on the server so
+        a browser's own clock cannot tell the analyst a different story.
+        """
+        return obj.elapsed_seconds
 
     def get_pipeline(self, obj) -> list[dict]:
         return describe(obj.kind)

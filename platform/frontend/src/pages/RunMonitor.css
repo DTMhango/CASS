@@ -103,6 +103,39 @@
   color: var(--grey-600);
 }
 
+/* How far into the stage the engine says it is. Only ever drawn for the stage
+   a run is actually in, and always beside the name of what is being counted:
+   OpenQuake restarts its percentage for each phase of a calculation. */
+
+.stage-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.stage-progress__track {
+  flex: 0 1 12rem;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--grey-200);
+  overflow: hidden;
+}
+
+.stage-progress__fill {
+  display: block;
+  height: 100%;
+  background: var(--status-info);
+  /* The number moves in whole per cent, a poll apart; without this the bar
+     jumps between two positions that are seconds of work apart. */
+  transition: width 400ms ease-out;
+}
+
+.stage-progress__figure {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Facts and event log ----------------------------------------------------- */
 
 .run-facts {

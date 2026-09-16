@@ -226,14 +226,26 @@ export interface Run {
   state: RunState;
   stage: string;
   stage_label: string;
+  /** Fraction of the pipeline's stages completed. Stages, not work. */
   progress: number;
+  /**
+   * How far into the current stage the engine says it has got, where it says
+   * anything. Null is the honest answer when it does not, and the label is what
+   * the fraction counts: an OpenQuake phase restarts its own percentage, so the
+   * number means nothing without it.
+   */
+  stage_progress: number | null;
+  stage_progress_label: string;
   pipeline: PipelineStage[];
   execution_profile: string;
   correlation_id: string;
   queued_at: string | null;
   started_at: string | null;
   finished_at: string | null;
+  /** How long a finished run took. Null until it finishes. */
   duration_seconds: number | null;
+  /** Time on the clock now, measured on the server. Null until it starts. */
+  elapsed_seconds: number | null;
   peak_memory_mb: number | null;
   failure_stage: string;
   failure_summary: string;
@@ -844,6 +856,12 @@ export interface GemCountry {
   region: string;
   country: string;
   loss_categories: string[];
+  /** ISO 3166-1 alpha-3, as GEM's stock summary for the country states it. */
+  iso3: string;
+  /** ISO 3166-1 alpha-2, which CASS keys the vulnerability set by. */
+  country_code: string;
+  /** Why the country cannot be built, or empty where it can. */
+  problem: string;
 }
 
 export interface GemCatalogue {
@@ -861,15 +879,14 @@ export interface DesignEraInput {
 /**
  * A written enrichment and where GEM publishes the country, as the build
  * endpoint takes them. The design eras are the assumption a reviewer argues
- * with, so each carries its reason.
+ * with, so each carries its reason. The country's codes are not sent: the API
+ * reads them from the release for the country chosen.
  */
 export interface VulnerabilitySpecificationInput {
   gem: { region: string; country: string };
   enrichment: {
     name: string;
     version: string;
-    country_code: string;
-    iso3: string;
     weighting: string;
     design_eras: { to_year: number | null; design_levels: string[]; reason: string }[];
     open_questions: string[];
@@ -885,6 +902,29 @@ export interface VulnerabilityBuildResult {
     vulnerability_version: string;
     multi_imt: { classes_needing_multi_imt: number };
   };
+}
+
+/**
+ * What a specification would generate, answered while it is being written.
+ *
+ * The same count the build guards against, so a specification this calls within
+ * the limit is one that builds. It is an upper bound wherever there are
+ * refinements: a refined cell and the base cell it replaces are both counted.
+ */
+export interface GridEstimate {
+  cells: number;
+  cells_from_tiles: number;
+  cells_by_refinement: { name: string; resolution_deg: string; cells: number }[];
+  counted_tiles: number;
+  /** Areas not yet complete enough to count, rather than wrong. */
+  incomplete: number;
+  /** What the build would refuse, said while it can still be changed. */
+  problems: string[];
+  limit: number;
+  within_limit: boolean;
+  is_upper_bound: boolean;
+  /** False where there is not yet enough to count anything at all. */
+  estimated: boolean;
 }
 
 export interface GridBuildResult {

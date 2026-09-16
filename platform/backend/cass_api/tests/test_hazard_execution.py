@@ -23,7 +23,7 @@ from apps.modelregistry import hazard_models, pilot
 from apps.modelregistry.models import HazardModel
 from apps.runs import hazard as hazard_service
 from apps.runs.models import HazardRun, Run, RunKind
-from cass_adapters.base import EngineRejected, IncompatibleEngine
+from cass_adapters.base import EngineJob, EngineRejected, EngineState, IncompatibleEngine
 from cass_adapters.openquake import OpenQuakeAdapter
 from cass_core.runs import RunState
 
@@ -68,11 +68,13 @@ class FakeEngine:
         submit_status=200,
         datastore=b"HDF5 datastore",
         publishes_realizations=True,
+        log=(["t", "INFO", "job", "computing gmfs"],),
     ):
         self.version = version
         self.statuses = list(statuses)
         self.submit_status = submit_status
         self.datastore = datastore
+        self.log = [list(line) for line in log]
         self.calls: list[tuple[str, str]] = []
         self.submitted: dict[str, bytes] = {}
         # A calculation on a single logic-tree branch exposes no realizations
@@ -173,7 +175,10 @@ class FakeEngine:
         if url.endswith("/traceback"):
             return FakeResponse(200, ["ValueError: the site model is empty"])
         if "/log/" in url:
-            return FakeResponse(200, [["t", "INFO", "job", "computing gmfs"]])
+            # The engine takes a line offset, and a caller following a running
+            # calculation asks only for what it has not read.
+            start, _, _stop = url.rstrip("/").rsplit("/", 1)[-1].partition(":")
+            return FakeResponse(200, self.log[int(start or 0):])
         if url.endswith("/results"):
             return FakeResponse(
                 200,
@@ -470,6 +475,111 @@ def test_a_failed_run_does_not_read_as_though_the_export_finished(hazard_run):
 
     hazard_run.run.refresh_from_db()
     assert hazard_run.run.progress < 1.0
+
+
+# -- following a calculation that is still going ----------------------------
+#
+# A national calculation is hours inside a single pipeline stage, so the stage
+# list alone tells an analyst nothing for most of the run. OpenQuake's status
+# endpoint answers with a state and a description and no counts; its log is
+# where the engine says how far it has got, and these hold that CASS reads it
+# without ever letting that reading disturb the calculation.
+
+def watch(hazard_run, monkeypatch) -> list[tuple]:
+    """What the run said about its position each time the monitor waited."""
+    seen: list[tuple] = []
+    monkeypatch.setattr(
+        hazard_service.time,
+        "sleep",
+        lambda _: seen.append(
+            Run.objects.values_list("stage_progress", "stage_progress_label").get(
+                pk=hazard_run.run_id
+            )
+        ),
+    )
+    return seen
+
+
+def test_the_monitor_records_how_far_into_the_calculation_the_engine_is(
+    hazard_run, monkeypatch
+):
+    engine = FakeEngine(
+        statuses=("executing", "executing", "complete"),
+        log=[
+            ["t", "INFO", "job", "classical  25% [128 submitted, 96 queued]"],
+            ["t", "INFO", "job", "classical  50% [128 submitted, 64 queued]"],
+        ],
+    )
+    seen = watch(hazard_run, monkeypatch)
+
+    run_it(hazard_run, engine)
+
+    # The latest line, not the first: the log is read forward to where the
+    # calculation actually is.
+    assert seen[0] == (0.5, "classical")
+
+
+def test_the_phase_is_kept_with_the_percentage(hazard_run, monkeypatch):
+    """OpenQuake's percentage restarts for each phase, so the bare number lies."""
+    engine = FakeEngine(
+        statuses=("executing", "executing", "complete"),
+        log=[
+            ["t", "INFO", "job", "classical 100% [128 submitted, 0 queued]"],
+            ["t", "INFO", "job", "computing gmfs   8% [64 submitted, 59 queued]"],
+        ],
+    )
+    seen = watch(hazard_run, monkeypatch)
+
+    run_it(hazard_run, engine)
+
+    assert seen[0] == (0.08, "computing gmfs")
+
+
+def test_a_line_that_merely_mentions_a_percentage_is_not_read_as_progress(hazard_run):
+    """Progress is the engine's own task line, not any number with a per cent sign."""
+    run = hazard_run.run
+    job = EngineJob(engine_job_id="77", state=EngineState.RUNNING)
+
+    class OnlyALog:
+        def log_entries(self, calculation_id, *, start=0, stop=0):
+            entries = [["t", "INFO", "job", "Sent 90% of the model to the workers"]]
+            return entries[start:]
+
+    read = hazard_service._follow(run, OnlyALog(), 77, job, 0)
+
+    assert read == 1
+    assert run.stage_progress is None
+
+
+class RefusesItsLog(FakeEngine):
+    """An engine that serves the calculation but not the log of it."""
+
+    def request(self, method, url, **kwargs):
+        if "/log/" in url:
+            return FakeResponse(500, text="log unavailable")
+        return super().request(method, url, **kwargs)
+
+
+def test_a_log_the_engine_will_not_serve_does_not_stop_the_calculation(hazard_run):
+    """Progress is a courtesy. Losing it must not cost a ten-hour calculation."""
+    run_it(hazard_run, RefusesItsLog(statuses=("executing", "complete")))
+
+    hazard_run.run.refresh_from_db()
+    assert hazard_run.run.state == RunState.SUCCEEDED
+    assert hazard_run.run.stage_progress is None
+
+
+def test_a_finished_run_carries_no_fraction_from_a_stage_it_has_left(hazard_run):
+    engine = FakeEngine(
+        statuses=("executing", "complete"),
+        log=[["t", "INFO", "job", "classical  25% [128 submitted, 96 queued]"]],
+    )
+
+    run_it(hazard_run, engine)
+
+    hazard_run.run.refresh_from_db()
+    assert hazard_run.run.stage_progress is None
+    assert hazard_run.run.stage_progress_label == ""
 
 
 # -- cancellation -----------------------------------------------------------

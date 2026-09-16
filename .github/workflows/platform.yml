@@ -46,7 +46,8 @@ jobs:
                       -e backend/packages/cass_oed \
                       -e backend/packages/cass_extract \
                       -e backend/services/keys \
-                      -e "backend/services/converter[hdf5]"
+                      -e "backend/services/converter[hdf5]" \
+                      -e backend/adapters
 
       - name: Lint
         run: ruff check backend

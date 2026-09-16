@@ -43,13 +43,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
+  Combobox,
   Disclosure,
   EmptyState,
   Field,
   MetricTile,
   Notice,
   PageHeader,
-  Select,
   TextInput,
 } from "@/components/primitives";
 import { useWorkingContext } from "@/context/WorkingContext";
@@ -154,21 +154,20 @@ function Comparisons({ results }: { results: ResultSet[] }) {
           htmlFor="compare-baseline"
           hint="The result the other is measured against."
         >
-          <Select
+          <Combobox
             id="compare-baseline"
+            placeholder="Select a baseline"
             value={baselineId}
-            onChange={(event) => {
-              setBaselineId(event.target.value);
+            onChange={(value) => {
+              setBaselineId(value);
               setCandidateId("");
             }}
-          >
-            <option value="">Select a baseline</option>
-            {results.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label} — {item.caveats.perspective}, {item.currency}
-              </option>
-            ))}
-          </Select>
+            options={results.map((item) => ({
+              value: item.id,
+              label: item.label,
+              detail: `${item.caveats.perspective}, ${item.currency}`,
+            }))}
+          />
         </Field>
 
         <Field
@@ -180,19 +179,14 @@ function Comparisons({ results }: { results: ResultSet[] }) {
               : "Choose a baseline first."
           }
         >
-          <Select
+          <Combobox
             id="compare-candidate"
+            placeholder="Select a candidate"
             value={candidateId}
             disabled={!baseline}
-            onChange={(event) => setCandidateId(event.target.value)}
-          >
-            <option value="">Select a candidate</option>
-            {candidates.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </Select>
+            onChange={setCandidateId}
+            options={candidates.map((item) => ({ value: item.id, label: item.label }))}
+          />
         </Field>
 
         <Field label="Name this comparison" htmlFor="compare-label">

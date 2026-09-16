@@ -34,6 +34,8 @@ const HELD_RUN: Run = {
   stage: "review",
   stage_label: "Result review",
   progress: 0.91,
+  stage_progress: null,
+  stage_progress_label: "",
   pipeline: [],
   execution_profile: "standard",
   correlation_id: "",
@@ -41,6 +43,7 @@ const HELD_RUN: Run = {
   started_at: null,
   finished_at: null,
   duration_seconds: null,
+  elapsed_seconds: null,
   peak_memory_mb: null,
   failure_stage: "",
   failure_summary: "",
@@ -121,6 +124,8 @@ let approvals: Approval[] = [];
 let artifacts: unknown[] = [];
 let mayDecide = false;
 let posts: { url: string; body: unknown }[] = [];
+/** The run the API is holding. Held at a gate unless a test says otherwise. */
+let detail: Run = HELD_RUN;
 
 function page<T>(results: T[]) {
   return { count: results.length, next: null, previous: null, results };
@@ -161,8 +166,8 @@ function routeFor(url: string, method: string, body: unknown): { status: number;
   if (url.includes("/analysis-runs/")) return { status: 200, body: page([ANALYSIS]) };
   if (url.includes(`/runs/${RUN_ID}/events/`)) return { status: 200, body: [] };
   if (url.includes(`/runs/${RUN_ID}/artifacts/`)) return { status: 200, body: artifacts };
-  if (url.includes(`/runs/${RUN_ID}/`)) return { status: 200, body: HELD_RUN };
-  if (url.includes("/runs/")) return { status: 200, body: page([HELD_RUN]) };
+  if (url.includes(`/runs/${RUN_ID}/`)) return { status: 200, body: detail };
+  if (url.includes("/runs/")) return { status: 200, body: page([detail]) };
   return { status: 200, body: {} };
 }
 
@@ -191,6 +196,7 @@ beforeEach(() => {
   artifacts = [];
   mayDecide = false;
   posts = [];
+  detail = HELD_RUN;
   window.localStorage.setItem(
     "cass.working-context.v1",
     JSON.stringify({ projectId: PROJECT_ID }),
@@ -322,5 +328,86 @@ describe("a run held at a gate", () => {
     expect(await screen.findByText("expired")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Download/ })).not.toBeInTheDocument();
     expect(screen.queryByText("not yours to read")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * A run that is still going.
+ *
+ * The monitor used to be at its least informative exactly when it was worth
+ * watching: the elapsed column read "—" until the run finished, and the stage
+ * list stood still for the hours an engine spends inside one stage.
+ */
+describe("a run that is still going", () => {
+  const RUNNING: Run = {
+    ...HELD_RUN,
+    state: "running",
+    stage: "losses",
+    stage_label: "Calculate losses",
+    is_active: true,
+    started_at: "2026-09-13T10:00:00Z",
+    finished_at: null,
+    duration_seconds: null,
+    elapsed_seconds: 187,
+    stage_progress: 0.35,
+    stage_progress_label: "classical",
+    gate_summary: "",
+    gate_detail: "",
+    manifest: {},
+    pipeline: [
+      {
+        key: "publish_oed",
+        label: "Publish OED",
+        description: "Write the portfolio the engine will read.",
+        gate: false,
+        position: 1,
+      },
+      {
+        key: "losses",
+        label: "Calculate losses",
+        description: "Run the loss calculation.",
+        gate: false,
+        position: 2,
+      },
+    ],
+  };
+
+  it("shows the time it has been running, rather than nothing until it ends", async () => {
+    detail = RUNNING;
+    renderMonitor();
+
+    // Seconds may have passed between the fetch and the assertion; the point is
+    // that a clock is running at all.
+    expect(await screen.findByText(/^3m \d+s$/)).toBeInTheDocument();
+  });
+
+  it("shows how far into the stage the engine says it is, and of what", async () => {
+    detail = RUNNING;
+    renderMonitor();
+
+    const bar = await screen.findByRole("progressbar");
+    expect(bar).toHaveAttribute("aria-valuenow", "35");
+    // The phase is part of the reading: OpenQuake starts its percentage again
+    // for each phase, so the bare number would say "nearly done" three times.
+    expect(bar).toHaveAttribute("aria-valuetext", "35% through classical");
+    expect(screen.getByText("classical")).toBeInTheDocument();
+  });
+
+  it("puts the fraction on the stage being worked on and nowhere else", async () => {
+    detail = RUNNING;
+    renderMonitor();
+
+    await screen.findByRole("progressbar");
+    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    const current = screen.getByText("Calculate losses").closest("li");
+    expect(current?.querySelector(".stage-progress")).not.toBeNull();
+  });
+
+  it("says nothing about a fraction the engine does not report", async () => {
+    detail = { ...RUNNING, stage_progress: null, stage_progress_label: "" };
+    renderMonitor();
+
+    await screen.findByText("Calculate losses");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 });

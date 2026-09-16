@@ -36,10 +36,10 @@ import { RunStateBadge, StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
+  Combobox,
   EmptyState,
   Notice,
   PageHeader,
-  Select,
 } from "@/components/primitives";
 import { formatCount, formatDate, formatDateTime } from "@/lib/format";
 
@@ -419,19 +419,15 @@ function HazardSets({ versions }: { versions: ModelVersion[] }) {
                       </span>
                     ) : mayPublish && candidates.length ? (
                       <div className="build__attach">
-                        <Select
+                        <Combobox
                           aria-label={`Model version for ${item.reference}`}
                           value={target}
-                          onChange={(event) =>
-                            setChosen({ ...chosen, [item.id]: event.target.value })
-                          }
-                        >
-                          {candidates.map((version) => (
-                            <option key={version.id} value={version.id}>
-                              {version.reference}
-                            </option>
-                          ))}
-                        </Select>
+                          onChange={(value) => setChosen({ ...chosen, [item.id]: value })}
+                          options={candidates.map((version) => ({
+                            value: version.id,
+                            label: version.reference,
+                          }))}
+                        />
                         <Button
                           size="sm"
                           busy={attach.isPending}

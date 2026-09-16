@@ -14,8 +14,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GridBuilder } from "./GridBuilder";
 
+/** What the server says the specification on the screen would generate. */
+const ESTIMATE = {
+  cells: 28,
+  cells_from_tiles: 24,
+  cells_by_refinement: [{ name: "Metro Manila", resolution_deg: "0.25", cells: 4 }],
+  counted_tiles: 1,
+  incomplete: 0,
+  problems: [] as string[],
+  limit: 250000,
+  within_limit: true,
+  is_upper_bound: true,
+  estimated: true,
+};
+
 let posted: { url: string; body: Record<string, unknown> }[] = [];
+let estimated: Record<string, unknown>[] = [];
 let refuseWith: string | null = null;
+let estimate = ESTIMATE;
 
 const BUILT = {
   grid: {
@@ -45,11 +61,17 @@ function respond(status: number, body: unknown) {
 
 beforeEach(() => {
   posted = [];
+  estimated = [];
   refuseWith = null;
+  estimate = ESTIMATE;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if ((init?.method ?? "GET") === "POST" && url.includes("/grids/estimate/")) {
+        estimated.push(JSON.parse(String(init?.body ?? "{}")));
+        return respond(200, estimate);
+      }
       if ((init?.method ?? "GET") === "POST" && url.includes("/grids/build/")) {
         posted.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
         return refuseWith
@@ -146,6 +168,54 @@ describe("GridBuilder", () => {
     await user.click(screen.getByRole("button", { name: "Build the grid" }));
 
     expect(await screen.findByText(/builds at most 100/)).toBeInTheDocument();
+  });
+
+  it("says what the specification would generate, before it is built", async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+
+    await writeSpecification(user);
+
+    expect(await screen.findByText("28 cells at most")).toBeInTheDocument();
+    expect(screen.getByText(/24 at the base resolution/)).toBeInTheDocument();
+    expect(screen.getByText(/4 in Metro Manila at 0.25/)).toBeInTheDocument();
+    // Only the geometry is asked about: a label or a reason changes nothing
+    // about how many cells there are.
+    expect(Object.keys(estimated[estimated.length - 1] ?? {}).sort()).toEqual([
+      "base_resolution_deg",
+      "refinements",
+      "tiles",
+    ]);
+  });
+
+  it("will not build what the count says the server would refuse", async () => {
+    estimate = { ...ESTIMATE, cells: 6_000_000, limit: 250_000, within_limit: false };
+    const user = userEvent.setup();
+    renderBuilder();
+
+    await writeSpecification(user);
+
+    expect(
+      await screen.findByText(/More cells than this installation builds/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/halving it quadruples the count/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Build the grid" })).toBeDisabled(),
+    );
+    expect(posted).toHaveLength(0);
+  });
+
+  it("names what the build would refuse while it can still be changed", async () => {
+    estimate = {
+      ...ESTIMATE,
+      problems: ["Refinement 'Metro Manila' is at 1 degrees, which is not finer than the base 0.5."],
+    };
+    const user = userEvent.setup();
+    renderBuilder();
+
+    await writeSpecification(user);
+
+    expect(await screen.findByText(/is not finer than the base/)).toBeInTheDocument();
   });
 
   it("will not build until the specification says what it is", async () => {

@@ -79,6 +79,10 @@
   align-items: center;
 }
 
+.build__attach > .combobox {
+  flex: 1 1 14rem;
+}
+
 .build__package-note {
   font-size: var(--text-sm);
 }

@@ -89,9 +89,12 @@ EXPOSE 8000
 # gunicorn rather than runserver, in every environment. A development-only
 # server in one environment and a production one in another is a difference
 # that hides bugs until late.
-CMD ["gunicorn", "cass.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
-     "--timeout", "120", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+#
+# The API applies migrations before it serves, so a rebuilt stack never runs new
+# code against an old schema. It is the only process that does: the worker and
+# the scheduler run this image with their own command, and wait for the API to
+# be healthy -- which it cannot be until gunicorn is up, after migrate has
+# finished -- so nothing reads the schema while it is changing. A failed
+# migration stops the container rather than serving against a half-applied one.
+# exec hands PID 1 to gunicorn, so a stop signal reaches it rather than sh.
+CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn cass.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --access-logfile - --error-logfile -"]

@@ -22,6 +22,7 @@ from cass_core.runs import (
     RunState,
     check_transition,
     is_retryable,
+    is_terminal,
     may_publish_results,
     pipeline,
 )
@@ -78,6 +79,19 @@ class Run(BaseModel):
         max_length=32, blank=True, help_text="Current pipeline stage key."
     )
     progress = models.FloatField(default=0.0)
+
+    #: How far into the current stage the engine says it has got, where it says
+    #: anything at all. ``progress`` counts pipeline stages, which is the wrong
+    #: unit for a monitor an analyst watches: an OpenQuake calculation is one
+    #: stage of six and most of the wall clock, so the stage fraction sits still
+    #: for hours while the work moves. Null where the engine reports nothing,
+    #: because a bar nobody can derive is an invented number.
+    stage_progress = models.FloatField(null=True, blank=True)
+    #: What that fraction counts -- the OpenQuake phase, or Oasis sub-tasks.
+    #: Recorded with it because OpenQuake's percentage restarts for each phase,
+    #: and a number that reaches a hundred three times is a lie without the
+    #: name of what finished.
+    stage_progress_label = models.CharField(max_length=80, blank=True)
 
     execution_profile = models.CharField(
         max_length=32,
@@ -151,12 +165,54 @@ class Run(BaseModel):
     def may_retry(self) -> bool:
         return is_retryable(self.run_state)
 
+    @property
+    def elapsed_seconds(self) -> int | None:
+        """Wall-clock seconds since the run started, running clock included.
+
+        ``duration_seconds`` is written when a run finishes, so reading it on
+        its own leaves the monitor blank for exactly as long as the run is
+        worth watching. A run still going is timed against now instead.
+        """
+        if self.started_at is None:
+            return None
+        if self.duration_seconds is not None:
+            return self.duration_seconds
+        return max(int((timezone.now() - self.started_at).total_seconds()), 0)
+
     def stage_label(self) -> str:
         if not self.stage:
             return ""
         return self.pipeline.stage(self.stage).label
 
     # -- progress ----------------------------------------------------------
+    def record_stage_progress(
+        self, fraction: float | None, label: str = "", *, save: bool = True
+    ) -> bool:
+        """Record how far into the current stage an engine says it has got.
+
+        Written straight onto the run rather than as a stage event: this is the
+        current position, not something that happened, and a ten-hour
+        calculation reporting every whole percent would otherwise write a
+        thousand rows nobody reads. Says whether it changed anything, so a
+        poller can leave the database alone while the number stands still.
+        """
+        if fraction is None:
+            value = None
+        else:
+            value = round(max(0.0, min(1.0, float(fraction))), 4)
+
+        label = (label or "")[:80]
+        if value == self.stage_progress and label == self.stage_progress_label:
+            return False
+
+        self.stage_progress = value
+        self.stage_progress_label = label
+        if save:
+            self.save(
+                update_fields=["stage_progress", "stage_progress_label", "updated_at"]
+            )
+        return True
+
     def advance(
         self,
         stage: str,
@@ -189,8 +245,17 @@ class Run(BaseModel):
 
         self.stage = stage
         self.progress = self.pipeline.progress(stage)
+        # A fraction measured inside the stage just left says nothing about the
+        # one just entered, so it goes rather than being carried forward.
+        self.stage_progress = None
+        self.stage_progress_label = ""
         if save:
-            self.save(update_fields=["stage", "progress", "updated_at"])
+            self.save(
+                update_fields=[
+                    "stage", "progress", "stage_progress", "stage_progress_label",
+                    "updated_at",
+                ]
+            )
 
         RunStageEvent.objects.create(
             run=self,
@@ -223,9 +288,17 @@ class Run(BaseModel):
         now = timezone.now()
 
         self.state = new_state.value
+        if stage and stage != self.stage:
+            self.stage_progress = None
+            self.stage_progress_label = ""
         if stage:
             self.stage = stage
             self.progress = self.pipeline.progress(stage)
+        if is_terminal(new_state):
+            # Nothing is working on it any more, so a fraction left on screen
+            # would describe a calculation that is no longer running.
+            self.stage_progress = None
+            self.stage_progress_label = ""
 
         match new_state:
             case RunState.QUEUED:

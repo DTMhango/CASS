@@ -35,6 +35,7 @@ believed.
 
 from __future__ import annotations
 
+import csv
 import dataclasses
 import enum
 import hashlib
@@ -42,6 +43,8 @@ import pathlib
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, BinaryIO
+
+from . import iso3166
 
 #: Bumped when the reader's interpretation of the file changes.
 READER_VERSION = "1.0.0"
@@ -362,13 +365,81 @@ def read_country(
     return models
 
 
-def catalogue(root: str | pathlib.Path) -> tuple[dict[str, Any], ...]:
+def stock_summary_path(
+    root: str | pathlib.Path, *, region: str, country: str
+) -> pathlib.Path:
+    """Where GEM publishes a country's building stock by taxonomy."""
+    return (
+        pathlib.Path(root)
+        / "global_exposure_model"
+        / region
+        / country
+        / "summaries"
+        / "Exposure_Summary_Taxonomy.csv"
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CountryIdentity:
+    """Which country a folder in the release is, by code."""
+
+    #: ISO 3166-1 alpha-3, as GEM writes it. Its mapping file is keyed by this.
+    iso3: str
+    #: ISO 3166-1 alpha-2, which the rest of CASS is keyed by.
+    country_code: str
+
+
+def country_identity(
+    root: str | pathlib.Path, *, region: str, country: str
+) -> CountryIdentity:
+    """The codes of the country a release folder holds, as GEM states them.
+
+    Read from ``ID_0`` in the stock summary the build weights the country's
+    functions with, so the codes and the stock cannot describe two different
+    countries. Only the first row is read here; the build reads every row and
+    refuses a summary that changes country part-way.
+    """
+    path = stock_summary_path(root, region=region, country=country)
+    place = f"{country.replace('_', ' ')} ({region.replace('_', ' ')})"
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            first = next(csv.DictReader(handle), None)
+    except OSError:
+        raise GemError(
+            f"GEM's exposure model holds no stock summary for {place}, so which country "
+            "it is, and what its buildings are, could not be read."
+        ) from None
+
+    iso3 = str((first or {}).get("ID_0") or "").strip().upper()
+    if not iso3:
+        raise GemError(
+            f"The stock summary for {place} states no ID_0, so which country it "
+            "describes could not be read."
+        )
+    code = iso3166.alpha_2(iso3)
+    if not code:
+        raise GemError(
+            f"GEM names {place} {iso3!r}, which is not an ISO 3166-1 alpha-3 code, so "
+            "there is no alpha-2 code to key its vulnerability set by."
+        )
+    return CountryIdentity(iso3=iso3, country_code=code)
+
+
+def catalogue(
+    root: str | pathlib.Path, *, identify: bool = False
+) -> tuple[dict[str, Any], ...]:
     """Every country a GEM release publishes vulnerability functions for.
 
     Read from the release rather than from a table inside CASS. Which countries
     GEM covers is a property of the release somebody downloaded, and a list
     compiled into the platform would be wrong the first time GEM published
     another -- which is exactly when somebody would be looking for it.
+
+    ``identify`` adds each country's codes, read from its stock summary. It
+    costs a file per country, so a caller that only counts countries leaves it
+    off. A country whose codes cannot be read is still listed, with the reason
+    in ``problem``: GEM publishes its functions, and saying why it cannot be
+    built is more use than leaving it out.
     """
     base = pathlib.Path(root) / "global_vulnerability_model"
     if not base.is_dir():
@@ -385,14 +456,25 @@ def catalogue(root: str | pathlib.Path) -> tuple[dict[str, Any], ...]:
                 for category in LossCategory
                 if (country / f"vulnerability_{category}.xml").is_file()
             ]
-            if categories:
-                found.append(
-                    {
-                        "region": region.name,
-                        "country": country.name,
-                        "loss_categories": categories,
-                    }
-                )
+            if not categories:
+                continue
+            entry: dict[str, Any] = {
+                "region": region.name,
+                "country": country.name,
+                "loss_categories": categories,
+            }
+            if identify:
+                try:
+                    identity = country_identity(
+                        root, region=region.name, country=country.name
+                    )
+                except GemError as exc:
+                    entry.update(iso3="", country_code="", problem=str(exc))
+                else:
+                    entry.update(
+                        iso3=identity.iso3, country_code=identity.country_code, problem=""
+                    )
+            found.append(entry)
     return tuple(found)
 
 

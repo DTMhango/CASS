@@ -2385,8 +2385,17 @@ def _note(run, stage: str, job, actor) -> None:
     Only meaningful changes are written. Polling a ten-minute calculation every
     five seconds would otherwise bury the stage history in a hundred identical
     rows.
+
+    The fraction is the exception, and is why it is kept on the run rather than
+    in the history: sub-tasks complete while the engine's state word does not
+    change, which is precisely the stretch an analyst is watching. It is
+    written first so it survives the return below.
     """
     from .models import RunStageEvent
+
+    run.record_stage_progress(
+        job.progress, "sub-tasks" if job.progress is not None else ""
+    )
 
     latest = (
         RunStageEvent.objects.filter(run=run, stage=stage).order_by("-created_at").first()

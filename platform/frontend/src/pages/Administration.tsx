@@ -40,6 +40,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   Button,
   Card,
+  Combobox,
   EmptyState,
   Field,
   Notice,
@@ -668,32 +669,24 @@ function AuditSearch() {
     >
       <div className="admin-audit__filters">
         <Field label="Action" htmlFor="audit-action">
-          <Select
+          <Combobox
             id="audit-action"
             value={action}
-            onChange={(event) => setAction(event.target.value)}
-          >
-            {AUDIT_ACTIONS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </Select>
+            onChange={setAction}
+            options={AUDIT_ACTIONS}
+          />
         </Field>
 
         <Field label="Project" htmlFor="audit-project">
-          <Select
+          <Combobox
             id="audit-project"
             value={project}
-            onChange={(event) => setProject(event.target.value)}
-          >
-            <option value="">Every project</option>
-            {projects?.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </Select>
+            onChange={setProject}
+            options={[
+              { value: "", label: "Every project" },
+              ...(projects ?? []).map((item) => ({ value: item.id, label: item.name })),
+            ]}
+          />
         </Field>
 
         <Field

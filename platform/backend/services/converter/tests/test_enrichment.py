@@ -174,6 +174,20 @@ def test_a_taxonomy_reported_both_as_a_total_and_by_settlement_is_refused(tmp_pa
         read_stock_prior(path, country_code="ID")
 
 
+def test_a_summary_for_another_country_is_refused(tmp_path):
+    """Its stock would otherwise be weighted through the mapping of the country named."""
+    path = tmp_path / "Exposure_Summary_Taxonomy.csv"
+    path.write_text(
+        "ID_0,NAME_0,OCCUPANCY,MACRO_TAXONOMY,TAXONOMY,SETTLEMENT,BUILDINGS,BLDG_REPL_COST_USD\n"
+        "IDN,Indonesia,COM,CR-,CR/LFINF/CDL+ERL/H:1-3/COM,TOTAL,10,1000\n",
+        encoding="utf-8",
+    )
+
+    assert read_stock_prior(path, country_code="ID", iso3="idn").country_code == "ID"
+    with pytest.raises(EnrichmentError, match="describes IDN, and this build is for ZMB"):
+        read_stock_prior(path, country_code="ZM", iso3="ZMB")
+
+
 def test_settlement_parts_without_a_total_are_summed(tmp_path):
     """Which is how GEM actually reports a taxonomy that splits urban and rural."""
     path = tmp_path / "Exposure_Summary_Taxonomy.csv"
