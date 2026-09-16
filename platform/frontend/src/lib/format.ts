@@ -8,10 +8,20 @@
  * preventing on the backend.
  */
 
-const COMPACT = new Intl.NumberFormat("en-GB", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
+/**
+ * The compact tiers, largest first.
+ *
+ * The suffix is ours rather than Intl's compact notation, which reads its
+ * abbreviations from whatever CLDR the runtime happens to ship: recent data
+ * renders en-GB as "9.9m" and "1.3bn" where older data renders "9.9M" and
+ * "1.3B". A loss figure should not change its wording because a machine
+ * updated its locale data, so the scaling is Intl's and the wording is not.
+ */
+const COMPACT_TIERS: readonly { scale: number; suffix: string }[] = [
+  { scale: 1e12, suffix: "T" },
+  { scale: 1e9, suffix: "B" },
+  { scale: 1e6, suffix: "M" },
+];
 
 const FULL = new Intl.NumberFormat("en-GB", {
   maximumFractionDigits: 0,
@@ -30,7 +40,23 @@ export function formatMoney(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return String(value);
-  if (Math.abs(numeric) >= 1_000_000) return COMPACT.format(numeric);
+  if (Math.abs(numeric) >= 1_000_000) return formatCompact(numeric);
+  return FULL.format(numeric);
+}
+
+/**
+ * One decimal place against the largest tier the value reaches.
+ *
+ * The tier is chosen after rounding rather than before it, so a figure that
+ * rounds up out of its tier is named by the one it lands in: 999,999,999 is
+ * 1B, not 1000M.
+ */
+function formatCompact(numeric: number): string {
+  for (const tier of COMPACT_TIERS) {
+    const scaled = Number((numeric / tier.scale).toFixed(1));
+    if (Math.abs(scaled) < 1) continue;
+    return `${scaled.toFixed(1).replace(/\.0$/, "")}${tier.suffix}`;
+  }
   return FULL.format(numeric);
 }
 

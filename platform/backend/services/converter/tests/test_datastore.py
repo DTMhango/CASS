@@ -75,7 +75,7 @@ def build(
             sites.create_dataset("custom_site_id", data=numpy.array(custom, dtype="S8"))
 
         table = numpy.array(
-            [(event, year) for event, year in years],
+            list(years),
             dtype=[("id", "u4"), ("year", "u4")],
         )
         store.create_dataset("events", data=table)

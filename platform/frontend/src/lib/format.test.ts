@@ -31,6 +31,14 @@ describe("formatMoney", () => {
     expect(formatMoney("1250000000")).toBe("1.3B");
   });
 
+  it("names the tier the value reaches once it has been rounded", () => {
+    // A hair under a billion is a millions figure until the rounding carries.
+    expect(formatMoney("999999999")).toBe("1B");
+    expect(formatMoney("1000000")).toBe("1M");
+    expect(formatMoney("-2500000")).toBe("-2.5M");
+    expect(formatMoney("3400000000000")).toBe("3.4T");
+  });
+
   it("shows values below a million in full", () => {
     expect(formatMoney("450000")).toBe("450,000");
   });
