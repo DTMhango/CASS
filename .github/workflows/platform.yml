@@ -30,9 +30,9 @@ jobs:
     name: Backend
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -99,9 +99,9 @@ jobs:
     name: Frontend
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -143,12 +143,12 @@ jobs:
           - image: oasis-worker
             scan: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build ${{ matrix.image }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: platform
           file: platform/deploy/images/Dockerfile.${{ matrix.image }}
@@ -160,9 +160,16 @@ jobs:
 
       # Section 10 requires dependency and image scanning, with a software bill
       # of materials for releases.
+      #
+      # The tag carries a v. Trivy's action was pinned at 0.29.0 until upstream
+      # renamed every tag to a v-prefixed one and deleted the old names, so the
+      # job stopped at "Set up job" -- unable to resolve the action -- without
+      # running a build or a scan. Pinned to the current release rather than
+      # back to the same version under its new name: the scanner is the part of
+      # this that goes stale.
       - name: Scan ${{ matrix.image }}
         if: matrix.scan != false
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: cass-${{ matrix.image }}:ci
           format: table
@@ -174,7 +181,7 @@ jobs:
     name: Compose configuration
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Catches a malformed compose file or an unset required variable before
       # anyone tries to bring the stack up.
