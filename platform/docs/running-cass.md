@@ -6,6 +6,13 @@ live stack; where something is a known limit rather than a step, it says so.
 CASS is a research tool. Its results are not a basis for pricing or reserving
 ([ADR 15](adr/0015-research-tool-and-gem-permission.md)).
 
+This document is for whoever installs and operates the platform. For people
+using it, CASS carries its own **User guide**, linked from the header of every
+screen (`/guide`): each screen step by step, how a grid is built, and a glossary
+of every term, written for someone new to catastrophe modelling. The guide's
+text lives in `frontend/src/pages/guide/`, one file per section, and is updated
+in the same change as the screens it describes.
+
 ## What "end to end" means here
 
 A finished run produces three numbers for one portfolio:
@@ -84,6 +91,15 @@ both commands return only once it is serving. After changing the code, run
 `make up-engines` again: it rebuilds the images CASS builds, recreates the
 containers whose image changed, and migrates. Your data is kept.
 
+**Memory.** Every container has a limit, set in `.env`. The defaults suit a
+shared server where CASS may use about 24 GB — together they come to 22 GiB —
+and they hold each engine to a few processes rather than one per core, which is
+what OpenQuake and the Oasis loss kernel do left alone. A container that reaches
+its limit is stopped rather than moved onto swap, so a run that needs more fails
+with a reason instead of slowing everything else on the host. On a machine CASS
+has to itself, `CASS_RESOURCE_LIMITS=0` lifts every limit and process count at
+once; `platform/deploy/.env.example` lists each one separately.
+
 - Interface: <http://localhost:8080>
 - API and its documentation: <http://localhost:8000>, `/api/docs/`
 - MinIO console: <http://localhost:9001>
@@ -118,13 +134,27 @@ are quick. The third is the calculation.
 named refinements and the reason for each — and post it. CASS generates the
 cells and registers the grid as a draft.
 
-The screen counts the cells as you write, so the cost of a resolution is visible
-before you build: cost is quadratic, and halving the resolution quadruples the
-count. A specification over the installation's cell limit is said to be over it
-there, and refused with its own count if it is posted anyway.
+For Bangladesh, Bhutan, Indonesia, Kuwait, the Maldives, Nepal, Oman, the
+Philippines, Qatar and Türkiye, start from the **seed** CASS ships: it loads a
+whole-country specification into the form to change before building.
 
-*API:* `POST /api/v1/grids/build/`, and `POST /api/v1/grids/estimate/` for the
-count on its own.
+A grid keeps only what it needs. By default the form keeps cells that touch the
+country's land (Natural Earth's outline, widened 5 km at the coast) and lie within
+5 km of any building or resident (the GHSL settlement layer). Both ship with CASS
+([ADR 20](adr/0020-grids-keep-land-and-settled-cells.md)).
+
+The screen counts the cells as you write — exactly, once the specification is
+whole — with the sea and empty land it leaves out, any land no tile covers, and
+the most the grid's hazard could store per thousand simulated years. Cost is
+quadratic: halving the resolution quadruples the count. A refinement must sit on
+the base lattice, and one that does not is named with the box that would. A
+specification over the installation's cell limit (`CASS_MAX_GRID_CELLS`, 500,000
+by default) is said to be over it there, and refused with its own count if it is
+posted anyway. `python manage.py check_grids` reports registered grids whose
+cells overlap.
+
+*API:* `POST /api/v1/grids/build/`, `POST /api/v1/grids/estimate/` for the count
+on its own, `GET /api/v1/grids/seeds/` and `GET /api/v1/grids/countries/`.
 
 ### 5. Build a vulnerability set
 
@@ -183,29 +213,43 @@ CASS applies its own defaults over the publisher's:
 | --- | --- | --- |
 | `calculation_mode` | `event_based` | A footprint needs events; published models are almost always classical |
 | `investigation_time` | 50 years | |
-| `ses_per_logic_tree_path` | 1 | |
+| `ses_per_logic_tree_path` | 10 | So a 1-in-1,000-year loss rests on the ten worst years rather than one ([ADR 21](adr/0021-ten-thousand-simulated-years.md)) |
 | `number_of_logic_tree_samples` | 20 | Twenty views of the logic tree, pooled ([ADR 18](adr/0018-sampled-paths-pooled-as-one-catalogue.md)) |
 
-Those last three multiply to a thousand simulated years. One sampled path was a
+Those last three multiply to ten thousand simulated years. One sampled path was a
 lottery of roughly ±20% against the model's own weighted mean; twenty cost the
-same to run.
+same to run. The configuration shows the catalogue's length, how many years each
+return period rests on, and the most its hazard would store, and warns above
+100 GB.
 
 **Set the region** if you do not want the whole country. This is the single
 largest lever on run time: it selects the grid cells the calculation covers.
 Leave it empty for a national run.
 
 **Run.** The spec's files are assembled and handed to the engine. What comes
-back becomes a hazard set: one footprint per intensity measure, the occurrence
-table, an intensity-bin dictionary per measure, and the job that produced them.
+back becomes a hazard set: one footprint per intensity measure, stored compressed,
+the occurrence table, an intensity-bin dictionary per measure, and the job that
+produced them. The datastore is streamed to disk and kept for 90 days, and
+OpenQuake's own copy is removed once CASS holds it, unless
+`CASS_OPENQUAKE_KEEP_CALCULATIONS=true` ([ADR 22](adr/0022-a-calculation-is-stored-once.md)).
+
+A hazard set is computed once for a grid and reused by every portfolio and model
+version on it. It must be run again when the grid, the hazard model, the run's
+settings or the site conditions change. When CASS's intensity bins change, **Rebuild
+the footprint** on the hazard set's row bins the stored datastore again instead.
 
 *API:* `POST /api/v1/hazard-models/{id}/configure/`, then
 `POST .../specs/{spec}/launch/`
 
-> **On timing.** The Jakarta–Bandung region (962 cells, twenty paths) takes
-> about 5½ minutes: 2 minutes in the engine and 3½ converting. A national run is
-> 55 times the cells and pulls far more ruptures into range, so it is several
-> hours. Memory is not a constraint — the conversion streams to disk and peaks
-> around a quarter of a gigabyte whatever the size.
+> **On timing and storage.** The Jakarta–Bandung region (962 cells, twenty paths,
+> 10,000 simulated years), measured on the live platform with OpenQuake on 20
+> cores: about 9 minutes from submission to a registered hazard set, a 233 MB
+> datastore, a 38 MB compressed footprint and a 108 MB package footprint. Only
+> motion of 0.05 g or more is stored, where every GEM vulnerability function
+> begins ([ADR 21](adr/0021-ten-thousand-simulated-years.md)); before that floor the
+> same run stored 1.78 GB and 566 MB. A national run pulls far more ruptures into
+> range and is far longer. Memory is not a constraint — the datastore and the
+> footprints are read from disk a slice at a time whatever their size.
 
 ### 7. Assemble a model version
 
@@ -385,6 +429,48 @@ the grid it applied to.
 or a postcode, the cell it lands in is close to a coin-flip between neighbours.
 The geocoding sensitivity report puts a value on how much of the book that
 affects.
+
+---
+
+## Deploying on a shared server with Dokploy
+
+CASS goes up as a Docker Compose application. Point Dokploy at this repository
+with the compose path `platform/deploy/docker-compose.yml`, paste
+`platform/deploy/dokploy.env.example` into its Environment tab, fill in the
+secrets, and leave Advanced → Command as it is.
+
+Three settings in that template are Dokploy's mechanics rather than preferences,
+and each one fails quietly when it is missing:
+
+| Setting | Without it |
+| --- | --- |
+| `CASS_PLATFORM_DIR=./platform` | Dokploy resolves compose's relative paths from the repository root, so the image builds read the folder *above* the repository, and the database initialisation scripts become an empty directory — leaving the Oasis databases unmade |
+| `COMPOSE_PROFILES=engines` | Dokploy's compose command passes no `--profile`, so OpenQuake, Oasis, the keys service and the converter never start |
+| `CASS_MODELS_PATH=/srv/...` | Dokploy deletes and re-clones the repository on every deploy, so anything inside it is transient |
+
+**The model files.** Put the GEM clones and hazard packages on the server, or on
+a share the server mounts, and point `CASS_MODELS_PATH` at that folder — an
+absolute path, outside the repository and outside `/etc/dokploy`. It is mounted
+read-only at `/models` in the API and the worker, and nothing else needs it:
+OpenQuake is sent each job as an archive, and the Oasis worker reads the package
+CASS deploys onto a volume. Two things to get right: keep each GEM repository's
+`.git` folder, which is where CASS reads which release it is, and make the files
+readable by uid 10001, the user the containers run as — `chmod -R a+rX`.
+
+**Storage.** The images are about 8 GB (the patched Oasis worker and its server
+2.25 and 1.48 GB, OpenQuake 1.74). A GEM release is on the order of a gigabyte.
+What grows is what runs produce: a national Oasis package is 9.5 GB of footprint
+and a deployment swap holds two ([ADR 19](adr/0019-footprint-stays-a-ktools-binary.md)),
+and each hazard calculation leaves an OpenQuake datastore and a copy in MinIO
+under its retention class. On a 200 GB server that is comfortable for regional
+work and worth watching once national runs are kept; Docker's build cache also
+grows on every deploy, and `docker builder prune` reclaims it.
+
+**Before people outside the team use it.** The template runs the settings a
+workstation does, where an error page carries its traceback. `cass.settings.prod`
+is the hardened module and needs HTTPS end to end: it sets secure-only cookies,
+redirects HTTP and sends HSTS for a year, which browsers keep after the setting
+changes. Move to it once the Dokploy domain serves HTTPS.
 
 ---
 

@@ -24,7 +24,10 @@ import type {
   AreaPerilGridSummary,
   GemCatalogue,
   GridBuildResult,
+  GridCountry,
   GridEstimate,
+  GridSeed,
+  GridSeedSummary,
   GridSpecificationInput,
   VulnerabilityBuildResult,
   GeocodingSensitivity,
@@ -690,10 +693,14 @@ export function useBuildVulnerabilitySet() {
  * read than one that is briefly a moment out of date.
  */
 export function useGridEstimate(specification: GridSpecificationInput, enabled: boolean) {
+  // The country and the domain change the count as much as the boxes do: a
+  // clip removes the sea from whichever country is named.
   const geometry = {
+    country_code: specification.country_code,
     base_resolution_deg: specification.base_resolution_deg,
     tiles: specification.tiles,
     refinements: specification.refinements,
+    domain: specification.domain,
   };
   return useQuery({
     queryKey: ["grid-estimate", geometry] as const,
@@ -702,6 +709,32 @@ export function useGridEstimate(specification: GridSpecificationInput, enabled: 
     placeholderData: (previous) => previous,
     staleTime: Infinity,
     retry: false,
+  });
+}
+
+/** The grid specifications CASS ships, one line each. */
+export function useGridSeeds() {
+  return useQuery({
+    queryKey: ["grid-seeds"] as const,
+    queryFn: () => api.get<GridSeedSummary[]>("/grids/seeds/"),
+    staleTime: Infinity,
+  });
+}
+
+/** Fetch one seed's specification to load into the builder. */
+export function useLoadGridSeed() {
+  return useMutation({
+    mutationFn: (countryCode: string) =>
+      api.get<GridSeed>(`/grids/seeds/${countryCode.toLowerCase()}/`),
+  });
+}
+
+/** Every country a grid can be clipped to, by its two-letter code. */
+export function useGridCountries() {
+  return useQuery({
+    queryKey: ["grid-countries"] as const,
+    queryFn: () => api.get<GridCountry[]>("/grids/countries/"),
+    staleTime: Infinity,
   });
 }
 
@@ -1312,6 +1345,24 @@ export function useHazardSets() {
   return useQuery({
     queryKey: ["hazard-sets"] as const,
     queryFn: async () => rows(await api.get<Paginated<HazardSet>>("/hazard-sets/")),
+  });
+}
+
+/**
+ * Rebuild a hazard set's footprint from its stored calculation, as a run.
+ *
+ * For when the intensity bins have changed since the set was built. The answer is
+ * the queued run, followed on the run monitor.
+ */
+export function useRebuildHazardSet() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (hazardSet: UUID) =>
+      api.post<{ run: UUID; hazard_run: UUID; state: string }>(
+        `/hazard-sets/${hazardSet}/rebuild/`,
+        {},
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["hazard-sets"] }),
   });
 }
 

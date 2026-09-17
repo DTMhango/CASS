@@ -161,6 +161,8 @@ const SPEC = {
 let specs: unknown[] = [];
 let launchStatus = 202;
 let servedModel: HazardModel = MODEL;
+let configured: ConfiguredRun = CONFIGURED;
+let configureBodies: Record<string, unknown>[] = [];
 
 function routeFor(url: string): unknown {
   if (url.includes("/launch/")) {
@@ -176,7 +178,7 @@ function routeFor(url: string): unknown {
   if (url.includes("/specs/")) return specs;
   if (url.includes("/hazard-models/parameters/")) return PARAMETERS;
   if (url.includes("/inspect/")) return INSPECTION;
-  if (url.includes("/configure/")) return CONFIGURED;
+  if (url.includes("/configure/")) return configured;
   if (url.includes("/grids/")) {
     return {
       count: 1,
@@ -218,10 +220,15 @@ beforeEach(() => {
   specs = [SPEC];
   launchStatus = 202;
   servedModel = MODEL;
+  configured = CONFIGURED;
+  configureBodies = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes("/configure/") && init?.body) {
+        configureBodies.push(JSON.parse(String(init.body)));
+      }
       const status = url.includes("/launch/") ? launchStatus : 200;
       return new Response(JSON.stringify(routeFor(url)), {
         status,
@@ -312,6 +319,62 @@ describe("HazardModels", () => {
     expect(
       await screen.findByText(/the number of Oasis periods/),
     ).toBeInTheDocument();
+  });
+
+  it("asks for ten thousand simulated years unless told otherwise", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByRole("button", { name: /Resolve configuration/ }));
+
+    await waitFor(() => expect(configureBodies.length).toBeGreaterThan(0));
+    // Ten fifty-year sets per path; the server's twenty paths make ten thousand.
+    expect(configureBodies[configureBodies.length - 1]?.overrides).toMatchObject({
+      investigation_time: 50,
+      ses_per_logic_tree_path: 10,
+    });
+  });
+
+  it("says how long the catalogue is and what its tail rests on", async () => {
+    configured = {
+      ...CONFIGURED,
+      overrides: { investigation_time: 50, ses_per_logic_tree_path: 10, number_of_logic_tree_samples: 20 },
+      catalogue: {
+        simulated_years: 10000,
+        tail: [
+          { return_period: 100, years_beyond: 100 },
+          { return_period: 1000, years_beyond: 10 },
+        ],
+        storage: { hazard_set_mb: 2300, package_mb: 1700, basis: "" },
+      },
+    };
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByRole("button", { name: /Resolve configuration/ }));
+
+    expect(await screen.findByText("10,000 simulated years")).toBeInTheDocument();
+    expect(screen.getByText(/50 years per event set × 10 event sets per path × 20 logic-tree paths/)).toBeInTheDocument();
+    expect(screen.getByText(/the 1-in-1,000 from the 10 worst/)).toBeInTheDocument();
+    expect(screen.getByText(/store at most 2.3 GB/)).toBeInTheDocument();
+    expect(screen.queryByText(/moves a great deal/)).not.toBeInTheDocument();
+  });
+
+  it("warns when a return period rests on fewer than ten simulated years", async () => {
+    configured = {
+      ...CONFIGURED,
+      catalogue: {
+        simulated_years: 1000,
+        tail: [{ return_period: 1000, years_beyond: 1 }],
+      },
+    };
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByText(MODEL.label));
+    await user.click(await screen.findByRole("button", { name: /Resolve configuration/ }));
+
+    expect(await screen.findByText(/the 1-in-1,000 from the 1 worst/)).toBeInTheDocument();
+    expect(screen.getByText(/moves a great deal from one run to the next/)).toBeInTheDocument();
   });
 
   it("warns that one sampled path is not the model's weighted mean", async () => {

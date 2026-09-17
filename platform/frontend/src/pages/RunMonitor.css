@@ -6,6 +6,12 @@
   align-items: start;
 }
 
+/* Side by side, a card's stacking margin would drop it below its neighbour;
+   the grid's gap spaces the cards. */
+.run-detail > .card + .card {
+  margin-top: 0;
+}
+
 @media (max-width: 1024px) {
   .run-detail {
     grid-template-columns: minmax(0, 1fr);

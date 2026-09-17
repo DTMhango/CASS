@@ -68,6 +68,7 @@ const RESULTS: ImportResults = {
     id: BATCH_ID,
     filename: "premium_policies.xlsx",
     source_checksum: "a".repeat(64),
+    snapshot_date: "2026-06-30",
     parser_version: "intake-1.0.0",
     cohort_rule_version: "cohort-1.0.0",
     overlay_version: "1.0.0",
@@ -394,6 +395,14 @@ describe("ImportReview", () => {
     renderScreen();
     expect(await screen.findByText("intake-1.0.0")).toBeInTheDocument();
     expect(screen.getByText("cohort-1.0.0")).toBeInTheDocument();
+  });
+
+  it("says the date the schedule describes, beside the file it came from", async () => {
+    renderScreen();
+    // The as-at date is asked for on import and read nowhere else, so this is
+    // the one place it can be checked against the workbook it was typed for.
+    expect(await screen.findByText("premium_policies.xlsx")).toBeInTheDocument();
+    expect(screen.getByText("2026-06-30")).toBeInTheDocument();
   });
 
   it("shows every gap with the value behind it and what it costs", async () => {

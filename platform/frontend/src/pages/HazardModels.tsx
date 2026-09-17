@@ -264,7 +264,7 @@ function UploadPanel() {
             </ul>
           </Disclosure>
 
-          <div className="upload-form">
+          <div className="upload-form form-row">
             <Field
               label="Country"
               htmlFor="hazard-country"
@@ -400,9 +400,13 @@ function ConfigurePanel({ model }: { model: HazardModel }) {
   const save = useSaveRunSpec(model.id);
 
   const [gridId, setGridId] = useState<UUID | undefined>();
+  // Fifty-year sets, ten per path, over the server's twenty paths: ten thousand
+  // simulated years (ADR 21). The form used to send twenty sets here, from
+  // before paths were pooled, which silently made every default run twenty
+  // thousand years long.
   const [overrides, setOverrides] = useState<Record<string, string>>({
     investigation_time: "50",
-    ses_per_logic_tree_path: "20",
+    ses_per_logic_tree_path: "10",
   });
   const [name, setName] = useState(`${model.label} run`);
   const initialRegion = model.country_code === "ID" ? "jakarta-bandung" : "national";
@@ -464,7 +468,7 @@ function ConfigurePanel({ model }: { model: HazardModel }) {
       title={`Configure a run of ${model.label}`}
       description="The model's own science is shown and not offered. What you set is the run."
     >
-      <div className="upload-form">
+      <div className="upload-form form-row">
         <Field
           label="Area-peril grid"
           htmlFor="hazard-grid"
@@ -698,6 +702,7 @@ function Resolved({ outcome }: { outcome: ConfiguredRun }) {
   return (
     <>
       <CalculationMode outcome={outcome} />
+      <Catalogue outcome={outcome} />
       <Coverage outcome={outcome} />
 
       {errors.length === 0 ? (
@@ -834,6 +839,64 @@ function CalculationMode({ outcome }: { outcome: ConfiguredRun }) {
  * cell with no nearby measurement takes the model's reference rock, which
  * understates the loss wherever the ground is softer.
  */
+/** Megabytes as a person reads them. */
+function gigabytes(megabytes: number): string {
+  return megabytes >= 1000 ? `${(megabytes / 1000).toFixed(1)} GB` : `${formatCount(megabytes)} MB`;
+}
+
+/**
+ * How long the simulated catalogue is, and what its return periods rest on.
+ *
+ * Three settings multiply into the length -- years per event set, event sets per
+ * path, and logic-tree paths -- and none of them says so alone. A loss read at a
+ * return period from a simulated catalogue is one of its worst years: from a
+ * thousand years the 1-in-1,000-year loss is the single worst, from ten thousand
+ * it is the tenth-worst. So the count of years beyond each return period is
+ * shown, before anything runs, beside what the run would store.
+ */
+function Catalogue({ outcome }: { outcome: ConfiguredRun }) {
+  const catalogue = outcome.catalogue;
+  if (!catalogue) return null;
+  const setting = (name: string) => outcome.overrides[name];
+  const thin = catalogue.tail.some((item) => item.years_beyond < 10);
+
+  return (
+    <Notice
+      tone={thin ? "warning" : "info"}
+      title={`${formatCount(catalogue.simulated_years)} simulated years`}
+    >
+      <p>
+        {String(setting("investigation_time") ?? "?")} years per event set ×{" "}
+        {String(setting("ses_per_logic_tree_path") ?? "?")} event sets per path ×{" "}
+        {String(setting("number_of_logic_tree_samples") ?? "?")} logic-tree paths.
+      </p>
+      <p>
+        A return-period loss is read from the worst simulated years:{" "}
+        {catalogue.tail
+          .map(
+            (item) =>
+              `the 1-in-${formatCount(item.return_period)} from the ${formatCount(
+                Math.floor(item.years_beyond),
+              )} worst`,
+          )
+          .join(", ")}
+        .
+        {thin
+          ? " Where that is fewer than ten years, the figure moves a great deal from one run to the next; more event sets steady it."
+          : ""}
+      </p>
+      {catalogue.storage ? (
+        <p className="muted">
+          Its hazard would store at most {gigabytes(catalogue.storage.hazard_set_mb)},
+          and a model package built on it at most{" "}
+          {gigabytes(catalogue.storage.package_mb)} more. Both
+          grow in step with the simulated years.
+        </p>
+      ) : null}
+    </Notice>
+  );
+}
+
 function Coverage({ outcome }: { outcome: ConfiguredRun }) {
   const coverage = outcome.coverage;
   const site = outcome.site_join as {

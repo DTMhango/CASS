@@ -112,7 +112,7 @@ export function ImportReview({ embedded = false }: { embedded?: boolean } = {}) 
         />}
         <EmptyState
           title="No portfolio has been imported yet"
-          description="Import a workbook in the exposure workspace, and this screen will show what came in and what it is missing."
+          description="Import a workbook on the Portfolios tab, under Add a portfolio, and this screen will show what came in and what it is missing."
         />
       </>
     );
@@ -550,7 +550,7 @@ function PromotionPanel({
         </>
       ) : (
         <>
-          <div className="promotion__form">
+          <div className="promotion__form form-row">
             <Field
               label="Portfolio name"
               htmlFor="promote-name"
@@ -724,6 +724,8 @@ function Provenance({ results }: { results: ImportResults }) {
           <dd>{batch.filename || "—"}</dd>
         </div>
         <div>
+          <dt>As at</dt>
+          <dd>{batch.snapshot_date || "not stated; read as today's position"}</dd>
         </div>
         <div>
           <dt>Parser</dt>
@@ -1081,7 +1083,7 @@ function QueueRow({
         </div>
       </dl>
 
-      <form className="queue__form" onSubmit={submit}>
+      <form className="queue__form form-row" onSubmit={submit}>
         <Field label="Decision" htmlFor={`${location.id}-field`}>
           <Select
             id={`${location.id}-field`}

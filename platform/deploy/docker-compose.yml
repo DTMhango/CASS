@@ -80,8 +80,39 @@ x-django-env: &django-env
   CASS_UPLOAD_SESSION_SECONDS: ${CASS_UPLOAD_SESSION_SECONDS:-900}
   CASS_CLAMD_HOST: ${CASS_CLAMD_HOST:-}
   CASS_CLAMD_PORT: ${CASS_CLAMD_PORT:-3310}
+  # The largest grid a specification may build, in cells. Every cell is a site
+  # in every hazard calculation on the grid, so this bounds hazard compute and
+  # storage rather than the grid itself, which is cheap at this size.
+  CASS_MAX_GRID_CELLS: ${CASS_MAX_GRID_CELLS:-500000}
+  # Whether OpenQuake keeps its copy of a calculation once CASS has stored the
+  # datastore. False stores each calculation once.
+  CASS_OPENQUAKE_KEEP_CALCULATIONS: ${CASS_OPENQUAKE_KEEP_CALCULATIONS:-false}
   # The scrape token for /metrics/. Empty leaves the metrics to administrators.
   CASS_METRICS_TOKEN: ${CASS_METRICS_TOKEN:-}
+
+# -- resource limits ----------------------------------------------------------
+# Every long-running container has a memory limit, set in .env, with defaults
+# that fit a shared server where CASS may use about 24 GB: they add up to
+# 22 GiB. Docker has no limit across containers, so that sum is the ceiling. It
+# is not a reservation; most containers idle far below theirs.
+#
+# Swap is held to the same figure. Docker otherwise lets a container use as much
+# swap again as its limit, and on a shared host a container that overruns onto
+# disk slows every other application instead of stopping itself.
+#
+# Each engine starts one process per CPU unless told otherwise, and each process
+# needs its own memory, so a memory limit without a process count is one the
+# engine outgrows on a larger server. CASS_OPENQUAKE_CORES,
+# CASS_OASIS_KERNEL_PROCESSES and CASS_OASIS_API_WORKERS bound them.
+#
+# CASS_RESOURCE_LIMITS=0 lifts all of it -- every limit and process count not
+# set on its own line -- which is how CASS ran before the limits existed.
+#
+# CASS_PLATFORM_DIR is where platform/ is, from the project directory compose
+# resolves relative paths against. make runs compose from this file's folder,
+# so the default is "..". Dokploy runs it from the repository root, so its
+# template sets "./platform" -- with the "./", because compose reads a mount
+# source that does not start with ".", "/" or "~" as the name of a volume.
 
 services:
   # Every image pulled from a registry is pinned by digest as well as tag, so the
@@ -102,7 +133,12 @@ services:
       # Postgres only runs these on first initialisation, which is the right
       # semantics: they are part of standing an installation up, not of every
       # restart.
-      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+      #
+      # Found through CASS_PLATFORM_DIR like the build contexts. A relative
+      # ./postgres-init resolved from the repository root is a folder that does
+      # not exist, which Docker creates empty -- so the databases would never be
+      # made, and the Oasis server would fail its first start.
+      - ${CASS_PLATFORM_DIR:-..}/deploy/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cass} -d ${POSTGRES_DB:-cass}"]
       interval: 5s
@@ -112,6 +148,8 @@ services:
     # reachable only from the compose network.
     expose:
       - "5432"
+    mem_limit: ${CASS_POSTGRES_MEMORY:-${CASS_RESOURCE_LIMITS:-768M}}
+    memswap_limit: ${CASS_POSTGRES_MEMORY:-${CASS_RESOURCE_LIMITS:-768M}}
 
   redis:
     image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
@@ -125,6 +163,8 @@ services:
       retries: 20
     expose:
       - "6379"
+    mem_limit: ${CASS_REDIS_MEMORY:-${CASS_RESOURCE_LIMITS:-256M}}
+    memswap_limit: ${CASS_REDIS_MEMORY:-${CASS_RESOURCE_LIMITS:-256M}}
 
   minio:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
@@ -141,6 +181,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    mem_limit: ${CASS_MINIO_MEMORY:-${CASS_RESOURCE_LIMITS:-768M}}
+    memswap_limit: ${CASS_MINIO_MEMORY:-${CASS_RESOURCE_LIMITS:-768M}}
 
   # Creates the buckets section 5 separates by purpose and retention, then
   # exits. Bucket creation is idempotent, so a restart is harmless.
@@ -164,6 +206,9 @@ services:
         done
         echo "CASS buckets ready"
     restart: "no"
+    # Runs for a moment and exits, so it is left out of the 22 GiB.
+    mem_limit: ${CASS_RESOURCE_LIMITS:-512M}
+    memswap_limit: ${CASS_RESOURCE_LIMITS:-512M}
 
   api:
     # One image for the API, the worker and the scheduler. They run the same
@@ -171,7 +216,7 @@ services:
     # worker on a stale image refuses tasks the API has just started sending.
     image: cass/platform-api:local
     build:
-      context: ..
+      context: ${CASS_PLATFORM_DIR:-..}
       dockerfile: deploy/images/Dockerfile.api
     environment:
       <<: [*django-env, *artifact-env]
@@ -199,6 +244,10 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    # Grids and vulnerability sets are built inside the request, so the API
+    # needs more than serving alone would.
+    mem_limit: ${CASS_API_MEMORY:-${CASS_RESOURCE_LIMITS:-1536M}}
+    memswap_limit: ${CASS_API_MEMORY:-${CASS_RESOURCE_LIMITS:-1536M}}
 
   # Durable background execution. Section 11 requires declared limits rather
   # than inherited maximum parallelism, so concurrency is set explicitly and
@@ -206,7 +255,7 @@ services:
   worker:
     image: cass/platform-api:local
     build:
-      context: ..
+      context: ${CASS_PLATFORM_DIR:-..}
       dockerfile: deploy/images/Dockerfile.api
     command:
       - celery
@@ -240,6 +289,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Where conversions, package builds and result collection actually run --
+    # the converter's own container only proves its package imports. Shared by
+    # CASS_WORKER_CONCURRENCY tasks at once.
+    mem_limit: ${CASS_WORKER_MEMORY:-${CASS_RESOURCE_LIMITS:-3.5G}}
+    memswap_limit: ${CASS_WORKER_MEMORY:-${CASS_RESOURCE_LIMITS:-3.5G}}
 
   # The scheduler. Retention expiry and abandoning stale runs are decisions the
   # platform takes on a clock rather than when somebody presses something, and
@@ -248,7 +302,7 @@ services:
   beat:
     image: cass/platform-api:local
     build:
-      context: ..
+      context: ${CASS_PLATFORM_DIR:-..}
       dockerfile: deploy/images/Dockerfile.api
     command:
       - celery
@@ -262,10 +316,12 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+    mem_limit: ${CASS_BEAT_MEMORY:-${CASS_RESOURCE_LIMITS:-256M}}
+    memswap_limit: ${CASS_BEAT_MEMORY:-${CASS_RESOURCE_LIMITS:-256M}}
 
   frontend:
     build:
-      context: ..
+      context: ${CASS_PLATFORM_DIR:-..}
       dockerfile: deploy/images/Dockerfile.frontend
       args:
         CASS_API_ORIGIN: ${CASS_API_ORIGIN:-http://api:8000}
@@ -274,14 +330,22 @@ services:
         condition: service_healthy
     ports:
       - "${CASS_WEB_PORT:-8080}:8080"
+    mem_limit: ${CASS_FRONTEND_MEMORY:-${CASS_RESOURCE_LIMITS:-256M}}
+    memswap_limit: ${CASS_FRONTEND_MEMORY:-${CASS_RESOURCE_LIMITS:-256M}}
 
   # -- CASS engine-adjacent services ---------------------------------------
   # The keys service and the converter are CASS product components, not engine
-  # forks. They are separate containers so the converter can be given a
-  # model-build resource profile without that applying to the whole API.
+  # forks. Today each image proves its package imports and exits: the control
+  # plane imports both as libraries, so keys are resolved in the API and
+  # conversions run in the worker, under those containers' limits.
+  #
+  # The converter carried a 16G limit, CASS_CONVERTER_MEMORY, which read as a
+  # limit on conversions and limited only this container, which does no work.
+  # It is gone rather than left to mislead; a line for it in an existing .env
+  # is ignored.
   keys:
     build:
-      context: ..
+      context: ${CASS_PLATFORM_DIR:-..}
       dockerfile: deploy/images/Dockerfile.keys
     environment:
       <<: *artifact-env
@@ -289,22 +353,22 @@ services:
     expose:
       - "8010"
     profiles: ["engines"]
+    # Imports and exits, so left out of the 22 GiB.
+    mem_limit: ${CASS_RESOURCE_LIMITS:-512M}
+    memswap_limit: ${CASS_RESOURCE_LIMITS:-512M}
 
   converter:
     build:
-      context: ..
+      context: ${CASS_PLATFORM_DIR:-..}
       dockerfile: deploy/images/Dockerfile.converter
     environment:
       <<: *artifact-env
     expose:
       - "8020"
-    # Section 11 separates the model-build profile from the portfolio-analysis
-    # one: a country-scale conversion needs memory an analysis does not.
-    deploy:
-      resources:
-        limits:
-          memory: ${CASS_CONVERTER_MEMORY:-16G}
     profiles: ["engines"]
+    # Imports and exits, so left out of the 22 GiB.
+    mem_limit: ${CASS_RESOURCE_LIMITS:-512M}
+    memswap_limit: ${CASS_RESOURCE_LIMITS:-512M}
 
   # -- upstream engines ----------------------------------------------------
   # Unmodified upstream images. CASS reaches them through adapters over their
@@ -320,11 +384,24 @@ services:
     # with no subcommand, printed its usage and exited 0 -- a container that
     # "started" and was never listening.
     command: ["oq webui start 0.0.0.0:8800 -s"]
+    # OpenQuake starts a calculation process on every core it finds, and asks
+    # for at least 2 GB each for hazard. Left to itself it would use every core
+    # of the server and outgrow any limit below, so the count is set in a file
+    # the engine reads over its own defaults (OQ_CONFIG_FILE). 0 is every core,
+    # the engine's default. The limit allows 2 GB a core over the webui's own
+    # measured footprint, just over 1 GB.
+    environment:
+      OQ_CONFIG_FILE: /etc/cass/openquake.cfg
+    configs:
+      - source: openquake
+        target: /etc/cass/openquake.cfg
     volumes:
       - openquake-data:/home/openquake/oqdata
     expose:
       - "8800"
     profiles: ["engines"]
+    mem_limit: ${CASS_OPENQUAKE_MEMORY:-${CASS_RESOURCE_LIMITS:-8G}}
+    memswap_limit: ${CASS_OPENQUAKE_MEMORY:-${CASS_RESOURCE_LIMITS:-8G}}
 
   oasis-api:
     image: coreoasis/api_server:2.5.7@sha256:0a1258352f185c7dc229cef740da17129123a44536de88586370cc2182ce2229
@@ -336,6 +413,21 @@ services:
       # true. Without it the container comes up against an empty schema and
       # fails creating the administrator, with "auth_user does not exist".
       STARTUP_RUN_MIGRATIONS: "true"
+      CASS_OASIS_API_WORKERS: ${CASS_OASIS_API_WORKERS:-${CASS_RESOURCE_LIMITS:-3}}
+    # The image's run script (wsgi/run-wsgi.sh) starts one gunicorn worker per
+    # CPU it can see, at roughly 270 MB each, and a memory limit does not change
+    # what it sees: 21 processes and 3.4 GB idle on a 20-core workstation, more
+    # on a larger server. This is that script with the count taken from the
+    # environment, where 0 restores the image's rule. The image's entrypoint
+    # still runs first -- migrations, the administrator -- and ends by exec-ing
+    # this. It copies the pinned image's script: raise the image, read it again.
+    command:
+      - sh
+      - -c
+      - |
+        workers="$$CASS_OASIS_API_WORKERS"
+        [ "$$workers" -gt 0 ] 2>/dev/null || workers=$$(python3 -c "import os; print(len(os.sched_getaffinity(0)))")
+        exec gunicorn src.server.oasisapi.wsgi --bind=0.0.0.0:8000 --workers="$$workers" --timeout=600 --log-level=info
     depends_on:
       postgres:
         condition: service_healthy
@@ -346,12 +438,14 @@ services:
     expose:
       - "8000"
     profiles: ["engines"]
+    mem_limit: ${CASS_OASIS_API_MEMORY:-${CASS_RESOURCE_LIMITS:-1536M}}
+    memswap_limit: ${CASS_OASIS_API_MEMORY:-${CASS_RESOURCE_LIMITS:-1536M}}
 
   oasis-worker:
     # The official worker with one upstream defect patched at build time; the
     # Dockerfile says which and why.
     build:
-      context: ..
+      context: ${CASS_PLATFORM_DIR:-..}
       dockerfile: deploy/images/Dockerfile.oasis-worker
     image: cass/model_worker:2.5.7-patched
     environment:
@@ -378,6 +472,14 @@ services:
       # calculating correctly. Ground-up never reaches that code, so the failure
       # looks like the financial terms rather than the log level.
       OASIS_LOG_LEVEL: ${OASIS_LOG_LEVEL:-INFO}
+      # The loss kernel runs one process per CPU unless told otherwise, and each
+      # holds its own share of the calculation; the PiWind baseline peaked at
+      # 21.6 GB under a highly parallel configuration. The image already takes
+      # computation settings from OASIS_<NAME> -- it ships OASIS_ENV_OVERRIDE
+      # set -- so this bounds the kernel without touching the analysis settings
+      # a run's calculation digest is taken from. 0 is one per CPU, the kernel's
+      # default.
+      OASIS_KERNEL_NUM_PROCESSES: ${CASS_OASIS_KERNEL_PROCESSES:-${CASS_RESOURCE_LIMITS:-4}}
     depends_on:
       oasis-api:
         condition: service_started
@@ -392,6 +494,8 @@ services:
       # integration suite -- to serve that instead.
       - ${CASS_MODEL_DATA_PATH:-oasis-model}:/home/worker/model:ro
     profiles: ["engines"]
+    mem_limit: ${CASS_OASIS_WORKER_MEMORY:-${CASS_RESOURCE_LIMITS:-4.5G}}
+    memswap_limit: ${CASS_OASIS_WORKER_MEMORY:-${CASS_RESOURCE_LIMITS:-4.5G}}
 
   # The API server's celery worker, and the service this stack was missing.
   #
@@ -422,6 +526,9 @@ services:
     volumes:
       - oasis-data:/shared-fs
     profiles: ["engines"]
+    # A fixed pool of four whatever the core count, measured at 0.37 GB.
+    mem_limit: ${CASS_OASIS_CELERY_MEMORY:-${CASS_RESOURCE_LIMITS:-768M}}
+    memswap_limit: ${CASS_OASIS_CELERY_MEMORY:-${CASS_RESOURCE_LIMITS:-768M}}
 
 volumes:
   postgres-data:
@@ -430,3 +537,12 @@ volumes:
   openquake-data:
   oasis-data:
   oasis-model:
+
+configs:
+  # Read by OpenQuake over its own defaults; see the openquake service. Written
+  # by compose from this text, so the core count follows .env without a file in
+  # the repository to mount.
+  openquake:
+    content: |
+      [distribution]
+      num_cores = ${CASS_OPENQUAKE_CORES:-${CASS_RESOURCE_LIMITS:-3}}

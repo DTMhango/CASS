@@ -209,6 +209,55 @@ describe("ExposureWorkspace", () => {
     expect(screen.getByText("3 locations")).toBeInTheDocument();
   });
 
+  it("offers both ways in while no portfolio is selected", async () => {
+    renderWorkspace();
+
+    expect(await screen.findByText("Add a portfolio")).toBeInTheDocument();
+    expect(screen.getByText("Your data is a spreadsheet")).toBeInTheDocument();
+    expect(screen.getByText("Your data is already OED")).toBeInTheDocument();
+  });
+
+  it("gives way to the portfolio once one is chosen, and comes back on request", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Pilot portfolio"));
+    await waitFor(() =>
+      expect(screen.queryByText("Add a portfolio")).not.toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add portfolio" }));
+    expect(await screen.findByText("Add a portfolio")).toBeInTheDocument();
+  });
+
+  it("says which project is missing rather than disabling a button silently", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    // The list is scoped to every project the user can see until one is chosen,
+    // but a portfolio has to be filed under one.
+    expect(await screen.findByText("Choose a project first")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import workbook" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create version" })).toBeDisabled();
+
+    await user.click(screen.getByLabelText("Project"));
+    await user.click(await screen.findByRole("option", { name: PROJECT.name }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Choose a project first")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("asks for the as-at date as a label on the import, not as an input to it", async () => {
+    renderWorkspace();
+
+    const asAt = await screen.findByLabelText(/As-at date/);
+    expect(asAt).toHaveAttribute("type", "date");
+    expect(
+      screen.getByText(/It labels the import and is shown on the import review/),
+    ).toBeInTheDocument();
+  });
+
   it("shows how many findings must be resolved before publication", async () => {
     renderWorkspace();
     expect(await screen.findByText("1 to resolve")).toBeInTheDocument();

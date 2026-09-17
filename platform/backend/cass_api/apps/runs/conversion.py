@@ -17,6 +17,8 @@ the two.
 from __future__ import annotations
 
 import json
+import pathlib
+import tempfile
 from typing import Any
 
 from django.db import transaction
@@ -78,21 +80,27 @@ def execute(conversion_run: ConversionRun, *, actor=None) -> ConversionRun:
     try:
         policy = policy_for(conversion_run)
         _require_policy(conversion_run, policy)
-        inputs = packaging.gather(conversion_run.model_version)
-        run.advance(
-            "manifest",
-            actor=actor,
-            message=(
-                f"Converting {conversion_run.model_version.reference} under "
-                f"{policy.event_identity} events and {policy.imt_representation} "
-                f"measures, approved as {policy.approval_reference}."
-            ),
-        )
+        # The footprints are read from files in a workspace rather than held in
+        # memory: a national one is gigabytes. They are needed only while the
+        # package is written, and the workspace goes as soon as it is.
+        with tempfile.TemporaryDirectory(prefix="cass-package-") as workspace:
+            inputs = packaging.gather(
+                conversion_run.model_version, workspace=pathlib.Path(workspace)
+            )
+            run.advance(
+                "manifest",
+                actor=actor,
+                message=(
+                    f"Converting {conversion_run.model_version.reference} under "
+                    f"{policy.event_identity} events and {policy.imt_representation} "
+                    f"measures, approved as {policy.approval_reference}."
+                ),
+            )
 
-        stage = "footprint"
-        built = packaging.deploy(
-            inputs, root=packaging.model_root(), token=str(run.id)[:8]
-        )
+            stage = "footprint"
+            built = packaging.deploy(
+                inputs, root=packaging.model_root(), token=str(run.id)[:8]
+            )
 
         stage = "events"
         run.advance(

@@ -38,6 +38,7 @@ from apps.exposure.models import (
     SourcePolicyRow,
     SourceRiskLocation,
 )
+from apps.exposure.review import import_results
 from cass_extract import intake
 from cass_extract import profile as intake_profile
 
@@ -384,6 +385,12 @@ def test_an_analyst_can_upload_an_extract(api, project, workbook):
     assert response.data["policy_row_count"] == 10
     assert response.data["risk_row_count"] == 11
     assert response.data["blocking"] is False
+
+    # The as-at date is the one thing on the upload form that no calculation
+    # reads. It earns its place by being readable afterwards: an import whose
+    # stated date never came back would be a field nobody could check.
+    batch = ImportBatch.objects.get(id=response.data["id"])
+    assert import_results(batch)["batch"]["snapshot_date"] == "2026-06-30"
 
 
 def test_an_upload_needs_a_project_the_caller_belongs_to(client_for, outsider, project, workbook):

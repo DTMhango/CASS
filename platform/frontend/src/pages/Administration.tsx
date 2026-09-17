@@ -667,7 +667,7 @@ function AuditSearch() {
       description="Append-only. Every governed action, who took it and what it touched."
       padded={false}
     >
-      <div className="admin-audit__filters">
+      <div className="admin-audit__filters form-row">
         <Field label="Action" htmlFor="audit-action">
           <Combobox
             id="audit-action"

@@ -1,5 +1,6 @@
 /**
- * Signing out, driven through the gate that decides what a person can see.
+ * Signing out, driven through the gate that decides what a person can see, and
+ * the other controls the frame around every screen carries.
  *
  * The button is only half of signing out. The other half is that the interface
  * stops showing the signed-out person's work, so this renders the real session
@@ -9,7 +10,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -178,5 +179,44 @@ describe("signing out", () => {
     await user.click(await screen.findByRole("button", { name: "Sign out" }));
 
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+});
+
+describe("the frame around every screen", () => {
+  it("opens the user guide from the header", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("link", { name: "User guide" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "User guide" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "User guide" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("keeps sign out in the sidebar, under the person it signs out", async () => {
+    renderApp();
+
+    const sidebar = await screen.findByRole("navigation", { name: "Product areas" });
+    expect(within(sidebar).getByText("Ada Analyst")).toBeInTheDocument();
+    // One sign out on the screen, and it is the sidebar's.
+    const signOuts = screen.getAllByRole("button", { name: "Sign out" });
+    expect(signOuts).toHaveLength(1);
+    expect(sidebar).toContainElement(signOuts[0] ?? null);
+  });
+
+  it("says a failed sign out beside the button in the sidebar", async () => {
+    const user = userEvent.setup();
+    deleteOutcome = { status: 503, body: { detail: "The platform is unavailable." } };
+    renderApp();
+
+    const sidebar = await screen.findByRole("navigation", { name: "Product areas" });
+    await user.click(within(sidebar).getByRole("button", { name: "Sign out" }));
+
+    expect(await within(sidebar).findByRole("alert")).toHaveTextContent(
+      "You are still signed in.",
+    );
   });
 });

@@ -310,16 +310,53 @@ def test_sampling_one_path_from_a_large_tree_is_declared(model, grid):
     )
 
 
-def test_a_run_samples_twenty_paths_over_the_same_thousand_years(model, grid):
-    """The rule ADR 18 decided, and the same span as one path covered before."""
+def test_a_run_samples_twenty_paths_over_ten_thousand_years(model, grid):
+    """Twenty paths (ADR 18), each ten fifty-year sets long (ADR 21)."""
     outcome = hazard_models.resolve(model, grid)
 
     assert "number_of_logic_tree_samples = 20" in outcome["rendered"]
-    assert "ses_per_logic_tree_path = 1" in outcome["rendered"]
+    assert "ses_per_logic_tree_path = 10" in outcome["rendered"]
     assert "investigation_time = 50.0" in outcome["rendered"]
+    assert outcome["catalogue"]["simulated_years"] == 10_000
     assert not any(
         "weighted mean" in item["message"] for item in outcome["problems"]
     )
+
+
+def test_the_catalogue_says_what_its_tail_rests_on_before_anything_runs(model, grid):
+    """A 1-in-1,000-year figure from 1,000 simulated years is the single worst year."""
+    from apps.modelregistry.assets import load_grid
+
+    outcome = hazard_models.resolve(
+        model,
+        grid,
+        overrides={"ses_per_logic_tree_path": 10, "number_of_logic_tree_samples": 20},
+        cells=load_grid(grid).cells,
+        region={"min_latitude": -7.2, "max_latitude": -5.9, "min_longitude": 106.5, "max_longitude": 107.9},
+    )
+
+    catalogue = outcome["catalogue"]
+    assert catalogue["simulated_years"] == 10_000
+    tail = {item["return_period"]: item["years_beyond"] for item in catalogue["tail"]}
+    assert tail[1000] == 10
+    assert tail[100] == 100
+    sites = outcome["coverage"]["cells_computed"]
+    assert catalogue["storage"]["hazard_set_mb"] == round(sites * (24.3 + 4.0) * 10 / 1000)
+
+
+def test_a_run_that_would_store_a_great_deal_says_so_first(model, grid):
+    from apps.modelregistry.assets import load_grid
+
+    outcome = hazard_models.resolve(
+        model,
+        grid,
+        overrides={"ses_per_logic_tree_path": 100},
+        cells=load_grid(grid).cells,
+    )
+
+    warnings = [item for item in outcome["problems"] if item["severity"] == "warning"]
+    assert any("could store up to about" in item["message"] for item in warnings)
+    assert outcome["runnable"] is True
 
 
 def test_the_rendered_configuration_is_what_would_run(model, grid):

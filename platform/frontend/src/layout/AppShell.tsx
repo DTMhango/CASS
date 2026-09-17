@@ -127,8 +127,34 @@ export function AppShell() {
         <div className="rail__footer">
           {user ? (
             <>
-              <p className="rail__user">{user.full_name || user.username}</p>
-              <p className="rail__role">{roleLabel(user.platform_role)}</p>
+              <div className="rail__identity">
+                <p className="rail__user">{user.full_name || user.username}</p>
+                <p className="rail__role">{roleLabel(user.platform_role)}</p>
+              </div>
+              {/* A sign out that fails silently is indistinguishable from a
+                  button that does nothing, and the person is still signed in,
+                  so the failure is said rather than swallowed. */}
+              {signOut.isError ? (
+                <p className="rail__signout-error" role="alert">
+                  {signOutMessage(signOut.error)}
+                </p>
+              ) : null}
+              {/* Named by aria-label because the collapsed rail hides the
+                  text and keeps only the glyph. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rail__signout"
+                onClick={() => signOut.mutate()}
+                busy={signOut.isPending}
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <span className="rail__glyph" aria-hidden="true">
+                  {"\u21e4"}
+                </span>
+                <span className="rail__signout-label">Sign out</span>
+              </Button>
             </>
           ) : null}
         </div>
@@ -147,26 +173,20 @@ export function AppShell() {
             )}
           </div>
           <div className="topbar__actions">
-            {user ? (
-              <>
-                {/* A sign out that fails silently is indistinguishable from a
-                    button that does nothing, and the person is still signed
-                    in, so the failure is said rather than swallowed. */}
-                {signOut.isError ? (
-                  <p className="topbar__signout-error" role="alert">
-                    {signOutMessage(signOut.error)}
-                  </p>
-                ) : null}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => signOut.mutate()}
-                  busy={signOut.isPending}
-                >
-                  Sign out
-                </Button>
-              </>
-            ) : null}
+            {/* In the header rather than the sidebar: the sidebar is the order
+                the work happens in, and the guide is not a step in it. */}
+            <NavLink
+              to="/guide"
+              className={({ isActive }) =>
+                `btn btn--ghost btn--sm topbar__guide ${isActive ? "topbar__guide--active" : ""}`.trim()
+              }
+              title="How to use CASS, and what its terms mean"
+            >
+              <span className="topbar__guide-glyph" aria-hidden="true">
+                ?
+              </span>
+              User guide
+            </NavLink>
           </div>
         </header>
 

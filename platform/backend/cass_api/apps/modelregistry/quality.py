@@ -25,6 +25,7 @@ from apps.common.storage import get_store
 from cass_converter import benchmark as benchmark_science
 from cass_converter import pilot_bins
 from cass_converter.benchmark import BenchmarkError, BenchmarkPoint
+from cass_converter.footprint_tables import open_table
 
 from .models import ConversionTolerances, HazardBenchmark, PublicationState
 
@@ -96,16 +97,19 @@ def _artifact(hazard_set, role: str):
 
 def _footprint_rows(payload: bytes, imt: str) -> list[_Row]:
     rows: list[_Row] = []
-    for row in csv.DictReader(io.StringIO(payload.decode("utf-8-sig"))):
-        rows.append(
-            _Row(
-                event_id=int(row["event_id"]),
-                area_peril_id=int(row["areaperil_id"]),
-                imt=imt,
-                intensity_bin_id=int(row["intensity_bin_id"]),
-                probability=float(row["probability"]),
+    # Compressed or not: footprints are stored compressed now, and a set
+    # registered before that holds plain CSV.
+    with open_table(payload) as handle:
+        for row in csv.DictReader(handle):
+            rows.append(
+                _Row(
+                    event_id=int(row["event_id"]),
+                    area_peril_id=int(row["areaperil_id"]),
+                    imt=imt,
+                    intensity_bin_id=int(row["intensity_bin_id"]),
+                    probability=float(row["probability"]),
+                )
             )
-        )
     return rows
 
 

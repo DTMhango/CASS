@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { ApiError } from "@/api/client";
 import { useSignIn } from "@/api/hooks";
-import { Button, Field, Notice, TextInput } from "@/components/primitives";
+import { Button, Field, Notice, PasswordInput, TextInput } from "@/components/primitives";
 import logoBox from "@/assets/logo_box.png";
 
 import "./SignIn.css";
@@ -48,10 +48,9 @@ export function SignIn() {
         </Field>
 
         <Field label="Password" htmlFor="password" required>
-          <TextInput
+          <PasswordInput
             id="password"
             name="password"
-            type="password"
             autoComplete="current-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}

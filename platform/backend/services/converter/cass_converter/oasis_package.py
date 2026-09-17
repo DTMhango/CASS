@@ -57,6 +57,8 @@ from cass_core.policy import (
     IMTRepresentation,
 )
 
+from .footprint_tables import open_table
+
 __all__ = [
     "CHANNEL_BASE",
     "CHANNEL_PERILS",
@@ -180,8 +182,9 @@ class PackageInputs:
     vulnerability_csv: bytes
     damage_bins_csv: bytes
     #: One ``event_id,areaperil_id,intensity_bin_id,probability`` table per
-    #: measure, with the grid's cell as the area peril.
-    footprints: Mapping[str, bytes]
+    #: measure, with the grid's cell as the area peril: its bytes, or the path of
+    #: a file on disk, compressed or not. A national footprint is a path.
+    footprints: Mapping[str, bytes | pathlib.Path]
     occurrence_csv: bytes
     period_count: int
     #: Source files of the packages the lookup imports, keyed by their path
@@ -299,13 +302,14 @@ def read_footprint_index(payload: bytes) -> list[FootprintIndexEntry]:
 
 
 def merged_footprint_events(
-    footprints: Mapping[str, bytes],
+    footprints: Mapping[str, bytes | pathlib.Path],
 ) -> Iterator[tuple[int, list[tuple[int, int, float]]]]:
     """Every event across the per-measure footprints, with channel area perils.
 
     Streams each table in step rather than loading them: a regional footprint is
     millions of rows per measure, and only one event's rows across the measures
-    are ever held at once.
+    are ever held at once. Each table is its bytes or, for anything large, the
+    path of a file on disk, compressed or not.
     """
     streams = []
     for imt, payload in sorted(footprints.items()):
@@ -331,8 +335,14 @@ def merged_footprint_events(
         yield event_id, entries
 
 
-def _footprint_rows(payload: bytes, imt: str) -> Iterator[tuple[int, int, int, float]]:
-    reader = csv.reader(io.StringIO(payload.decode("utf-8")))
+def _footprint_rows(
+    source: bytes | pathlib.Path, imt: str
+) -> Iterator[tuple[int, int, int, float]]:
+    with open_table(source) as handle:
+        yield from _footprint_reader_rows(csv.reader(handle), imt)
+
+
+def _footprint_reader_rows(reader, imt: str) -> Iterator[tuple[int, int, int, float]]:
     header = next(reader, None) or []
     column = {name.strip(): position for position, name in enumerate(header)}
     missing = {"event_id", "areaperil_id", "intensity_bin_id", "probability"} - set(column)

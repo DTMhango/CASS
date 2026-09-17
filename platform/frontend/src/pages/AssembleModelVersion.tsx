@@ -67,7 +67,7 @@ export function AssembleModelVersion() {
 
       {halves ? (
         <>
-          <div className="grid-builder__row">
+          <div className="grid-builder__row form-row">
             <Field label="Grid" htmlFor="assemble-grid" required>
               <Combobox
                 id="assemble-grid"
@@ -96,7 +96,7 @@ export function AssembleModelVersion() {
             </Field>
           </div>
 
-          <div className="grid-builder__row">
+          <div className="grid-builder__row form-row">
             <Field
               label="Model version"
               htmlFor="assemble-version"

@@ -21,6 +21,7 @@ import { Models } from "@/pages/Models";
 import { ResultsWorkspace } from "@/pages/ResultsWorkspace";
 import { RunMonitor } from "@/pages/RunMonitor";
 import { SignIn } from "@/pages/SignIn";
+import { UserGuide } from "@/pages/UserGuide";
 
 export function App() {
   const { data: session, isLoading } = useSession();
@@ -58,6 +59,7 @@ export function App() {
           element={<Navigate to="/models?tab=hazard" replace />}
         />
         <Route path="administration" element={<Administration />} />
+        <Route path="guide" element={<UserGuide />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

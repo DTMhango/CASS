@@ -1,22 +1,9 @@
-/* The grid builder's form: rows of fields that wrap rather than scroll. */
+/* The grid builder's form: rows of fields that wrap rather than scroll. Each
+   row is a .form-row, which lays the fields out; this spaces one row from the
+   next. */
 
 .grid-builder__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  align-items: flex-start;
   margin-bottom: var(--space-4);
-}
-
-.grid-builder__row > * {
-  flex: 1 1 12rem;
-  min-width: 0;
-}
-
-/* Side by side, the stacking margin would drop every field after the first
-   below the one beside it; the row's own margin spaces the rows instead. */
-.grid-builder__row > .field + .field {
-  margin-top: 0;
 }
 
 .grid-builder__heading {
@@ -49,4 +36,26 @@
 .grid-builder__problems {
   margin: 0;
   padding-left: var(--space-4);
+}
+
+/* A choice that switches part of the domain on or off, beside the buffer it
+   governs. Laid out as a field so the row keeps its rhythm. */
+.grid-builder__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 16rem;
+  font-size: var(--text-sm);
+}
+
+/* The seed picker sits above the form it fills. */
+.grid-builder__seed {
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.grid-builder__seed-action {
+  display: flex;
+  align-items: flex-end;
 }

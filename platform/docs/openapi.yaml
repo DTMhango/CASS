@@ -3237,6 +3237,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/GridBuildResult'
           description: ''
+  /api/v1/grids/countries/:
+    get:
+      operationId: api_v1_grids_countries_list
+      description: |-
+        Every country a grid can be clipped to, by its two-letter code.
+
+        Natural Earth's list, because it is the land the clip reads: a code it
+        does not draw has no outline to clip to.
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedGridCountryList'
+          description: ''
   /api/v1/grids/estimate/:
     post:
       operationId: api_v1_grids_estimate_create
@@ -3269,6 +3330,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GridEstimate'
+          description: ''
+  /api/v1/grids/seeds/:
+    get:
+      operationId: api_v1_grids_seeds_list
+      description: |-
+        The grid specifications CASS ships, one line each.
+
+        A seed is where a specification starts, not a grid: it is loaded into the
+        builder, changed like anything typed there, and built by whoever builds
+        it. Nothing is registered by reading one.
+      parameters:
+      - in: query
+        name: country_code
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: publication_state
+        schema:
+          type: string
+          enum:
+          - approved
+          - candidate
+          - draft
+          - published
+          - superseded
+          - withdrawn
+        description: |-
+          * `draft` - Draft
+          * `candidate` - Candidate awaiting approval
+          * `approved` - Approved
+          * `published` - Published
+          * `superseded` - Superseded
+          * `withdrawn` - Withdrawn
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedGridSeedList'
+          description: ''
+  /api/v1/grids/seeds/{code}/:
+    get:
+      operationId: api_v1_grids_seeds_retrieve
+      description: One seed's specification, as the grid builder takes it, and what
+        it measured.
+      parameters:
+      - in: path
+        name: code
+        schema:
+          type: string
+          pattern: ^[A-Za-z]{2}$
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GridSeedDetail'
           description: ''
   /api/v1/hazard-benchmarks/:
     get:
@@ -4068,6 +4215,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HazardSet'
+          description: ''
+  /api/v1/hazard-sets/{id}/rebuild/:
+    post:
+      operationId: api_v1_hazard_sets_rebuild_create
+      description: |-
+        Rebuild this set's footprint from its stored calculation, as a run.
+
+        For when the intensity bins have changed since the set was built. The
+        ground motion is read again from the datastore CASS kept, so OpenQuake
+        is not asked for anything; the new footprint is registered as a new set
+        that names this one, and this one's footprint is removed once no model
+        version uses it.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this hazard set.
+        required: true
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardRebuildLaunched'
           description: ''
   /api/v1/model-versions/:
     get:
@@ -6731,6 +6909,8 @@ components:
         is_frozen:
           type: boolean
           readOnly: true
+        specification:
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -6745,6 +6925,7 @@ components:
       - reference
       - refined_resolution_deg
       - refinement_rule
+      - specification
       - version
     AreaPerilGridRequest:
       type: object
@@ -7747,11 +7928,35 @@ components:
       required:
       - grid
       - summary
+    GridCountry:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        parts:
+          type: array
+          items:
+            type: string
+        bounds:
+          type: object
+          additionalProperties: {}
+        seeded:
+          type: boolean
+      required:
+      - bounds
+      - code
+      - name
+      - parts
+      - seeded
     GridEstimate:
       type: object
       properties:
         cells:
           type: integer
+        exact:
+          type: boolean
         cells_from_tiles:
           type: integer
         cells_by_refinement:
@@ -7759,20 +7964,51 @@ components:
           items:
             type: object
             additionalProperties: {}
+        candidates:
+          type: integer
+        removed_as_sea:
+          type: integer
+        removed_as_unsettled:
+          type: integer
+        uncovered_land:
+          type: object
+          additionalProperties: {}
+          nullable: true
+        counted_tiles:
+          type: integer
+        incomplete:
+          type: integer
         limit:
           type: integer
         within_limit:
+          type: boolean
+        is_upper_bound:
+          type: boolean
+        estimated:
           type: boolean
         problems:
           type: array
           items:
             type: string
+        storage:
+          type: object
+          additionalProperties: {}
       required:
+      - candidates
       - cells
       - cells_by_refinement
       - cells_from_tiles
+      - counted_tiles
+      - estimated
+      - exact
+      - incomplete
+      - is_upper_bound
       - limit
       - problems
+      - removed_as_sea
+      - removed_as_unsettled
+      - storage
+      - uncovered_land
       - within_limit
     GridEstimateRequestRequest:
       type: object
@@ -7790,6 +8026,48 @@ components:
           items:
             type: object
             additionalProperties: {}
+    GridSeed:
+      type: object
+      properties:
+        country_code:
+          type: string
+        label:
+          type: string
+        version:
+          type: string
+        base_resolution_deg:
+          type: string
+        tiles:
+          type: integer
+        refinements:
+          type: integer
+        domain:
+          type: object
+          additionalProperties: {}
+        cells:
+          type: integer
+          nullable: true
+      required:
+      - base_resolution_deg
+      - cells
+      - country_code
+      - domain
+      - label
+      - refinements
+      - tiles
+      - version
+    GridSeedDetail:
+      type: object
+      properties:
+        specification:
+          type: object
+          additionalProperties: {}
+        measured:
+          type: object
+          additionalProperties: {}
+      required:
+      - measured
+      - specification
     GridSpecificationRequestRequest:
       type: object
       properties:
@@ -7826,6 +8104,9 @@ components:
         notes:
           type: string
           minLength: 1
+        domain:
+          type: object
+          additionalProperties: {}
       required:
       - base_resolution_deg
       - country_code
@@ -8063,6 +8344,21 @@ components:
       - country_code
       - label
       - version
+    HazardRebuildLaunched:
+      type: object
+      properties:
+        run:
+          type: string
+          format: uuid
+        hazard_run:
+          type: string
+          format: uuid
+        state:
+          type: string
+      required:
+      - hazard_run
+      - run
+      - state
     HazardRun:
       type: object
       properties:
@@ -8282,6 +8578,13 @@ components:
         samples_above_range:
           type: integer
           readOnly: true
+        openquake_calculation_removed:
+          type: boolean
+          readOnly: true
+        rebuild:
+          allOf:
+          - $ref: '#/components/schemas/HazardSetRebuildStatus'
+          readOnly: true
         publication_state:
           allOf:
           - $ref: '#/components/schemas/PublicationStateEnum'
@@ -8310,12 +8613,41 @@ components:
       - licence_cleared
       - logic_tree_paths
       - notes
+      - openquake_calculation_removed
       - publication_state
+      - rebuild
       - reference
       - samples_above_range
       - source_model
       - stochastic_event_sets
       - version
+    HazardSetRebuildStatus:
+      type: object
+      properties:
+        intensity_bins_current:
+          type: boolean
+          nullable: true
+        datastore_available:
+          type: boolean
+        datastore_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        unavailable_reason:
+          type: string
+        rebuilt_as:
+          type: string
+          nullable: true
+        rebuilt_from:
+          type: string
+          nullable: true
+      required:
+      - datastore_available
+      - datastore_expires_at
+      - intensity_bins_current
+      - rebuilt_as
+      - rebuilt_from
+      - unavailable_reason
     Health:
       type: object
       properties:
@@ -8939,6 +9271,52 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExposureVersion'
+    PaginatedGridCountryList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/GridCountry'
+    PaginatedGridSeedList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/GridSeed'
     PaginatedHazardBenchmarkList:
       type: object
       required:
@@ -10648,6 +11026,10 @@ components:
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
+        intensity_bins_current:
+          type: boolean
+          nullable: true
+          readOnly: true
         assumption_variants:
           description: Assumption set flavour to the rules its function table was
             built under.
@@ -10664,6 +11046,7 @@ components:
       - country_code
       - created_at
       - id
+      - intensity_bins_current
       - is_frozen
       - source
       - unsupported_imts

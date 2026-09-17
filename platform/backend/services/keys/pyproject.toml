@@ -9,5 +9,15 @@ dependencies = ["cass-core", "cass-oed"]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[project.optional-dependencies]
+# Clipping a grid to land and skipping empty land read the outlines and the
+# settlement layer with numpy. The lookup itself needs neither.
+geodata = ["numpy>=1.26"]
+
 [tool.setuptools.packages.find]
 include = ["cass_keys*"]
+
+[tool.setuptools.package-data]
+# Natural Earth's country outlines and the GHSL settlement layer ship with the
+# package, so a grid can be clipped without downloading anything.
+cass_keys = ["data/natural_earth/*.zip", "data/natural_earth/*.md", "data/settlement/*.bin", "data/settlement/*.md", "seed_grids/*.json"]

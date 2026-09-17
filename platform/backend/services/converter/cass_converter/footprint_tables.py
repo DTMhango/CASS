@@ -13,8 +13,8 @@ gigabytes of interpreter objects, for a table whose only destination is a file.
 Section 15 names that failure -- large files passing through in one piece --
 and the reader had already been written to avoid it.
 
-So the rows go straight to disk, one CSV per measure, and everything the
-conversion reports about them is counted on the way past. Three properties make
+So the rows go straight to disk, one compressed CSV per measure, and
+everything the conversion reports about them is counted on the way past. Three properties make
 that possible without a second pass:
 
 * **The stream is already sorted.** The accumulator emits events in ascending
@@ -29,14 +29,24 @@ that possible without a second pass:
   of events, the set of cells, a count per measure.
 
 What is left in memory is a few megabytes whatever the footprint's size.
+
+**The files are compressed as they are written.** A footprint is the largest
+thing a hazard set stores, and CSV text of integers and eight-decimal
+probabilities compresses well: the Jakarta-Bandung footprint was 335 MB as text
+and 55 MB compressed, which took under two seconds. Nothing reads the
+uncompressed text back, so there is no reason to keep it. Tables stored before
+compression still read, because the readers here recognise either.
 """
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import gzip
+import io
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from .footprint import (
     PROBABILITY_TOLERANCE,
@@ -54,13 +64,87 @@ FOOTPRINT_HEADER = "event_id,areaperil_id,intensity_bin_id,probability\n"
 PROBABILITY_FORMAT = ".8f"
 
 
+#: What a stored footprint's filename ends with.
+FOOTPRINT_SUFFIX = ".csv.gz"
+
+#: gzip's fastest setting. Measured on the Jakarta-Bandung footprint: 335 MB of
+#: CSV became 55 MB in 1.8 seconds at this level, and 49 MB in 8.3 seconds at
+#: level 6 -- four and a half times the time for a further twelve per cent.
+COMPRESSION_LEVEL = 1
+
+#: The first two bytes of every gzip stream.
+_GZIP_MAGIC = bytes((0x1F, 0x8B))
+
+
 def measure_stem(imt: str) -> str:
     """The filename-safe form of a measure, as the Oasis tables name it."""
     return imt.replace("(", "").replace(")", "").replace(".", "p")
 
 
+def footprint_filename(imt: str) -> str:
+    """The name one measure's footprint is written and stored under."""
+    return f"footprint_{measure_stem(imt)}{FOOTPRINT_SUFFIX}"
+
+
+@contextlib.contextmanager
+def open_table(source: bytes | str | Path) -> Iterator[IO[str]]:
+    """A stored table as text, whether it was stored compressed or not.
+
+    Takes the table's bytes or a path to it. Tables stored before footprints
+    were compressed are plain CSV, and a hazard set registered then must still
+    build a package, so the stream is recognised by its first bytes rather than
+    by its name.
+    """
+    with contextlib.ExitStack() as stack:
+        if isinstance(source, bytes | bytearray | memoryview):
+            raw: IO[bytes] = stack.enter_context(io.BytesIO(bytes(source)))
+        else:
+            raw = stack.enter_context(Path(source).open("rb"))
+        compressed = raw.read(2) == _GZIP_MAGIC
+        raw.seek(0)
+        binary: IO[bytes] = (
+            stack.enter_context(gzip.GzipFile(fileobj=raw, mode="rb"))
+            if compressed
+            else raw
+        )
+        text = io.TextIOWrapper(binary, encoding="utf-8", newline="")
+        try:
+            yield text
+        finally:
+            # Leave the binary streams to the exit stack, which closes them in
+            # order; closing the wrapper here would close them twice.
+            text.detach()
+
+
+class _CompressedText:
+    """A text file written through gzip, with nothing in its header that varies.
+
+    gzip records the time and the original filename by default, which would
+    make two conversions of the same calculation write different bytes. Both
+    are left out, so a footprint written twice is the same file twice.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._raw = path.open("wb")
+        self._compressed = gzip.GzipFile(
+            filename="",
+            mode="wb",
+            compresslevel=COMPRESSION_LEVEL,
+            fileobj=self._raw,
+            mtime=0,
+        )
+        self._text = io.TextIOWrapper(self._compressed, encoding="utf-8", newline="")
+
+    def write(self, text: str) -> int:
+        return self._text.write(text)
+
+    def close(self) -> None:
+        self._text.close()
+        self._raw.close()
+
+
 class FootprintTableWriter:
-    """Writes footprint rows to one CSV per measure, checking as they pass."""
+    """Writes footprint rows to one compressed CSV per measure, checking as they pass."""
 
     def __init__(self, directory: str | Path) -> None:
         self._directory = Path(directory)
@@ -132,8 +216,8 @@ class FootprintTableWriter:
     def _handle(self, imt: str):
         handle = self._handles.get(imt)
         if handle is None:
-            path = self._directory / f"footprint_{measure_stem(imt)}.csv"
-            handle = path.open("w", encoding="utf-8", newline="")
+            path = self._directory / footprint_filename(imt)
+            handle = _CompressedText(path)
             handle.write(FOOTPRINT_HEADER)
             self._handles[imt] = handle
         return handle
@@ -184,7 +268,7 @@ class FootprintTableWriter:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class FootprintTables:
-    """A footprint held as one CSV per measure, with the summary of its writing.
+    """A footprint held as one compressed CSV per measure, with the summary of its writing.
 
     Every number here was counted as the rows went past, so nothing downstream
     reads the table back to learn how large it is, which events or cells it
@@ -214,7 +298,7 @@ class FootprintTables:
         return tuple(sorted(self.rows_by_measure))
 
     def path_for(self, imt: str) -> Path:
-        path = self.directory / f"footprint_{measure_stem(imt)}.csv"
+        path = self.directory / footprint_filename(imt)
         if not path.is_file():
             raise FootprintError(
                 f"This hazard set has no rows for {imt}. It carries "
@@ -224,22 +308,20 @@ class FootprintTables:
 
     def paths(self) -> dict[str, Path]:
         """Every footprint file, keyed by the name it is stored under."""
-        return {
-            f"footprint_{measure_stem(imt)}.csv": self.path_for(imt)
-            for imt in self.imts
-        }
+        return {footprint_filename(imt): self.path_for(imt) for imt in self.imts}
 
     def csv_bytes(self, imt: str) -> bytes:
-        """One measure's table, read whole.
+        """One measure's table as CSV, decompressed and read whole.
 
         For small sets and for tests. A national footprint is gigabytes and is
-        uploaded from its path instead.
+        uploaded from its path, still compressed, instead.
         """
-        return self.path_for(imt).read_bytes()
+        with gzip.open(self.path_for(imt), "rb") as handle:
+            return handle.read()
 
     def rows_for(self, imt: str) -> Iterator[FootprintRow]:
         """Read one measure's rows back from its file."""
-        with self.path_for(imt).open(encoding="utf-8") as handle:
+        with open_table(self.path_for(imt)) as handle:
             next(handle, None)  # the header
             for line in handle:
                 event, cell, bin_id, probability = line.rstrip("\n").split(",")

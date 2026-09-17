@@ -21,16 +21,18 @@ specification id and the checksum, which is what makes the rebuild checkable --
 a grid republished between the launch and the worker picking it up changes the
 checksum, and the run refuses rather than computing something nobody reviewed.
 
-And the datastore comes back whole. OpenQuake can export a ground-motion field
-as CSV, which is smaller and easier to read; the HDF5 datastore is the engine's
-complete record of the calculation, checksummed once, from which every later
-question -- events, sites, realisations, the GMF itself -- can be answered
-without asking a server that may by then have been rebuilt.
+And the datastore comes back whole, to disk rather than to memory. OpenQuake
+can export a ground-motion field as CSV, but that is a second copy of the
+motion written as text, and at national scale a copy the worker cannot hold.
+The HDF5 datastore is the engine's complete record of the calculation,
+checksummed once, from which every later question -- events, sites,
+realisations, the GMF itself -- can be answered without asking a server that
+may by then have been rebuilt; and it is read a slice at a time. Once CASS
+holds it, the engine's copy is removed, so a calculation is stored once.
 """
 
 from __future__ import annotations
 
-import io
 import pathlib
 import re
 import tempfile
@@ -153,6 +155,156 @@ def execute(
             "openquake_calculation_id": hazard_run.openquake_calculation_id,
             "event_count": hazard_run.event_count,
         },
+    )
+    return hazard_run
+
+
+def rebuild(hazard_run: HazardRun, *, actor=None) -> HazardRun:
+    """Bin a hazard set's stored calculation again, against the current intensity bins.
+
+    A footprint is ground motion counted into intensity bins, so when the bins
+    change every footprint counted into the old ones is out of date -- but the
+    ground motion is not. CASS keeps the calculation's datastore, and this reads
+    it again instead of asking OpenQuake for hours of new ground motion.
+
+    What comes out is a new hazard set rather than a changed one: a set a model
+    version was built on keeps meaning what it meant. The new set names the one
+    it replaces and shares its datastore rather than copying it, and the old
+    set's footprint is removed as soon as no model version uses it.
+
+    Such a run skips submitting and monitoring, because the calculation already
+    happened; it prepares, then exports.
+    """
+    from apps.modelregistry import hazard as hazard_registry
+
+    run = hazard_run.run
+    source = hazard_run.rebuild_of
+    if source is None:
+        raise HazardExecutionError("This run names no hazard set to rebuild.")
+    if run.run_state is RunState.DRAFT:
+        run.transition(RunState.QUEUED, actor=actor)
+    if run.run_state is not RunState.QUEUED:
+        raise HazardExecutionError(
+            f"A run in state {run.state} cannot be executed. "
+            "Only a draft or queued run may start."
+        )
+    run.transition(RunState.RUNNING, actor=actor)
+
+    manifest = dict(run.manifest or {})
+    manifest["stages_not_performed"] = {
+        **UNPERFORMED_STAGES,
+        "validate_settings": "A rebuild runs no calculation, so there are no settings to validate.",
+        "submit": "A rebuild reads the stored calculation rather than submitting a new one.",
+        "monitor": "A rebuild reads the stored calculation rather than submitting a new one.",
+    }
+    manifest["rebuild_of"] = source.reference
+    stage = "prepare"
+    try:
+        refusal = hazard_registry.rebuild_refusal(source)
+        if refusal:
+            raise HazardExecutionError(refusal)
+        artifact = hazard_registry.datastore_artifact(source)
+        # Linked as this run's input, so the retention sweep will not expire the
+        # datastore out from under a rebuild that is reading it.
+        ArtifactLink.objects.update_or_create(
+            subject_type="hazard_run",
+            subject_id=run.id,
+            role="openquake_datastore",
+            defaults={"artifact": artifact, "direction": "input"},
+        )
+        run.advance(
+            "prepare",
+            actor=actor,
+            message=(
+                f"Rebuilding {source.reference}'s footprint from its stored calculation "
+                f"({artifact.size_bytes} bytes), against the current intensity bins."
+            ),
+        )
+
+        stage = "export"
+        source_statement = hazard_registry.SourceStatement(
+            model=source.source_model,
+            licence=source.licence,
+            cleared=source.licence_cleared,
+            reference=source.licence_note if source.licence_cleared else "",
+            ground_motion_models=tuple(source.ground_motion_models or ()),
+            checksum=source.source_model_checksum,
+        )
+        with tempfile.TemporaryDirectory(prefix="cass-rebuild-") as workspace:
+            path = get_store().download(artifact.uri, pathlib.Path(workspace) / "datastore.hdf5")
+            hazard_set, converted = hazard_registry.register_from_datastore(
+                path,
+                country_code=source.country_code,
+                version=hazard_registry.rebuilt_version(source),
+                source=source_statement,
+                grid=source.grid,
+                label=source.label,
+                calculation_id=source.openquake_calculation_id,
+                datastore_uri=source.datastore_uri,
+                rebuilt_from=source,
+                job_spec=source.job_spec,
+                job_checksum=source.job_checksum,
+                actor=actor,
+            )
+        # The same calculation, so the same facts about it as the set it replaces.
+        type(hazard_set).objects.filter(pk=hazard_set.pk).update(
+            licence_note=source.licence_note,
+            openquake_calculation_removed=source.openquake_calculation_removed,
+        )
+        retired = hazard_registry.retire_footprints(source, actor=actor)
+
+        hazard_run.gmf_bytes = artifact.size_bytes
+        hazard_run.event_count = len(converted.events)
+        hazard_run.site_count = hazard_set.cell_count
+        hazard_run.save(update_fields=["gmf_bytes", "event_count", "site_count", "updated_at"])
+
+        kept = retired["kept_because"]
+        run.advance(
+            "export",
+            actor=actor,
+            message=(
+                f"Rebuilt as {hazard_set.reference}: {hazard_set.footprint_row_count} "
+                f"footprint rows over {hazard_set.cell_count} cells. "
+                + (
+                    f"{source.reference}'s footprint was removed ({retired['retired']} "
+                    "table(s)); its record and the calculation remain."
+                    if retired["retired"]
+                    else f"{source.reference}'s footprint is kept: {kept}"
+                )
+            ),
+        )
+        manifest["hazard"] = {
+            "hazard_set": {
+                "id": str(hazard_set.id),
+                "reference": hazard_set.reference,
+                "events": hazard_set.event_count,
+                "cells": hazard_set.cell_count,
+                "footprint_rows": hazard_set.footprint_row_count,
+                "imts": list(hazard_set.imts),
+                "samples_above_range": hazard_set.samples_above_range,
+                "problems": list(converted.problems),
+            },
+            "rebuilt_from": source.reference,
+            "retired_footprints": retired,
+        }
+        manifest["grid"] = source.grid.reference
+    except (AdapterError, HazardExecutionError, hazard_registry.HazardRegistrationError) as exc:
+        _fail(run, exc, stage=stage, actor=actor)
+        if isinstance(exc, hazard_registry.HazardRegistrationError):
+            raise HazardExecutionError(str(exc)) from exc
+        raise
+
+    run.manifest = manifest
+    run.save(update_fields=["manifest", "updated_at"])
+    run.transition(RunState.SUCCEEDED, actor=actor, stage="export")
+    audit.record(
+        action=AuditAction.CREATE,
+        subject_type="hazard_set",
+        subject_id=manifest["hazard"]["hazard_set"]["id"],
+        actor=actor,
+        subject_label=manifest["hazard"]["hazard_set"]["reference"],
+        after={"rebuilt_from": source.reference, "run": str(run.id)},
+        detail=f"Rebuilt {source.reference}'s footprint against the current intensity bins.",
     )
     return hazard_run
 
@@ -423,70 +575,78 @@ def _follow(run, engine, calculation_id: int, job, read: int) -> int:
 
 
 def _export(hazard_run: HazardRun, engine, actor) -> dict[str, Any]:
-    """Bring the datastore back and register it as an artifact."""
+    """Bring the datastore back to disk, store it, and build the hazard set from it.
+
+    Nothing here holds the calculation in memory. The datastore is streamed to a
+    file, uploaded from that file, and read a slice at a time to build the
+    footprint -- because a national calculation is gigabytes, and the worker
+    that holds it is not. The CSV exports this stage used to fetch were a second
+    copy of the ground motion written as text, and they are no longer asked for.
+
+    Once the hazard set is registered, the engine's own copy of the datastore
+    is removed: CASS holds the calculation from then on, and keeping it on the
+    engine as well would store every national calculation twice. It is kept
+    where the deployment asks for that, and whenever anything before
+    registration fails, so a failed run stays readable where it ran.
+    """
     run = hazard_run.run
     calculation_id = int(hazard_run.openquake_calculation_id)
 
-    sink = io.BytesIO()
-    engine.download_datastore(calculation_id, sink)
-    payload = sink.getvalue()
-    if not payload:
-        raise HazardExecutionError(
-            "OpenQuake reported the calculation complete but returned an empty "
-            "datastore."
+    with tempfile.TemporaryDirectory(prefix="cass-hazard-") as workspace:
+        path = pathlib.Path(workspace) / "datastore.hdf5"
+        with path.open("wb") as sink:
+            engine.download_datastore(calculation_id, sink)
+        size = path.stat().st_size
+        if not size:
+            raise HazardExecutionError(
+                "OpenQuake reported the calculation complete but returned an empty "
+                "datastore."
+            )
+
+        store = get_store()
+        ref = store.put_file(
+            bucket("hazard"),
+            f"hazard/{run.id}/datastore.hdf5",
+            path,
+            content_type="application/x-hdf5",
+            # The class the retention policy already names for this exact
+            # object: an OpenQuake GMF that expires after footprint acceptance
+            # unless something governs it for longer.
+            retention=RetentionClass.HAZARD_INTERMEDIATE,
+            # Model scope, not project. A hazard run belongs to a model version
+            # rather than a project, so PROJECT access on a run with no project
+            # would make the datastore readable by nobody at all.
+            access=AccessPolicy.MODEL,
+        )
+        if ref.size_bytes != size:
+            raise HazardExecutionError(
+                f"The datastore was {size} bytes on disk and {ref.size_bytes} bytes "
+                "once stored, so the stored copy is not the calculation. Nothing was "
+                "registered, and OpenQuake keeps its copy."
+            )
+        artifact, _ = Artifact.objects.update_or_create(
+            uri=ref.uri,
+            defaults={
+                "checksum": ref.checksum,
+                "size_bytes": ref.size_bytes,
+                "content_type": ref.content_type,
+                "retention": str(ref.retention),
+                "access": str(ref.access),
+                "state": ArtifactState.REGISTERED,
+                "project": run.project,
+                "role": "openquake_datastore",
+            },
+        )
+        ArtifactLink.objects.update_or_create(
+            subject_type="hazard_run",
+            subject_id=run.id,
+            role="openquake_datastore",
+            defaults={"artifact": artifact, "direction": "output"},
         )
 
-    store = get_store()
-    ref = store.put_bytes(
-        bucket("hazard"),
-        f"hazard/{run.id}/datastore.hdf5",
-        payload,
-        content_type="application/x-hdf5",
-        # The class the retention policy already names for this exact object:
-        # an OpenQuake GMF that expires after footprint acceptance unless
-        # something governs it for longer.
-        retention=RetentionClass.HAZARD_INTERMEDIATE,
-        # Model scope, not project. A hazard run belongs to a model version
-        # rather than a project, so PROJECT access on a run with no project
-        # would make the datastore readable by nobody at all.
-        access=AccessPolicy.MODEL,
-    )
-    artifact, _ = Artifact.objects.update_or_create(
-        uri=ref.uri,
-        defaults={
-            "checksum": ref.checksum,
-            "size_bytes": ref.size_bytes,
-            "content_type": ref.content_type,
-            "retention": str(ref.retention),
-            "access": str(ref.access),
-            "state": ArtifactState.REGISTERED,
-            "project": run.project,
-            "role": "openquake_datastore",
-        },
-    )
-    ArtifactLink.objects.update_or_create(
-        subject_type="hazard_run",
-        subject_id=run.id,
-        role="openquake_datastore",
-        defaults={"artifact": artifact, "direction": "output"},
-    )
+        hazard_set, converted = _register_hazard_set(hazard_run, path, ref.uri, actor)
 
-    # The datastore is the engine's complete record, but the converter reads
-    # the CSV exports -- ground motion, events, ruptures for the timing, and the
-    # realisation count that says whether one event set may stand alone.
-    exports: dict[str, bytes] = {}
-    for output_type in ("gmf_data", "events", "ruptures"):
-        exports.update(engine.export(calculation_id, output_type))
-    # A calculation on a single logic-tree branch has no logic tree to
-    # describe, and OpenQuake publishes no realizations output for it. Its
-    # absence is the ordinary case here, not a failure: the converter counts
-    # the realisations the events themselves name.
-    try:
-        exports.update(engine.export(calculation_id, "realizations"))
-    except AdapterError:
-        pass
-
-    hazard_set, converted = _register_hazard_set(hazard_run, exports, actor)
+    engine_copy = release_engine_copy(hazard_set, engine)
 
     hazard_run.gmf_bytes = ref.size_bytes
     hazard_run.event_count = len(converted.events)
@@ -510,7 +670,7 @@ def _export(hazard_run: HazardRun, engine, actor) -> dict[str, Any]:
         message=(
             f"Datastore registered ({ref.size_bytes} bytes) and converted to hazard "
             f"set {hazard_set.reference}: {hazard_set.event_count} events over "
-            f"{hazard_set.cell_count} cells."
+            f"{hazard_set.cell_count} cells. {engine_copy['message']}"
         ),
         actor=actor,
         metrics={"checksum": ref.checksum, "hazard_set": registered},
@@ -519,13 +679,162 @@ def _export(hazard_run: HazardRun, engine, actor) -> dict[str, Any]:
         "uri": ref.uri,
         "checksum": ref.checksum,
         "size_bytes": ref.size_bytes,
-        "exports": sorted(exports),
         "hazard_set": registered,
+        "engine_copy": engine_copy,
     }
 
 
-def _register_hazard_set(hazard_run: HazardRun, exports: dict[str, bytes], actor):
-    """Turn the exported calculation into a hazard set a model version can use.
+def release_engine_copy(hazard_set, engine) -> dict[str, Any]:
+    """Remove OpenQuake's copy of a calculation CASS now holds, unless told not to.
+
+    Never allowed to fail the run. The hazard set is registered by the time this
+    is asked, so a removal the engine refuses costs disk rather than a result,
+    and the run says so rather than pretending the copy is gone.
+
+    The set records the removal. OpenQuake reuses calculation numbers once its
+    own database is reset, so a number whose calculation is gone may later name
+    a different one -- and a comparison chained onto that would read somebody
+    else's ground motion while looking exactly like a comparison.
+    """
+    from django.conf import settings
+
+    calculation_id = int(hazard_set.openquake_calculation_id)
+    if getattr(settings, "CASS_OPENQUAKE_KEEP_CALCULATIONS", False):
+        return {
+            "removed": False,
+            "message": (
+                f"OpenQuake keeps calculation {calculation_id} as well, because this "
+                "installation is set to keep calculations on the engine."
+            ),
+        }
+    try:
+        engine.remove(calculation_id)
+    except AdapterError as exc:
+        return {
+            "removed": False,
+            "message": (
+                f"OpenQuake's copy of calculation {calculation_id} could not be "
+                f"removed ({exc}), so the calculation is stored twice until it is."
+            ),
+        }
+    type(hazard_set).objects.filter(pk=hazard_set.pk).update(
+        openquake_calculation_removed=True
+    )
+    hazard_set.openquake_calculation_removed = True
+    return {
+        "removed": True,
+        "message": (
+            f"OpenQuake's copy of calculation {calculation_id} was removed, so CASS "
+            "holds the only copy."
+        ),
+    }
+
+
+def restore_calculation(
+    hazard_set,
+    engine,
+    *,
+    poll_interval: float = 10.0,
+    timeout: float | None = None,
+) -> int:
+    """Run a calculation removed from OpenQuake again, and prove it is the same one.
+
+    A chained job -- the OpenQuake reference comparison -- reads the ground
+    motion from the engine's own copy of the hazard calculation, and that copy
+    is removed once CASS holds the datastore. Rather than keep every national
+    calculation twice for a comparison run now and then, the calculation is run
+    again when one is asked for.
+
+    It is not trusted to match. The engine writes the same ground motion for the
+    same inputs -- measured on the Jakarta-Bandung calculation, which run twice
+    gave the same rows to the bit -- so the new datastore's fingerprint is
+    compared with the one recorded when the set was registered, and so is the
+    engine's own checksum of its inputs. A calculation that does not reproduce
+    is removed again and refused, because a comparison chained onto different
+    ground motion would look exactly like a comparison.
+
+    Returns the new calculation's number. The caller removes it when finished.
+    """
+    from apps.modelregistry import hazard_models
+    from apps.modelregistry.assets import ModelAssetError
+    from cass_converter import datastore
+
+    spec = hazard_set.job_spec
+    if spec is None or not hazard_set.job_checksum or not hazard_set.ground_motion_digest:
+        raise HazardExecutionError(
+            f"OpenQuake's copy of the calculation behind {hazard_set.reference} was "
+            "removed, and the set does not record the configuration and ground-motion "
+            "fingerprint needed to run it again and check it is the same. Run the "
+            "hazard again to compare against it."
+        )
+    try:
+        assembled = hazard_models.job_files(spec)
+    except (hazard_models.HazardModelError, ModelAssetError) as exc:
+        raise HazardExecutionError(str(exc)) from exc
+    if assembled["job_checksum"] != hazard_set.job_checksum:
+        raise HazardExecutionError(
+            f"The configuration behind {hazard_set.reference} now resolves to a "
+            f"different job ({assembled['job_checksum'][:12]}, not "
+            f"{hazard_set.job_checksum[:12]}), usually because its grid or model was "
+            "republished. Running it would compute different ground motion."
+        )
+
+    calculation = engine.submit(assembled["files"])
+    waited = 0.0
+    state = engine.status(calculation)
+    while not state.state.is_terminal:
+        if timeout is not None and waited >= timeout:
+            engine.abort(calculation)
+            raise HazardExecutionError(
+                f"Running the calculation again was still {state.raw_state or 'running'} "
+                f"after {waited:.0f} seconds."
+            )
+        time.sleep(poll_interval)
+        waited += poll_interval
+        state = engine.status(calculation)
+    if state.state is not EngineState.SUCCEEDED:
+        raise HazardExecutionError(
+            f"Running the calculation again {state.raw_state or 'did not finish'}: "
+            f"{state.message or 'the engine did not say why'}."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="cass-restore-") as workspace:
+        path = pathlib.Path(workspace) / "datastore.hdf5"
+        with path.open("wb") as sink:
+            engine.download_datastore(calculation, sink)
+        try:
+            stated = datastore.provenance(path)
+            digest = datastore.ground_motion_digest(path)
+        except datastore.DatastoreError as exc:
+            _remove_quietly(engine, calculation)
+            raise HazardExecutionError(str(exc)) from exc
+
+    differs = []
+    if digest != hazard_set.ground_motion_digest:
+        differs.append("its ground motion")
+    if hazard_set.calculation_checksum and stated["checksum"] != hazard_set.calculation_checksum:
+        differs.append("the engine's checksum of its inputs")
+    if differs:
+        _remove_quietly(engine, calculation)
+        raise HazardExecutionError(
+            f"The calculation run again for {hazard_set.reference} differs from the "
+            f"stored one in {' and '.join(differs)}, so nothing was chained onto it. "
+            "The engine may have been upgraded since the set was computed."
+        )
+    return calculation
+
+
+def _remove_quietly(engine, calculation: int) -> bool:
+    """Remove a calculation, reporting rather than raising if the engine refuses."""
+    try:
+        engine.remove(calculation)
+    except AdapterError:
+        return False
+    return True
+
+
+def _register_hazard_set(hazard_run: HazardRun, datastore_path, datastore_uri: str, actor):
+    """Turn the calculation's datastore into a hazard set a model version can use.
 
     Registered as the run's final act rather than left to a separate command,
     because a hazard run whose output nothing can consume is the gap that left
@@ -558,24 +867,24 @@ def _register_hazard_set(hazard_run: HazardRun, exports: dict[str, bytes], actor
         checksum=model.archive_checksum,
         note=f"Configuration {spec.name}, job checksum {settings.get('job_checksum', '')[:12]}.",
     )
-    with tempfile.TemporaryDirectory() as directory:
-        for name, payload in exports.items():
-            (pathlib.Path(directory) / name).write_bytes(payload)
-        try:
-            return hazard_registry.register(
-                directory,
-                country_code=hazard_run.grid.country_code,
-                version=f"{model.version}-{str(hazard_run.run_id)[:8]}"[:32],
-                source=source,
-                grid=hazard_run.grid,
-                label=f"{model.label}, {spec.name}",
-                # Kept so a later job can be chained onto the same ground-motion
-                # fields, which is what makes a reference comparison a comparison.
-                calculation_id=hazard_run.openquake_calculation_id,
-                actor=actor,
-            )
-        except hazard_registry.HazardRegistrationError as exc:
-            raise HazardExecutionError(str(exc)) from exc
+    try:
+        return hazard_registry.register_from_datastore(
+            datastore_path,
+            country_code=hazard_run.grid.country_code,
+            version=f"{model.version}-{str(hazard_run.run_id)[:8]}"[:32],
+            source=source,
+            grid=hazard_run.grid,
+            label=f"{model.label}, {spec.name}",
+            # Kept so a later job can be chained onto the same ground-motion
+            # fields, which is what makes a reference comparison a comparison.
+            calculation_id=hazard_run.openquake_calculation_id,
+            datastore_uri=datastore_uri,
+            job_spec=spec,
+            job_checksum=settings.get("job_checksum", ""),
+            actor=actor,
+        )
+    except hazard_registry.HazardRegistrationError as exc:
+        raise HazardExecutionError(str(exc)) from exc
 
 
 def _with_detail(engine, calculation_id: int) -> Exception:

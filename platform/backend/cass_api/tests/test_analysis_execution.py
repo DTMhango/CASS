@@ -2870,6 +2870,7 @@ class ReferenceEngine:
         self.losses = losses
         self.submitted: dict = {}
         self.files: dict = {}
+        self.removed: list[str] = []
 
     def request(self, method, url, **kwargs):
         import io as _io
@@ -2914,6 +2915,9 @@ class ReferenceEngine:
             return FakeResponse(200, ["ValueError: the exposure found no hazard"])
         if "/log/" in url:
             return FakeResponse(200, [["t", "INFO", "job", "computing risk"]])
+        if url.endswith("/remove"):
+            self.removed.append(url.rstrip("/").rsplit("/", 2)[-2])
+            return FakeResponse(200, {"success": True})
         raise AssertionError(f"unscripted call {method} {url}")
 
 
@@ -2988,6 +2992,63 @@ def stored_report(analysis_run):
     )
     with get_store().open(link.artifact.uri) as handle:
         return json.load(handle)
+
+
+def test_a_removed_hazard_calculation_is_run_again_before_the_reference_job(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    """CASS holds the only copy, so the comparison restores one and removes it after."""
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+    attached_hazard.openquake_calculation_removed = True
+    attached_hazard.save()
+    restored: list = []
+
+    def restore(hazard_set, engine, **kwargs):
+        restored.append(hazard_set.reference)
+        return 93
+
+    monkeypatch.setattr(
+        "apps.runs.management.commands.compare_with_openquake.hazard_service.restore_calculation",
+        restore,
+    )
+    engine = ReferenceEngine()
+
+    compare_run(analysis_run, gem_root, engine, monkeypatch)
+
+    assert restored == [attached_hazard.reference]
+    assert engine.submitted["hazard_job_id"] == "93"
+    # The reference job first, then the calculation it read from.
+    assert engine.removed == ["91", "93"]
+    report = stored_report(analysis_run)
+    assert report["hazard_calculation"] == "93"
+    assert report["hazard_calculation_rerun"] is True
+
+
+def test_a_removed_calculation_that_cannot_be_restored_stops_the_comparison(
+    analysis_run, attached_hazard, modeller, analyst, tmp_path, monkeypatch
+):
+    from django.core.management.base import CommandError
+
+    from apps.runs.hazard import HazardExecutionError
+
+    gem_root = prepare_reference(
+        analysis_run, attached_hazard, modeller, analyst, tmp_path
+    )
+    attached_hazard.openquake_calculation_removed = True
+    attached_hazard.save()
+
+    def refuse(hazard_set, engine, **kwargs):
+        raise HazardExecutionError("differs from the stored one in its ground motion")
+
+    monkeypatch.setattr(
+        "apps.runs.management.commands.compare_with_openquake.hazard_service.restore_calculation",
+        refuse,
+    )
+
+    with pytest.raises(CommandError, match="ground motion"):
+        compare_run(analysis_run, gem_root, ReferenceEngine(), monkeypatch)
 
 
 def test_the_reference_job_runs_on_the_events_the_footprint_was_built_from(

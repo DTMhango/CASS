@@ -47,7 +47,7 @@ from typing import Any
 
 from django.db import transaction
 
-from cass_converter import pilot_bins, pilot_enrichment
+from cass_converter import hazard_build, pilot_bins, pilot_enrichment
 from cass_converter.enrichment import Enrichment, EnrichmentError, enrichment_from
 from cass_converter.gem import GemError, country_identity
 from cass_converter.model_build import (
@@ -361,6 +361,11 @@ def register_vulnerability(
                 {str(item.coverage_type) for item in built.classes}
             ),
             "damage_bin_count": len(pilot_bins.damage_bins().bins),
+            # Over the whole dictionary, as a hazard set records it, so the two
+            # fingerprints compare whatever measures each happens to carry.
+            "intensity_bins_checksum": hazard_build.intensity_bins_checksum(
+                pilot_bins.intensity_bins()
+            ),
             "assumption_variants": {key: variants[key] for key in builds},
             "publication_state": PublicationState.DRAFT,
             "updated_by": actor,

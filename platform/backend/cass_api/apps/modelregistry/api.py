@@ -12,7 +12,12 @@ from __future__ import annotations
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    extend_schema,
+    extend_schema_field,
+    inline_serializer,
+)
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -24,6 +29,8 @@ from apps.common.permissions import MayApproveGates, MayPublishModels
 from apps.modelregistry.assets import ModelAssetError, load_grid
 from apps.runs.models import HazardRun, Run, RunKind
 from cass_converter import gem as gem_release
+from cass_keys import land as land_outlines
+from cass_keys import seeds as grid_seeds
 
 from . import assembly, gem_location, grid_build, hazard_models, quality
 from . import gem as gem_registry
@@ -53,13 +60,16 @@ class AreaPerilGridSerializer(serializers.ModelSerializer):
             "cell_count", "excludes_offshore", "site_condition_source",
             "site_condition_fallback", "border_policy", "mapping_tolerance_km",
             "publication_state", "supersedes", "notes", "is_frozen",
-            "created_at",
+            "specification", "created_at",
         ]
-        read_only_fields = ["id", "reference", "is_frozen", "created_at"]
+        read_only_fields = ["id", "reference", "is_frozen", "specification", "created_at"]
 
 
 class VulnerabilitySetSerializer(serializers.ModelSerializer):
     unsupported_imts = serializers.ListField(read_only=True)
+    #: Whether the functions were discretised against the intensity bins CASS
+    #: uses now; null for a set that records no fingerprint.
+    intensity_bins_current = serializers.SerializerMethodField()
 
     class Meta:
         model = VulnerabilitySet
@@ -67,10 +77,18 @@ class VulnerabilitySetSerializer(serializers.ModelSerializer):
             "id", "country_code", "version", "source", "source_commit",
             "taxonomy_generation", "licence", "licence_cleared", "licence_note",
             "function_count", "imts_used", "unsupported_imts", "coverage_components",
-            "damage_bin_count", "assumption_variants", "publication_state", "is_frozen",
-            "created_at",
+            "damage_bin_count", "intensity_bins_current", "assumption_variants",
+            "publication_state", "is_frozen", "created_at",
         ]
-        read_only_fields = ["id", "unsupported_imts", "is_frozen", "created_at"]
+        read_only_fields = [
+            "id", "unsupported_imts", "intensity_bins_current", "is_frozen", "created_at",
+        ]
+
+    def get_intensity_bins_current(self, vulnerability_set) -> bool | None:
+        recorded = vulnerability_set.intensity_bins_checksum
+        if not recorded:
+            return None
+        return recorded == hazard_registry.current_intensity_bins_checksum()
 
 
 class AssumptionSetSerializer(serializers.ModelSerializer):
@@ -169,6 +187,7 @@ class AreaPerilGridViewSet(viewsets.ModelViewSet):
                     child=serializers.CharField(), required=False
                 ),
                 "notes": serializers.CharField(required=False),
+                "domain": serializers.DictField(required=False),
             },
         ),
         responses={
@@ -230,11 +249,21 @@ class AreaPerilGridViewSet(viewsets.ModelViewSet):
                 name="GridEstimate",
                 fields={
                     "cells": serializers.IntegerField(),
+                    "exact": serializers.BooleanField(),
                     "cells_from_tiles": serializers.IntegerField(),
                     "cells_by_refinement": serializers.ListField(child=serializers.DictField()),
+                    "candidates": serializers.IntegerField(),
+                    "removed_as_sea": serializers.IntegerField(),
+                    "removed_as_unsettled": serializers.IntegerField(),
+                    "uncovered_land": serializers.DictField(allow_null=True),
+                    "counted_tiles": serializers.IntegerField(),
+                    "incomplete": serializers.IntegerField(),
                     "limit": serializers.IntegerField(),
                     "within_limit": serializers.BooleanField(),
+                    "is_upper_bound": serializers.BooleanField(),
+                    "estimated": serializers.BooleanField(),
                     "problems": serializers.ListField(child=serializers.CharField()),
+                    "storage": serializers.DictField(),
                 },
             )
         },
@@ -252,6 +281,90 @@ class AreaPerilGridViewSet(viewsets.ModelViewSet):
             return Response(grid_build.estimate(request.data))
         except grid_build.GridBuildError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name="GridSeed",
+                fields={
+                    "country_code": serializers.CharField(),
+                    "label": serializers.CharField(),
+                    "version": serializers.CharField(),
+                    "base_resolution_deg": serializers.CharField(),
+                    "tiles": serializers.IntegerField(),
+                    "refinements": serializers.IntegerField(),
+                    "domain": serializers.DictField(),
+                    "cells": serializers.IntegerField(allow_null=True),
+                },
+                many=True,
+            )
+        },
+    )
+    @action(detail=False, methods=["get"], url_path="seeds")
+    def seeds(self, request, version=None):
+        """The grid specifications CASS ships, one line each.
+
+        A seed is where a specification starts, not a grid: it is loaded into the
+        builder, changed like anything typed there, and built by whoever builds
+        it. Nothing is registered by reading one.
+        """
+        return Response(grid_seeds.catalogue())
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name="GridSeedDetail",
+                fields={
+                    "specification": serializers.DictField(),
+                    "measured": serializers.DictField(),
+                },
+            )
+        },
+    )
+    @action(detail=False, methods=["get"], url_path=r"seeds/(?P<code>[A-Za-z]{2})")
+    def seed(self, request, code=None, version=None):
+        """One seed's specification, as the grid builder takes it, and what it measured."""
+        try:
+            return Response(
+                {
+                    "specification": grid_seeds.specification(code),
+                    "measured": grid_seeds.measured(code),
+                }
+            )
+        except grid_seeds.SeedError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name="GridCountry",
+                fields={
+                    "code": serializers.CharField(),
+                    "name": serializers.CharField(),
+                    "parts": serializers.ListField(child=serializers.CharField()),
+                    "bounds": serializers.DictField(),
+                    "seeded": serializers.BooleanField(),
+                },
+                many=True,
+            )
+        },
+    )
+    @action(detail=False, methods=["get"], url_path="countries")
+    def countries(self, request, version=None):
+        """Every country a grid can be clipped to, by its two-letter code.
+
+        Natural Earth's list, because it is the land the clip reads: a code it
+        does not draw has no outline to clip to.
+        """
+        seeded = set(grid_seeds.countries())
+        return Response(
+            [
+                {**outline.as_dict(), "seeded": code in seeded}
+                for code, outline in sorted(
+                    land_outlines.countries().items(), key=lambda item: item[1].name
+                )
+            ]
+        )
 
 
 class VulnerabilitySetViewSet(viewsets.ModelViewSet):
@@ -762,6 +875,9 @@ class HazardSetSerializer(serializers.ModelSerializer):
     #: it is investigation time by event sets by logic-tree paths, and a reader
     #: multiplying the first two alone gets every annual rate wrong (ADR 18).
     effective_time = serializers.FloatField(read_only=True)
+    #: Whether the footprint matches the current intensity bins, and whether it
+    #: can be rebuilt from the stored calculation if not.
+    rebuild = serializers.SerializerMethodField()
 
     class Meta:
         model = HazardSet
@@ -771,18 +887,103 @@ class HazardSetSerializer(serializers.ModelSerializer):
             "investigation_time", "stochastic_event_sets", "logic_tree_paths",
             "effective_time", "event_count",
             "cell_count", "footprint_row_count", "imts", "samples_above_range",
+            "openquake_calculation_removed", "rebuild",
             "publication_state", "notes", "created_at",
         ]
         read_only_fields = fields
+
+    @extend_schema_field(
+        inline_serializer(
+            name="HazardSetRebuildStatus",
+            fields={
+                "intensity_bins_current": serializers.BooleanField(allow_null=True),
+                "datastore_available": serializers.BooleanField(),
+                "datastore_expires_at": serializers.DateTimeField(allow_null=True),
+                "unavailable_reason": serializers.CharField(),
+                "rebuilt_as": serializers.CharField(allow_null=True),
+                "rebuilt_from": serializers.CharField(allow_null=True),
+            },
+        )
+    )
+    def get_rebuild(self, hazard_set) -> dict:
+        return hazard_registry.rebuild_status(hazard_set)
 
 
 class HazardSetViewSet(viewsets.ReadOnlyModelViewSet):
     """Registered hazard sets, which a model version is pointed at to produce loss."""
 
-    queryset = HazardSet.objects.select_related("grid").order_by("-created_at")
+    queryset = HazardSet.objects.select_related("grid", "rebuilt_from").order_by("-created_at")
     serializer_class = HazardSetSerializer
     permission_classes = [MayPublishModels]
     filterset_fields = ["country_code", "grid", "publication_state"]
+
+    @extend_schema(
+        request=None,
+        responses={
+            202: inline_serializer(
+                name="HazardRebuildLaunched",
+                fields={
+                    "run": serializers.UUIDField(),
+                    "hazard_run": serializers.UUIDField(),
+                    "state": serializers.CharField(),
+                },
+            )
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def rebuild(self, request, pk=None, version=None):
+        """Rebuild this set's footprint from its stored calculation, as a run.
+
+        For when the intensity bins have changed since the set was built. The
+        ground motion is read again from the datastore CASS kept, so OpenQuake
+        is not asked for anything; the new footprint is registered as a new set
+        that names this one, and this one's footprint is removed once no model
+        version uses it.
+        """
+        hazard_set = self.get_object()
+        refusal = hazard_registry.rebuild_refusal(hazard_set)
+        if refusal:
+            return Response({"detail": refusal}, status=status.HTTP_409_CONFLICT)
+
+        run = Run.objects.create(
+            kind=RunKind.HAZARD,
+            project=None,
+            label=f"Rebuild footprint of {hazard_set.reference}",
+            execution_profile="model_build",
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        hazard_run = HazardRun.objects.create(
+            run=run,
+            grid=hazard_set.grid,
+            rebuild_of=hazard_set,
+            openquake_calculation_id=hazard_set.openquake_calculation_id,
+            job_settings={"rebuild_of": str(hazard_set.id)},
+            imts=list(hazard_set.imts),
+            investigation_time=hazard_set.investigation_time,
+            stochastic_event_sets=hazard_set.stochastic_event_sets,
+            logic_tree_paths=hazard_set.logic_tree_paths,
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        audit.record(
+            action=AuditAction.SUBMIT,
+            subject_type="hazard_run",
+            subject_id=run.id,
+            actor=request.user,
+            subject_label=str(run),
+            after={"rebuild_of": hazard_set.reference},
+            request=request,
+        )
+
+        from apps.runs.tasks import rebuild_hazard
+
+        rebuild_hazard.delay(str(hazard_run.id))
+        run.refresh_from_db()
+        return Response(
+            {"run": str(run.id), "hazard_run": str(hazard_run.id), "state": run.state},
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @action(detail=True, methods=["post"])
     def benchmark(self, request, pk=None, version=None):

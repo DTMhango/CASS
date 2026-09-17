@@ -40,6 +40,7 @@ from apps.modelregistry.assets import (
     load_grid,
 )
 from apps.results.models import ResultSet
+from apps.runs import hazard as hazard_service
 from apps.runs.models import AnalysisRun
 from cass_adapters.base import AdapterError, EngineState
 from cass_converter import reference
@@ -90,6 +91,9 @@ class Command(BaseCommand):
         parser.add_argument("--poll-interval", type=float, default=10.0)
         parser.add_argument("--timeout", type=float, default=7200.0)
 
+    #: The reference job's calculation, once submitted.
+    reference_calculation: int | None = None
+
     def handle(self, *args, **options) -> None:
         analysis_run = self._find_run(options["run"])
         run = analysis_run.run
@@ -137,13 +141,55 @@ class Command(BaseCommand):
             ignore_covs=options["ignore_covs"],
         )
 
-        losses = self._calculate(
-            files,
-            hazard_calculation=int(hazard_set.openquake_calculation_id),
-            effective_time=hazard_set.effective_time,
-            poll_interval=options["poll_interval"],
-            timeout=options["timeout"],
-        )
+        engine = openquake_adapter()
+        hazard_calculation = int(hazard_set.openquake_calculation_id)
+        restored = None
+        if hazard_set.openquake_calculation_removed:
+            # CASS holds the only copy of the calculation, and a chained job
+            # needs one on the engine. Run it again, checked against the stored
+            # fingerprint, and remove it again afterwards.
+            self.stdout.write(
+                f"OpenQuake's copy of calculation {hazard_calculation} was removed "
+                "once CASS held it. Running it again and checking it reproduces the "
+                "stored ground motion."
+            )
+            try:
+                restored = hazard_service.restore_calculation(
+                    hazard_set,
+                    engine,
+                    poll_interval=options["poll_interval"],
+                    timeout=options["timeout"],
+                )
+            except hazard_service.HazardExecutionError as exc:
+                raise CommandError(str(exc)) from None
+            hazard_calculation = restored
+            self.stdout.write(
+                f"Calculation {restored} reproduces the stored ground motion."
+            )
+
+        try:
+            losses = self._calculate(
+                files,
+                engine=engine,
+                hazard_calculation=hazard_calculation,
+                effective_time=hazard_set.effective_time,
+                poll_interval=options["poll_interval"],
+                timeout=options["timeout"],
+            )
+        finally:
+            if restored is not None:
+                # The reference job was chained onto the calculation run again,
+                # so it goes first: the engine will not remove a calculation
+                # another still reads from. Its losses are in the stored report.
+                if self.reference_calculation is not None:
+                    hazard_service._remove_quietly(engine, self.reference_calculation)
+                removed = hazard_service._remove_quietly(engine, restored)
+                self.stdout.write(
+                    f"Calculation {restored} removed again."
+                    if removed
+                    else f"Calculation {restored} could not be removed and is still "
+                    "on the engine."
+                )
 
         report = reference.compare(
             exposure=exposure,
@@ -155,7 +201,8 @@ class Command(BaseCommand):
         report["run"] = str(run.id)
         report["perspective"] = result.perspective
         report["hazard_set"] = hazard_set.reference
-        report["hazard_calculation"] = hazard_set.openquake_calculation_id
+        report["hazard_calculation"] = str(hazard_calculation)
+        report["hazard_calculation_rerun"] = restored is not None
 
         self._store(run, report)
         self._report(report)
@@ -289,14 +336,15 @@ class Command(BaseCommand):
         self,
         files: dict[str, bytes],
         *,
+        engine,
         hazard_calculation: int,
         effective_time: float,
         poll_interval: float,
         timeout: float,
     ) -> reference.ReferenceLosses:
-        engine = openquake_adapter()
         try:
             calculation = engine.submit(files, hazard_job_id=hazard_calculation)
+            self.reference_calculation = calculation
         except AdapterError as exc:
             raise CommandError(
                 f"OpenQuake refused the reference job: {exc.summary}"

@@ -84,9 +84,7 @@
 
 /* Comparing two governed runs. */
 .compare__form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--space-3);
+  --form-row-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   margin-bottom: var(--space-3);
 }
 

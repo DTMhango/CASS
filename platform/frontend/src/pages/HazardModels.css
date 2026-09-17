@@ -71,9 +71,7 @@
 /* Forms ------------------------------------------------------------------- */
 
 .upload-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-3);
+  --form-row-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   margin: var(--space-4) 0;
 }
 

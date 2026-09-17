@@ -345,14 +345,21 @@ EDITABLE = tuple(
 #: sampled.
 CASS_DEFAULTS: dict[str, Any] = {
     "investigation_time": 50.0,
-    # Twenty paths of one event set each: a thousand simulated years, as before,
-    # but drawn across twenty views of the logic tree rather than one. A single
-    # path's hazard curve sat between 0.84 and 1.24 of the model's own weighted
-    # mean depending on which path was drawn, and twenty cost the same to run
-    # (ADR 18).
-    "ses_per_logic_tree_path": 1,
+    # Twenty paths of ten event sets each: ten thousand simulated years, drawn
+    # across twenty views of the logic tree (ADR 18) -- and ten sets per path
+    # rather than one because a return-period loss read from a catalogue is an
+    # order statistic. From a thousand years the 1-in-1,000-year loss is the
+    # single worst year; from ten thousand it is the tenth-worst (ADR 21).
+    # Measured on this platform over the 962 Jakarta-Bandung cells: 121 seconds
+    # and 176 MB for a thousand years, 501 seconds and 1.78 GB for ten thousand.
+    "ses_per_logic_tree_path": 10,
     "number_of_logic_tree_samples": 20,
 }
+
+#: Above this a configuration warns that its hazard would store a great deal.
+#: A warning rather than a refusal: whether the disk is there is the
+#: installation's to know, but nobody should find out after the calculation.
+STORAGE_WARNING_MB = 100_000
 
 
 def published_configuration(model: HazardModel) -> JobConfig:
@@ -574,6 +581,27 @@ def _build(
             )
         )
 
+    catalogue = catalogue_summary(
+        resolved.effective_time, coverage.get("cells_computed") if coverage else None
+    )
+    stored = (catalogue or {}).get("storage") or {}
+    if stored.get("hazard_set_mb", 0) > STORAGE_WARNING_MB:
+        problems.append(
+            job_config.Problem(
+                "ses_per_logic_tree_path",
+                "warning",
+                f"This run's hazard could store up to about "
+                f"{stored['hazard_set_mb'] / 1000:,.0f} GB -- "
+                f"{catalogue['simulated_years']:,.0f} simulated years over "
+                f"{coverage.get('cells_computed', 0):,} cells -- plus a model package "
+                "of up to "
+                f"{stored['package_mb'] / 1000:,.0f} GB once built. Storage grows in "
+                "step with the simulated years and the cells, so fewer event sets or "
+                "a smaller region reduce it. The figure is a ceiling measured on the "
+                "strongest shaking CASS has computed.",
+            )
+        )
+
     outcome = {
         "overrides": chosen,
         "region": bounds,
@@ -589,8 +617,52 @@ def _build(
             hazard_job.job_checksum(job) if job is not None else ""
         ),
         "rendered": resolved.render().decode("utf-8"),
+        "catalogue": catalogue,
     }
     return outcome, job, join
+
+
+#: Return periods a catalogue's tail is described at, in years.
+TAIL_RETURN_PERIODS = (100, 250, 500, 1000)
+
+
+def catalogue_summary(simulated_years: float | None, sites: int | None) -> dict[str, Any] | None:
+    """How long a run's catalogue is, what its tail rests on, and what it will store.
+
+    A return-period loss read from a simulated catalogue is an order statistic:
+    the 1-in-1,000-year loss from 10,000 simulated years is the tenth-worst year,
+    and from 1,000 years it is the single worst. So the number of simulated
+    years beyond each return period is the plainest measure of how much a tail
+    figure rests on, and it is shown before anything is run rather than
+    discovered in the results.
+    """
+    from . import grid_build  # noqa: PLC0415
+
+    if not simulated_years:
+        return None
+    thousands = simulated_years / 1000
+    summary: dict[str, Any] = {
+        "simulated_years": simulated_years,
+        "tail": [
+            {"return_period": period, "years_beyond": simulated_years / period}
+            for period in TAIL_RETURN_PERIODS
+        ],
+    }
+    if sites:
+        summary["storage"] = {
+            "hazard_set_mb": round(
+                sites
+                * (grid_build.DATASTORE_KB_PER_CELL + grid_build.FOOTPRINT_KB_PER_CELL)
+                * thousands
+                / 1000
+            ),
+            "package_mb": round(sites * grid_build.PACKAGE_KB_PER_CELL * thousands / 1000),
+            "basis": (
+                "Measured on the Jakarta-Bandung calculation, the strongest shaking CASS "
+                "has computed, so a ceiling: quieter cells store less."
+            ),
+        }
+    return summary
 
 
 def resolve(

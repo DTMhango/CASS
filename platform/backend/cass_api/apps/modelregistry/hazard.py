@@ -31,20 +31,23 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
+import re
 from typing import Any
 
 from django.db import transaction
 
-from cass_converter import hazard_build, pilot_bins, qa
+from apps.artifacts.models import Artifact, ArtifactLink, ArtifactState
+from cass_converter import datastore, hazard_build, pilot_bins, qa
 from cass_converter.hazard_build import HazardBuildError
 from cass_converter.hazard_build import HazardSet as ConvertedHazard
 from cass_converter.hazard_job import HazardJob
 
 from . import quality
-from .assets import attach_hazard_asset, attach_hazard_asset_file
+from .assets import HAZARD_ROLE_PREFIX, attach_hazard_asset, attach_hazard_asset_file
 from .models import (
     INTERNAL_USE_LICENCE,
     AreaPerilGrid,
+    HazardJobSpec,
     HazardSet,
     ModelVersion,
     PublicationState,
@@ -119,6 +122,38 @@ def build(
         raise HazardRegistrationError(str(exc)) from exc
 
 
+def build_from_datastore(
+    path: str | pathlib.Path,
+    *,
+    country_code: str,
+    label: str = "",
+    job: HazardJob | None = None,
+) -> ConvertedHazard:
+    """Read a calculation's own datastore into the converter's hazard set.
+
+    The datastore rather than the CSV exports, because the exports are a second
+    copy of the ground motion written as text, and at national scale a copy the
+    worker cannot hold. The datastore is read a slice at a time under a row
+    budget, so memory follows the budget rather than the size of the
+    calculation.
+    """
+    try:
+        return hazard_build.build_hazard_from_datastore(
+            path,
+            country_code=country_code,
+            intensity_bins=pilot_bins.intensity_bins(),
+            label=label,
+            job=job,
+        )
+    except HazardBuildError as exc:
+        raise HazardRegistrationError(str(exc)) from exc
+
+
+def current_intensity_bins_checksum() -> str:
+    """The fingerprint of the intensity bins a footprint built now would use."""
+    return hazard_build.intensity_bins_checksum(pilot_bins.intensity_bins())
+
+
 @transaction.atomic
 def register(
     directory: str | pathlib.Path,
@@ -139,6 +174,88 @@ def register(
     sets whose event identifiers mean different things.
     """
     converted = build(directory, country_code=country_code, label=label, job=job)
+    hazard_set = record(
+        converted,
+        version=version,
+        source=source,
+        grid=grid,
+        job=job,
+        calculation_id=calculation_id,
+        actor=actor,
+    )
+    return hazard_set, converted
+
+
+def register_from_datastore(
+    path: str | pathlib.Path,
+    *,
+    country_code: str,
+    version: str,
+    source: SourceStatement,
+    grid: AreaPerilGrid | None = None,
+    label: str = "",
+    job: HazardJob | None = None,
+    calculation_id: str = "",
+    datastore_uri: str = "",
+    rebuilt_from: HazardSet | None = None,
+    job_spec: HazardJobSpec | None = None,
+    job_checksum: str = "",
+    actor=None,
+) -> tuple[HazardSet, ConvertedHazard]:
+    """Register a calculation from its datastore, which stays where it is stored.
+
+    The conversion runs before anything is written, outside the transaction: a
+    national footprint takes minutes to bin, and a database transaction held
+    open for all of it would block everything else that touches the registry.
+    Only the record and its tables are written atomically.
+
+    ``datastore_uri`` is kept on the set, because it is what a later rebuild
+    reads. ``rebuilt_from`` names the set this one replaces, where it was
+    rebuilt rather than computed. ``job_spec`` and ``job_checksum`` name the
+    saved configuration the calculation ran, which is what lets it be run again
+    and shown to be the same calculation.
+    """
+    converted = build_from_datastore(
+        path, country_code=country_code, label=label, job=job
+    )
+    try:
+        digest = datastore.ground_motion_digest(path)
+    except datastore.DatastoreError as exc:
+        raise HazardRegistrationError(str(exc)) from exc
+    with transaction.atomic():
+        hazard_set = record(
+            converted,
+            version=version,
+            source=source,
+            grid=grid,
+            job=job,
+            calculation_id=calculation_id,
+            datastore_uri=datastore_uri,
+            rebuilt_from=rebuilt_from,
+            job_spec=job_spec,
+            job_checksum=job_checksum,
+            ground_motion_digest=digest,
+            actor=actor,
+        )
+    return hazard_set, converted
+
+
+def record(
+    converted: ConvertedHazard,
+    *,
+    version: str,
+    source: SourceStatement,
+    grid: AreaPerilGrid | None = None,
+    job: HazardJob | None = None,
+    calculation_id: str = "",
+    datastore_uri: str = "",
+    rebuilt_from: HazardSet | None = None,
+    job_spec: HazardJobSpec | None = None,
+    job_checksum: str = "",
+    ground_motion_digest: str = "",
+    actor=None,
+) -> HazardSet:
+    """Write one converted calculation into the registry with its tables."""
     code = converted.country_code
 
     if grid is None:
@@ -172,9 +289,19 @@ def register(
             "engine_version": converted.metadata.engine_version[:32],
             "calculation_checksum": converted.metadata.checksum[:64],
             "job_checksum": (
-                hazard_build.hazard_job.job_checksum(job) if job is not None else ""
+                hazard_build.hazard_job.job_checksum(job)
+                if job is not None
+                else job_checksum[:64]
             ),
+            "job_spec": job_spec,
+            "ground_motion_digest": ground_motion_digest,
+            "openquake_calculation_removed": False,
             "openquake_calculation_id": str(calculation_id or "")[:32],
+            "datastore_uri": datastore_uri,
+            "intensity_bins_checksum": hazard_build.intensity_bins_checksum(
+                converted.intensity_bins
+            ),
+            "rebuilt_from": rebuilt_from,
             "investigation_time": converted.metadata.investigation_time or 0.0,
             "stochastic_event_sets": converted.metadata.ses_per_logic_tree_path or 0,
             "logic_tree_paths": max(1, converted.metadata.realization_count),
@@ -206,7 +333,7 @@ def register(
         json.dumps(_report_with_qa(converted), indent=2, sort_keys=True).encode("utf-8"),
         actor=actor,
     )
-    return hazard_set, converted
+    return hazard_set
 
 
 @transaction.atomic
@@ -235,6 +362,7 @@ def attach(model_version: ModelVersion, hazard_set: HazardSet, *, actor=None) ->
             "and reporting zero, which is indistinguishable from no damage."
         )
 
+    replaced = model_version.hazard_set
     model_version.hazard_set = hazard_set
     model_version.hazard_source_model = hazard_set.source_model
     model_version.hazard_source_licence = hazard_set.licence
@@ -243,6 +371,10 @@ def attach(model_version: ModelVersion, hazard_set: HazardSet, *, actor=None) ->
     model_version.imts = sorted(set(model_version.imts) | set(hazard_set.imts))
     model_version.updated_by = actor
     model_version.save()
+    # A set this one was rebuilt from may now be used by nothing, and its
+    # footprint is then a second copy of this one's.
+    if replaced is not None and replaced.pk != hazard_set.pk and hazard_set.rebuilt_from_id == replaced.pk:
+        retire_footprints(replaced, actor=actor)
     return model_version
 
 
@@ -265,6 +397,123 @@ def _notes(converted: ConvertedHazard, source: SourceStatement) -> str:
         lines.append("Problems found in conversion:")
         lines.extend(f"- {item}" for item in converted.problems)
     return "\n".join(lines)
+
+
+# -- rebuilding a footprint from the stored calculation ---------------------------------
+
+#: How a rebuilt set's version is marked: the set it came from, then ``-b`` and the
+#: start of the fingerprint of the bins it was rebuilt against.
+_REBUILT_SUFFIX = re.compile(r"-b[0-9a-f]{8}$")
+
+
+def datastore_artifact(hazard_set: HazardSet) -> Artifact:
+    """The stored datastore a set's footprint can be rebuilt from, or why there is none."""
+    if not hazard_set.datastore_uri:
+        raise HazardRegistrationError(
+            f"{hazard_set.reference} was registered from exported tables rather than "
+            "from a calculation run on this platform, so CASS holds no datastore to "
+            "rebuild its footprint from. Run the hazard on the platform to get one."
+        )
+    artifact = Artifact.objects.filter(uri=hazard_set.datastore_uri).first()
+    if artifact is None or not artifact.is_readable:
+        state = artifact.state if artifact is not None else "missing"
+        raise HazardRegistrationError(
+            f"The calculation behind {hazard_set.reference} is no longer stored "
+            f"({state}): stored calculations are kept 90 days, and this one's time has "
+            "passed. Its footprint can only be rebuilt by running the hazard again."
+        )
+    return artifact
+
+
+def rebuild_status(hazard_set: HazardSet) -> dict[str, Any]:
+    """Whether a set's footprint matches the current intensity bins, and whether it can be rebuilt.
+
+    Asked for every set the registry lists, so it reads the database and nothing
+    else: the fingerprint of the current bins is a hash of a few hundred rows.
+    """
+    current = current_intensity_bins_checksum()
+    recorded = hazard_set.intensity_bins_checksum
+    try:
+        artifact = datastore_artifact(hazard_set)
+        available, reason, expires = True, "", artifact.expires_at
+    except HazardRegistrationError as exc:
+        available, reason, expires = False, str(exc), None
+    rebuilt = hazard_set.rebuilds.filter(intensity_bins_checksum=current).first()
+    return {
+        "intensity_bins_current": None if not recorded else recorded == current,
+        "datastore_available": available,
+        "datastore_expires_at": expires.isoformat() if expires else None,
+        "unavailable_reason": reason,
+        "rebuilt_as": rebuilt.reference if rebuilt else None,
+        "rebuilt_from": hazard_set.rebuilt_from.reference if hazard_set.rebuilt_from_id else None,
+    }
+
+
+def rebuilt_version(hazard_set: HazardSet) -> str:
+    """The version a rebuild of this set against the current bins is registered under."""
+    base = _REBUILT_SUFFIX.sub("", hazard_set.version)
+    return f"{base[:22]}-b{current_intensity_bins_checksum()[:8]}"
+
+
+def rebuild_refusal(hazard_set: HazardSet) -> str:
+    """Why this set's footprint may not be rebuilt now, or an empty string where it may."""
+    status = rebuild_status(hazard_set)
+    if not status["datastore_available"]:
+        return status["unavailable_reason"]
+    if status["intensity_bins_current"]:
+        return (
+            f"{hazard_set.reference} was binned against the intensity bins CASS uses "
+            "now, so rebuilding it would produce the same footprint."
+        )
+    if status["rebuilt_as"]:
+        return (
+            f"{hazard_set.reference} has already been rebuilt against the current "
+            f"bins, as {status['rebuilt_as']}. Use that set."
+        )
+    return ""
+
+
+def retire_footprints(hazard_set: HazardSet, *, actor=None) -> dict[str, Any]:
+    """Remove a superseded set's footprints once nothing can use them.
+
+    A rebuilt set carries its own footprint, counted into the current bins, and
+    the set it replaced still holds the old one -- the largest table either
+    stores, kept twice. The old one goes as soon as nothing needs it: the record
+    stays, for lineage, and so does the calculation both were counted from, so
+    the old footprint could be made again.
+
+    Kept, and said so, while a model version still points at the old set or the
+    set is published: a package built from it would otherwise have nothing to
+    read.
+    """
+    from apps.artifacts import retention  # noqa: PLC0415
+
+    if not hazard_set.rebuilds.exists():
+        return {"retired": 0, "kept_because": "Nothing has replaced it."}
+    if hazard_set.is_frozen:
+        return {"retired": 0, "kept_because": "It is published, and published sets are kept whole."}
+    users = list(
+        ModelVersion.objects.filter(hazard_set=hazard_set).values_list("version", flat=True)
+    )
+    if users:
+        return {
+            "retired": 0,
+            "kept_because": (
+                f"Model version(s) {', '.join(users)} still use it. Attach the rebuilt "
+                "set to them and the old footprint is removed."
+            ),
+        }
+    links = ArtifactLink.objects.filter(
+        subject_type="hazard_set",
+        subject_id=hazard_set.id,
+        role__startswith=f"{HAZARD_ROLE_PREFIX}footprint_",
+        artifact__state=ArtifactState.REGISTERED,
+    ).select_related("artifact")
+    retired = 0
+    for link in links:
+        retention.expire(link.artifact, actor=actor)
+        retired += 1
+    return {"retired": retired, "kept_because": ""}
 
 
 def report(hazard_set: HazardSet) -> dict[str, Any]:

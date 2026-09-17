@@ -251,6 +251,33 @@ def test_a_package_has_the_layout_an_oasis_worker_mounts(tmp_path):
     assert "model_data/footprint.bin" in manifest["files"]
 
 
+def test_footprints_read_from_compressed_files_build_the_same_package(tmp_path):
+    """Stored compressed and read from disk, the footprint is the same footprint.
+
+    A national footprint is read from files rather than memory, and it is stored
+    compressed. Neither may change a byte of what the engine reads.
+    """
+    import gzip
+
+    from_memory = tmp_path / "memory"
+    oasis_package.build(inputs(), from_memory)
+
+    stored = tmp_path / "stored"
+    stored.mkdir()
+    paths = {}
+    for imt, payload in (("PGA", FOOTPRINT_PGA), ("SA(0.3)", FOOTPRINT_SA03)):
+        path = stored / f"{imt}.csv.gz"
+        path.write_bytes(gzip.compress(payload))
+        paths[imt] = path
+    from_disk = tmp_path / "disk"
+    oasis_package.build(inputs(footprints=paths), from_disk)
+
+    for name in ("footprint.bin", "footprint.idx"):
+        assert (from_disk / "model_data" / name).read_bytes() == (
+            from_memory / "model_data" / name
+        ).read_bytes()
+
+
 def test_the_lookup_is_named_as_oasislmf_loads_it(tmp_path):
     """oasislmf loads ``<model_id>KeysLookup`` from the module path."""
     oasis_package.build(inputs(), tmp_path)

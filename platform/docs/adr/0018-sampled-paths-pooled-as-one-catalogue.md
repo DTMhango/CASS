@@ -1,6 +1,6 @@
 # 18. Hazard is sampled along several logic-tree paths, pooled as one catalogue
 
-Status: Accepted
+Status: Accepted, amended by [ADR 21](0021-ten-thousand-simulated-years.md)
 Date: 2026-09-14
 Amends: [ADR 12](0012-national-classical-model-run-event-based.md)
 

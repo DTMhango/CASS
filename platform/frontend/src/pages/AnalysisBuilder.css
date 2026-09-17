@@ -17,6 +17,11 @@
   gap: var(--space-4);
 }
 
+/* The gap between cards comes from the column, not from each card. */
+.builder__side > .card + .card {
+  margin-top: 0;
+}
+
 .precondition-list {
   display: flex;
   flex-direction: column;

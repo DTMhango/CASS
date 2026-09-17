@@ -1,0 +1,213 @@
+{
+  "country_code": "ID",
+  "version": "1.0.0-seed",
+  "label": "Indonesia seed grid",
+  "base_resolution_deg": "0.025",
+  "mapping_tolerance_km": "0",
+  "domain": {
+    "clip_to_land": true,
+    "coast_buffer_km": "5",
+    "skip_unsettled": true,
+    "settlement_buffer_km": "5"
+  },
+  "tiles": [
+    {
+      "name": "Sumatra",
+      "reason": "Sunda megathrust and Sumatran Fault; Sumatra's cities and ports.",
+      "min_latitude": "-6.3",
+      "max_latitude": "6.1",
+      "min_longitude": "94.9",
+      "max_longitude": "106.3"
+    },
+    {
+      "name": "Riau Islands, Anambas and Natuna",
+      "reason": "Islands the prototype's rectangles left out.",
+      "min_latitude": "-1.2",
+      "max_latitude": "5.0",
+      "min_longitude": "103.0",
+      "max_longitude": "109.0"
+    },
+    {
+      "name": "Bangka Belitung",
+      "reason": "Tin-mining islands between Sumatra and Kalimantan.",
+      "min_latitude": "-3.5",
+      "max_latitude": "-1.2",
+      "min_longitude": "105.0",
+      "max_longitude": "108.8"
+    },
+    {
+      "name": "Java and Madura",
+      "reason": "The largest concentration of buildings and insured exposure in the country.",
+      "min_latitude": "-9.0",
+      "max_latitude": "-5.5",
+      "min_longitude": "105.0",
+      "max_longitude": "116.0"
+    },
+    {
+      "name": "Bali and Nusa Tenggara",
+      "reason": "Bali's tourism exposure and the Flores back-arc thrust.",
+      "min_latitude": "-11.1",
+      "max_latitude": "-7.0",
+      "min_longitude": "114.4",
+      "max_longitude": "125.5"
+    },
+    {
+      "name": "Kalimantan and the southern Java Sea islands",
+      "reason": "Lower seismicity; industrial and resource exposure.",
+      "min_latitude": "-5.0",
+      "max_latitude": "4.5",
+      "min_longitude": "108.5",
+      "max_longitude": "119.3"
+    },
+    {
+      "name": "Sulawesi",
+      "reason": "Active faults including Palu-Koro, and the islands to its south.",
+      "min_latitude": "-7.5",
+      "max_latitude": "2.0",
+      "min_longitude": "118.6",
+      "max_longitude": "125.5"
+    },
+    {
+      "name": "Sangihe, Talaud and Miangas",
+      "reason": "Northern islands the prototype's rectangles left out.",
+      "min_latitude": "2.0",
+      "max_latitude": "5.8",
+      "min_longitude": "124.8",
+      "max_longitude": "127.5"
+    },
+    {
+      "name": "Maluku",
+      "reason": "Complex plate boundaries of the Banda and Molucca Seas.",
+      "min_latitude": "-8.5",
+      "max_latitude": "3.0",
+      "min_longitude": "124.0",
+      "max_longitude": "135.3"
+    },
+    {
+      "name": "Papua",
+      "reason": "New Guinea's western half.",
+      "min_latitude": "-9.3",
+      "max_latitude": "0.5",
+      "min_longitude": "130.8",
+      "max_longitude": "141.1"
+    }
+  ],
+  "refinements": [
+    {
+      "name": "Jakarta",
+      "reason": "Indonesia's largest concentration of buildings and exposure, on the soft sediments of the Jakarta basin.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-6.6",
+      "max_latitude": "-5.9",
+      "min_longitude": "106.5",
+      "max_longitude": "107.2"
+    },
+    {
+      "name": "Surabaya",
+      "reason": "Indonesia's second city and an industrial centre.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-7.55",
+      "max_latitude": "-7.1",
+      "min_longitude": "112.55",
+      "max_longitude": "112.9"
+    },
+    {
+      "name": "Bandung",
+      "reason": "A large city in an intermontane basin, near the Lembang Fault.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-7.1",
+      "max_latitude": "-6.75",
+      "min_longitude": "107.45",
+      "max_longitude": "107.8"
+    },
+    {
+      "name": "Medan",
+      "reason": "Sumatra's largest city.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "3.45",
+      "max_latitude": "3.75",
+      "min_longitude": "98.55",
+      "max_longitude": "98.8"
+    },
+    {
+      "name": "Semarang",
+      "reason": "Central Java's largest city and port.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-7.15",
+      "max_latitude": "-6.9",
+      "min_longitude": "110.3",
+      "max_longitude": "110.55"
+    },
+    {
+      "name": "Makassar",
+      "reason": "Sulawesi's largest city.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-5.25",
+      "max_latitude": "-5.0",
+      "min_longitude": "119.35",
+      "max_longitude": "119.55"
+    },
+    {
+      "name": "Palembang",
+      "reason": "South Sumatra's largest city and an industrial centre.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-3.1",
+      "max_latitude": "-2.85",
+      "min_longitude": "104.65",
+      "max_longitude": "104.9"
+    },
+    {
+      "name": "Denpasar",
+      "reason": "Bali's capital and the centre of its tourism exposure.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-8.85",
+      "max_latitude": "-8.55",
+      "min_longitude": "115.05",
+      "max_longitude": "115.35"
+    },
+    {
+      "name": "Yogyakarta",
+      "reason": "A densely built city near the fault behind the 2006 Yogyakarta earthquake.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-7.95",
+      "max_latitude": "-7.65",
+      "min_longitude": "110.25",
+      "max_longitude": "110.5"
+    },
+    {
+      "name": "Padang",
+      "reason": "West Sumatra's capital, facing the Sunda megathrust; damaged in the 2009 Padang earthquake.",
+      "resolution_deg": "0.0125",
+      "min_latitude": "-1.05",
+      "max_latitude": "-0.8",
+      "min_longitude": "100.3",
+      "max_longitude": "100.45"
+    }
+  ],
+  "open_questions": [
+    "Site conditions are not represented. No cell carries Vs30, soil class or basin depth, so a hazard run applies the hazard model's own site model or its reference conditions to every cell.",
+    "Refinement follows where people and buildings concentrate, not hazard gradient. A durable rule would also follow active faults and site-condition gradients.",
+    "Mapping tolerance is zero, so a location outside the grid is reported rather than snapped to the nearest cell.",
+    "No hazard has been computed on these cells. They are geometry only until a hazard run is made on the grid."
+  ],
+  "notes": "Seed grid shipped with CASS. The base resolution is the finest of 0.0125 degrees (about 1.4 km) and 0.025 degrees at which the country's inhabited land fits in 300,000 cells, leaving room under the 500,000-cell limit for refinement; where only 0.025 fits, its largest cities are refined to 0.0125. Finer than about a kilometre adds cells without adding information, because global site-condition data is no finer. Tiles name regions and do not follow the coast: the domain removes the sea, and land more than 5 km from any building or resident.",
+  "measured": {
+    "cells": 270769,
+    "cells_by_refinement": {
+      "Jakarta": 2904,
+      "Surabaya": 961,
+      "Bandung": 784,
+      "Medan": 480,
+      "Semarang": 400,
+      "Makassar": 304,
+      "Palembang": 400,
+      "Denpasar": 531,
+      "Yogyakarta": 480,
+      "Padang": 240
+    },
+    "removed_as_sea": 631216,
+    "removed_as_unsettled": 35211,
+    "uncovered_land_cells": 0,
+    "builder_version": "1.1.0"
+  }
+}

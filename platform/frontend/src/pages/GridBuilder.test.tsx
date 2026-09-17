@@ -17,15 +17,77 @@ import { GridBuilder } from "./GridBuilder";
 /** What the server says the specification on the screen would generate. */
 const ESTIMATE = {
   cells: 28,
+  exact: false,
   cells_from_tiles: 24,
   cells_by_refinement: [{ name: "Metro Manila", resolution_deg: "0.25", cells: 4 }],
+  candidates: 28,
+  removed_as_sea: 0,
+  removed_as_unsettled: 0,
+  uncovered_land: null as null | {
+    cells: number;
+    examples: { cells: number; latitude: number; longitude: number }[];
+  },
   counted_tiles: 1,
   incomplete: 0,
   problems: [] as string[],
-  limit: 250000,
+  limit: 500000,
   within_limit: true,
   is_upper_bound: true,
   estimated: true,
+  storage: {
+    hazard_set_mb_per_thousand_years: 7,
+    package_mb_per_thousand_years: 5,
+    basis: "A ceiling.",
+  },
+};
+
+const COUNTRIES = [
+  { code: "PH", name: "Philippines", parts: ["Philippines"], bounds: {}, seeded: true },
+  { code: "QA", name: "Qatar", parts: ["Qatar"], bounds: {}, seeded: true },
+  { code: "FR", name: "France", parts: ["France"], bounds: {}, seeded: false },
+];
+
+const SEEDS = [
+  {
+    country_code: "QA",
+    label: "Qatar seed grid",
+    version: "1.0.0-seed",
+    base_resolution_deg: "0.0125",
+    tiles: 1,
+    refinements: 0,
+    domain: { clip_to_land: true, skip_unsettled: true },
+    cells: 8752,
+  },
+];
+
+const QATAR = {
+  specification: {
+    country_code: "QA",
+    version: "1.0.0-seed",
+    label: "Qatar seed grid",
+    base_resolution_deg: "0.0125",
+    mapping_tolerance_km: "0",
+    domain: {
+      clip_to_land: true,
+      coast_buffer_km: "5",
+      skip_unsettled: true,
+      settlement_buffer_km: "5",
+    },
+    tiles: [
+      {
+        name: "Qatar",
+        reason: "The whole peninsula; the domain removes the sea.",
+        min_latitude: "24.45",
+        max_latitude: "26.2",
+        min_longitude: "50.7",
+        max_longitude: "51.7",
+      },
+    ],
+    refinements: [],
+    open_questions: ["Earthquake hazard here is low.", "Site conditions are not represented."],
+    notes: "Seed grid shipped with CASS.",
+  },
+  measured: { cells: 8752 },
 };
 
 let posted: { url: string; body: Record<string, unknown> }[] = [];
@@ -47,7 +109,9 @@ const BUILT = {
     cells: 27,
     cells_at_base_resolution: 23,
     cells_by_refinement: { "Metro Manila": 4 },
-    builder_version: "1.0.0",
+    removed_as_sea: 0,
+    removed_as_unsettled: 0,
+    builder_version: "1.1.0",
     specification: {},
   },
 };
@@ -78,6 +142,15 @@ beforeEach(() => {
           ? respond(400, { detail: refuseWith })
           : respond(201, BUILT);
       }
+      if (url.includes("/grids/countries/")) {
+        return respond(200, COUNTRIES);
+      }
+      if (url.includes("/grids/seeds/qa/")) {
+        return respond(200, QATAR);
+      }
+      if (url.includes("/grids/seeds/")) {
+        return respond(200, SEEDS);
+      }
       if (url.includes("/grids/")) {
         return respond(200, { count: 0, next: null, previous: null, results: [] });
       }
@@ -102,7 +175,11 @@ function renderBuilder() {
 }
 
 async function writeSpecification(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/^Country/), "ph");
+  const country = screen.getByRole("combobox", { name: /^Country/ });
+  await waitFor(() => expect(country).not.toBeDisabled());
+  await user.type(country, "ph");
+  await screen.findByRole("option", { name: /Philippines \(PH\)/ });
+  await user.keyboard("{Enter}");
   await user.type(screen.getByLabelText(/^Version/), "0.1.0");
   await user.type(screen.getByLabelText(/^Label/), "Luzon prototype grid");
   await user.type(screen.getByLabelText(/^Base resolution/), "0.5");
@@ -179,17 +256,19 @@ describe("GridBuilder", () => {
     expect(await screen.findByText("28 cells at most")).toBeInTheDocument();
     expect(screen.getByText(/24 at the base resolution/)).toBeInTheDocument();
     expect(screen.getByText(/4 in Metro Manila at 0.25/)).toBeInTheDocument();
-    // Only the geometry is asked about: a label or a reason changes nothing
-    // about how many cells there are.
+    // Only what decides the cells is asked about: a label or a reason changes
+    // nothing about how many there are, and the country and domain do.
     expect(Object.keys(estimated[estimated.length - 1] ?? {}).sort()).toEqual([
       "base_resolution_deg",
+      "country_code",
+      "domain",
       "refinements",
       "tiles",
     ]);
   });
 
   it("will not build what the count says the server would refuse", async () => {
-    estimate = { ...ESTIMATE, cells: 6_000_000, limit: 250_000, within_limit: false };
+    estimate = { ...ESTIMATE, cells: 6_000_000, limit: 500_000, within_limit: false };
     const user = userEvent.setup();
     renderBuilder();
 
@@ -233,5 +312,84 @@ describe("GridBuilder", () => {
 
     expect(screen.getByLabelText(/^Tile 2 name/)).toBeInTheDocument();
     expect(screen.getByLabelText(/^Refinement 1 resolution/)).toBeInTheDocument();
+  });
+
+  it("keeps only land near where people live or build, unless told otherwise", async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+
+    await writeSpecification(user);
+    await user.click(
+      screen.getByRole("checkbox", { name: /Skip land with no buildings or people nearby/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Build the grid" }));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]?.body.domain).toEqual({
+      clip_to_land: true,
+      coast_buffer_km: "5",
+      skip_unsettled: false,
+      settlement_buffer_km: "5",
+    });
+  });
+
+  it("says how many cells the domain leaves out, and what the hazard would store", async () => {
+    estimate = {
+      ...ESTIMATE,
+      cells: 8752,
+      exact: true,
+      is_upper_bound: false,
+      cells_by_refinement: [],
+      candidates: 11200,
+      removed_as_sea: 2424,
+      removed_as_unsettled: 24,
+      storage: { hazard_set_mb_per_thousand_years: 2100, package_mb_per_thousand_years: 1575, basis: "" },
+    };
+    const user = userEvent.setup();
+    renderBuilder();
+
+    await writeSpecification(user);
+
+    expect(await screen.findByText("8,752 cells")).toBeInTheDocument();
+    expect(screen.getByText(/2,424 over the sea and 24 on empty land/)).toBeInTheDocument();
+    expect(screen.getByText(/at most 2.1 GB for every thousand simulated years/)).toBeInTheDocument();
+  });
+
+  it("warns where the country's land is in no tile", async () => {
+    estimate = {
+      ...ESTIMATE,
+      exact: true,
+      uncovered_land: { cells: 13, examples: [{ cells: 13, latitude: -4.79, longitude: 115.82 }] },
+    };
+    const user = userEvent.setup();
+    renderBuilder();
+
+    await writeSpecification(user);
+
+    expect(await screen.findByText(/Some of the country's land is in no tile/)).toBeInTheDocument();
+    expect(screen.getByText(/-4.79, 115.82/)).toBeInTheDocument();
+  });
+
+  it("starts a specification from a seed CASS ships", async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+
+    const seed = await screen.findByRole("combobox", { name: /^Seed/ });
+    await user.type(seed, "qa");
+    await screen.findByRole("option", { name: /Qatar seed grid/ });
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "Load into the form" }));
+
+    expect(await screen.findByText(/The QA seed is in the form/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Label/)).toHaveValue("Qatar seed grid");
+    expect(screen.getByLabelText(/^Base resolution/)).toHaveValue("0.0125");
+    expect(screen.getByLabelText(/^Tile 1 name/)).toHaveValue("Qatar");
+    expect(screen.getByLabelText(/^Open questions/)).toHaveValue(
+      "Earthquake hazard here is low.\nSite conditions are not represented.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Build the grid" }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]?.body).toMatchObject({ country_code: "QA", version: "1.0.0-seed" });
   });
 });

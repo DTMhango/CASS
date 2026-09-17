@@ -208,7 +208,25 @@ CASS_MODELS_ROOT = env("CASS_MODELS_ROOT", "/models")
 #: count is quadratic in resolution: Indonesia at 0.1 degrees is 52,831 cells
 #: and at 0.01 it is five million, which is a hazard calculation nobody asked
 #: for. A specification over this is refused with its own count.
-CASS_MAX_GRID_CELLS = int(env("CASS_MAX_GRID_CELLS", "250000"))
+#:
+#: 500,000 rather than the first 250,000, which was a guard against a typo and
+#: never a measurement. Building, storing and looking up a 230,000-cell grid
+#: took seconds when measured, and a loss run does not slow with grid size;
+#: what grows is the hazard calculation and its storage, which the grid
+#: builder's estimate shows before anything is built. Indonesia clipped to its
+#: land at 0.025 degrees is about 279,000 cells.
+CASS_MAX_GRID_CELLS = int(env("CASS_MAX_GRID_CELLS", "500000"))
+
+#: Keep OpenQuake's own copy of a calculation after CASS has stored its
+#: datastore. Off by default: CASS holds the calculation once it is registered,
+#: and a second copy on the engine doubles the storage of every national run. A
+#: comparison chained onto a removed calculation runs it again and checks it
+#: reproduces the stored ground motion.
+CASS_OPENQUAKE_KEEP_CALCULATIONS = env("CASS_OPENQUAKE_KEEP_CALCULATIONS", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # -- engine adapters --------------------------------------------------------
 

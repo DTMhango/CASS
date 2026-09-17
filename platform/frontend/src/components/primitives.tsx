@@ -51,11 +51,20 @@ interface CardProps {
   actions?: React.ReactNode;
   children: React.ReactNode;
   padded?: boolean;
+  /** Set where a single card needs to be linked to, as the user guide does. */
+  id?: string;
 }
 
-export function Card({ title, description, actions, children, padded = true }: CardProps) {
+export function Card({
+  title,
+  description,
+  actions,
+  children,
+  padded = true,
+  id,
+}: CardProps) {
   return (
-    <section className="card">
+    <section className="card" id={id}>
       {title || actions ? (
         <header className="card__header">
           <div>
@@ -176,12 +185,15 @@ export function MetricTile({
 export function DefinitionRow({
   term,
   children,
+  id,
 }: {
   term: React.ReactNode;
   children: React.ReactNode;
+  /** Set where a single definition needs to be linked to, as the user guide does. */
+  id?: string;
 }) {
   return (
-    <div className="definition-row">
+    <div className="definition-row" id={id}>
       <dt>{term}</dt>
       <dd>{children}</dd>
     </div>
@@ -241,6 +253,58 @@ export const TextInput = (props: React.InputHTMLAttributes<HTMLInputElement>) =>
 export const TextArea = (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => (
   <textarea {...props} className={`input input--area ${props.className ?? ""}`.trim()} />
 );
+
+/**
+ * A file picker that looks like the rest of the form.
+ *
+ * The control stays native, because it is the only one that opens the file
+ * dialog without script and the only one a keyboard and a screen reader
+ * already know. Only the button the browser draws inside it is restyled, so
+ * "Choose File" stops being the one piece of operating-system grey on the
+ * screen.
+ */
+export const FileInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
+  <input
+    {...props}
+    type="file"
+    className={`input input--file ${props.className ?? ""}`.trim()}
+  />
+);
+
+/**
+ * A password, with the option to read back what has been typed.
+ *
+ * A password typed blind is a password mistyped, and the reader of this one is
+ * signing in to a confidential platform: the choice of whether it is safe to
+ * show it belongs to whoever is at the keyboard. It starts hidden, and the
+ * button says what pressing it does rather than which state the field is in.
+ */
+export function PasswordInput({
+  id,
+  className,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement>) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="password">
+      <input
+        {...props}
+        id={id}
+        type={shown ? "text" : "password"}
+        className={`input password__input ${className ?? ""}`.trim()}
+      />
+      <button
+        type="button"
+        className="password__toggle"
+        aria-controls={id}
+        aria-label={shown ? "Hide password" : "Show password"}
+        onClick={() => setShown((current) => !current)}
+      >
+        {shown ? "Hide" : "Show"}
+      </button>
+    </div>
+  );
+}
 
 /** A native select, for a handful of fixed choices where there is nothing to search. */
 export const Select = (props: React.SelectHTMLAttributes<HTMLSelectElement>) => (

@@ -350,6 +350,8 @@
 
 /* Forms ------------------------------------------------------------------- */
 
+/* Fields stacked one under another. Side by side, a row spaces them instead:
+   see .form-row. */
 .field + .field {
   margin-top: var(--space-4);
 }
@@ -423,8 +425,89 @@
     linear-gradient(135deg, var(--grey-500) 50%, transparent 50%);
 }
 
+/* Only the button the browser draws inside the file input is restyled; the
+   control itself stays native. The button is a box of its own rather than a
+   flex item, so it is spaced with a margin rather than the row's gap. */
+.input--file {
+  display: flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--grey-600);
+  cursor: pointer;
+}
+
+.input--file::file-selector-button {
+  min-height: 30px;
+  margin-right: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--grey-0);
+  box-shadow: var(--shadow-sm);
+  font: inherit;
+  font-weight: 600;
+  color: var(--grey-900);
+  cursor: pointer;
+}
+
+.input--file:hover:not(:disabled)::file-selector-button {
+  background: var(--grey-50);
+  border-color: var(--grey-300);
+}
+
+.input--file:disabled {
+  cursor: not-allowed;
+}
+
 .field--invalid .input {
   border-color: var(--status-error);
+}
+
+/* Fields side by side, in columns that wrap. A row's fields rarely say the same
+   amount above their controls: one has a hint, one has none, one's hint runs
+   to two lines. So each field fills the height of its line and its control
+   sits at the foot, and the controls line up whatever is written above them.
+   The row's gap spaces the fields, so the stacking margin is not added to it.
+   A page sets --form-row-columns where its fields want other widths. */
+.form-row {
+  display: grid;
+  grid-template-columns: var(
+    --form-row-columns,
+    repeat(auto-fit, minmax(min(12rem, 100%), 1fr))
+  );
+  gap: var(--space-4) var(--space-3);
+}
+
+.form-row > .field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.form-row > .field + .field {
+  margin-top: 0;
+}
+
+.form-row > .field > :is(.field__label, .field__hint) + :not(.field__hint) {
+  margin-top: auto;
+}
+
+/* A button in the row stands on the controls' line. */
+.form-row > :not(.field) {
+  align-self: end;
+  justify-self: start;
+}
+
+.form-row > .btn--sm {
+  margin-bottom: var(--space-1);
+}
+
+/* Fields that follow the prose introducing them keep the rhythm of fields
+   stacked one under another, rather than sitting against the last line. */
+:is(p, .field) + .form-row,
+p + .field {
+  margin-top: var(--space-4);
 }
 
 /* A value the platform works out rather than asks for, shown where the field
@@ -437,6 +520,40 @@
   background: var(--surface-sunken);
   border-radius: var(--radius-md);
   color: var(--ink);
+}
+
+/* Password ---------------------------------------------------------------- */
+
+.password {
+  position: relative;
+  min-width: 0;
+}
+
+/* Room for the button, so a long password never runs under it. */
+.password__input {
+  padding-right: 4.5rem;
+}
+
+/* Inside the field's right edge, where the combobox keeps its chevron. */
+.password__toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  min-width: 4rem;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: transparent;
+  color: var(--kre-blue);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.password__toggle:hover {
+  color: var(--kre-blue-hover);
+  text-decoration: underline;
 }
 
 /* Combobox ---------------------------------------------------------------- */

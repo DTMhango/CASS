@@ -41,7 +41,7 @@ RUN pip install --no-cache-dir \
     ./packages/cass_core \
     ./packages/cass_oed \
     ./packages/cass_extract \
-    ./services/keys \
+    "./services/keys[geodata]" \
     "./services/converter[hdf5]"
 
 COPY backend/cass_api ./cass_api

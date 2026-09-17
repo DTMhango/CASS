@@ -483,6 +483,8 @@ export interface ImportResults {
     id: UUID;
     filename: string;
     source_checksum: string;
+    /** The date the schedule describes, where the importer stated one. */
+    snapshot_date: string | null;
     parser_version: string;
     cohort_rule_version: string;
     overlay_version: string;
@@ -647,6 +649,12 @@ export interface ConfiguredRun {
   runnable: boolean;
   job_checksum: string;
   rendered: string;
+  /** How long the catalogue is, what its tail rests on, and what it would store. */
+  catalogue?: {
+    simulated_years: number;
+    tail: { return_period: number; years_beyond: number }[];
+    storage?: { hazard_set_mb: number; package_mb: number; basis: string };
+  } | null;
 }
 
 export interface AreaPerilGridSummary {
@@ -657,6 +665,21 @@ export interface AreaPerilGridSummary {
   label: string;
   cell_count: number;
   publication_state: string;
+  /** True only where the grid was clipped to its country's land. */
+  excludes_offshore?: boolean;
+}
+
+/**
+ * Which of the tiles' cells a grid keeps. Both off keeps every cell of every
+ * tile, as grids always did. Buffers are kilometres, typed as text.
+ */
+export interface GridDomain {
+  /** Keep only cells touching the country's land, in Natural Earth's outline. */
+  clip_to_land: boolean;
+  coast_buffer_km: string;
+  /** Keep only cells near anywhere a building stands or a resident lives. */
+  skip_unsettled: boolean;
+  settlement_buffer_km: string;
 }
 
 /** One named area of a grid specification, with the reason it is there. */
@@ -689,6 +712,40 @@ export interface GridSpecificationInput {
   refinements: GridRefinement[];
   open_questions: string[];
   notes: string;
+  domain: GridDomain;
+}
+
+/** One grid specification CASS ships, as the catalogue lists it. */
+export interface GridSeedSummary {
+  country_code: string;
+  label: string;
+  version: string;
+  base_resolution_deg: string;
+  tiles: number;
+  refinements: number;
+  domain: Partial<GridDomain>;
+  cells: number | null;
+}
+
+export interface GridSeed {
+  specification: GridSpecificationInput;
+  measured: {
+    cells: number;
+    cells_by_refinement: Record<string, number>;
+    removed_as_sea: number;
+    removed_as_unsettled: number;
+    uncovered_land_cells: number | null;
+    builder_version: string;
+  };
+}
+
+/** A country a grid can be clipped to: Natural Earth's outline for it. */
+export interface GridCountry {
+  code: string;
+  name: string;
+  parts: string[];
+  bounds: Record<string, number>;
+  seeded: boolean;
 }
 
 /** One end of a metric's range, and the scenario that sets it. */
@@ -915,8 +972,19 @@ export interface VulnerabilityBuildResult {
  */
 export interface GridEstimate {
   cells: number;
+  /** True where the count is the build's own; false where it is a bound from the boxes. */
+  exact: boolean;
   cells_from_tiles: number;
   cells_by_refinement: { name: string; resolution_deg: string; cells: number }[];
+  /** Cells the tiles and refinements span before the domain removes any. */
+  candidates: number;
+  removed_as_sea: number;
+  removed_as_unsettled: number;
+  /** The country's land no tile or refinement covers, where the grid clips to land. */
+  uncovered_land: {
+    cells: number;
+    examples: { cells: number; latitude: number; longitude: number }[];
+  } | null;
   counted_tiles: number;
   /** Areas not yet complete enough to count, rather than wrong. */
   incomplete: number;
@@ -927,6 +995,12 @@ export interface GridEstimate {
   is_upper_bound: boolean;
   /** False where there is not yet enough to count anything at all. */
   estimated: boolean;
+  /** The most its hazard would store, per thousand simulated years. */
+  storage: {
+    hazard_set_mb_per_thousand_years: number;
+    package_mb_per_thousand_years: number;
+    basis: string;
+  };
 }
 
 export interface GridBuildResult {
@@ -935,6 +1009,8 @@ export interface GridBuildResult {
     cells: number;
     cells_at_base_resolution: number;
     cells_by_refinement: Record<string, number>;
+    removed_as_sea: number;
+    removed_as_unsettled: number;
     builder_version: string;
     specification: Record<string, unknown>;
   };
@@ -1294,6 +1370,17 @@ export interface HazardSet {
   footprint_row_count: number;
   imts: string[];
   samples_above_range: number;
+  /** Whether OpenQuake's own copy was removed once CASS held the calculation. */
+  openquake_calculation_removed?: boolean;
+  /** Whether the footprint matches the current intensity bins, and whether it can be rebuilt. */
+  rebuild?: {
+    intensity_bins_current: boolean | null;
+    datastore_available: boolean;
+    datastore_expires_at: string | null;
+    unavailable_reason: string;
+    rebuilt_as: string | null;
+    rebuilt_from: string | null;
+  };
   publication_state: string;
   notes: string;
   created_at: string;

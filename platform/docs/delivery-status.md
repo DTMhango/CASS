@@ -1,6 +1,6 @@
 # CASS delivery status
 
-Updated 13 September 2026. Measured against
+Updated 17 September 2026. Measured against
 [build plan 1.8](../../deliverables/Klapton%20Re%20Earthquake%20Catastrophe%20Modelling%20Platform%20Build%20Plan.md)
 and the
 [geocoded portfolio brief](../../deliverables/CASS%20Geocoded%20Portfolio%20Test%20Dataset%20Integration%20Instructions.md).
@@ -22,6 +22,43 @@ run. Production items that serve only a governed deployment are not pursued
 ([ADR 15](adr/0015-research-tool-and-gem-permission.md)).
 
 ## Evidence at this revision
+
+- **Grids keep only land and settlement, and ten countries ship a seed**
+  ([ADR 20](adr/0020-grids-keep-land-and-settled-cells.md)). A specification can
+  clip to its country's land (Natural Earth 1:10m 5.1.1, 5 km coast buffer) and
+  skip cells more than 5 km from any building or resident (GHSL R2023A 2020,
+  built-up or population); both ship with CASS. Every one of the 240 countries
+  Natural Earth codes clips. Against KRE's 30 June geocoded book (224 locations)
+  the land clip dropped no location inside its country and the 5 km settlement
+  buffer dropped none; 2 km dropped two. The ten seeds build within the new
+  500,000-cell limit — Indonesia 270,769 cells at 0.025° with ten cities at
+  0.0125°, Qatar 8,752 — each leaving none of its country's land outside a tile,
+  and the tests rebuild all ten against their recorded counts. Refinements off
+  the base lattice are refused; the builder is 1.1.0 and still writes the
+  Indonesian prototype's cell file byte for byte.
+- **Ten thousand simulated years by default, and wider intensity bins**
+  ([ADR 21](adr/0021-ten-thousand-simulated-years.md)). Measured on the live
+  OpenQuake with PuSGeN 2024: Jakarta–Bandung at 1,000, 5,000 and 10,000 years took
+  121, 301 and 501 seconds with datastores of 176 MB, 891 MB and 1.78 GB; Java at
+  1,000 years took 161 seconds. Java at 1,000 years reached 13.47 g at 0.3 s and
+  9.75 g at 0.6 s, and Jakarta–Bandung at 10,000 years 14.05 g, clipping the old
+  ceilings; the ceilings are now 12, 28, 20 and 14 g over 56 bins. The hazard
+  models form had been sending twenty event sets per path, which made a default
+  run twenty thousand years; it sends ten. Only motion of 0.05 g or more is now
+  stored: all 73,308 GEM v2026.0.0 functions start there, and 91% of the
+  site-events stored before never reached it. On the live platform the 10,000-year
+  Jakarta–Bandung run then took 9 minutes end to end and stored a 233 MB datastore
+  and a 38 MB footprint, against 1.78 GB and 566 MB before; its footprint was rebuilt
+  from the stored datastore in 60 seconds.
+- **A calculation is stored once** ([ADR 22](adr/0022-a-calculation-is-stored-once.md)).
+  The hazard run streams the datastore to disk and builds the hazard set from it,
+  so a national run no longer has to fit the worker's memory; OpenQuake's copy is
+  removed once the set is registered; footprints are stored compressed (335 MB of
+  CSV became 55 MB) and packages are built from disk. The same 1,000-year job run
+  twice gave identical ground motion, so a comparison on a removed calculation
+  runs it again and checks the fingerprint. A footprint is rebuilt from the stored
+  datastore when the bins change, and the replaced footprint is expired once no
+  model version uses it.
 
 - 2,075 backend tests pass, 1 skipped. Of the 106 integration tests, the
   portfolio and enrichment acceptance suites (57 and 27) were re-run at this
@@ -401,7 +438,9 @@ machinery around one, the decision still has to be taken.
   removed or re-typed, and nothing CASS reads affected. Adoption still means
   moving the reader and the pinned ODS Tools together, and re-running the
   acceptance checks against PiWind and the KRE extract.
-- A full Indonesian grid run: 52,831 cells, hours of compute.
+- A full Indonesian hazard run on the seed grid: 270,769 cells at 10,000
+  simulated years stores up to about 77 GB of hazard and 30 GB of package at the
+  measured ceiling, and its engine time at national scale is not yet measured.
 
 ### Answered on 13 September 2026
 

@@ -32,6 +32,7 @@ from .assets import (
     VULNERABILITY_MAPPING_ROLE,
     VULNERABILITY_VARIANT_ROLE_PREFIX,
     asset_bytes,
+    asset_file,
 )
 from .models import ModelVersion
 
@@ -75,8 +76,16 @@ def measure_stem(imt: str) -> str:
     return imt.replace("(", "").replace(")", "").replace(".", "p")
 
 
-def gather(model_version: ModelVersion) -> oasis_package.PackageInputs:
-    """Everything the package is built from, read from the registry."""
+def gather(
+    model_version: ModelVersion, *, workspace: pathlib.Path | None = None
+) -> oasis_package.PackageInputs:
+    """Everything the package is built from, read from the registry.
+
+    With a ``workspace``, each footprint is downloaded into it and handed over
+    as a path, so the package is written from disk a row at a time. Without one
+    the footprints are read into memory, which is for small sets and tests: a
+    national footprint is gigabytes and the worker is not.
+    """
     hazard_set = model_version.hazard_set
     if hazard_set is None:
         raise PackageBuildError(
@@ -86,15 +95,35 @@ def gather(model_version: ModelVersion) -> oasis_package.PackageInputs:
     grid = model_version.grid
     vulnerability = model_version.vulnerability_set
 
-    footprints = {
-        imt: asset_bytes(
-            hazard_set,
-            "hazard_set",
-            f"{HAZARD_ROLE_PREFIX}footprint_{measure_stem(imt)}",
-            f"{hazard_set.reference} {imt} footprint",
+    # A footprint counted into bins the package no longer uses would be read
+    # against the wrong intensities, every row of it, and nothing downstream
+    # would notice. A set that records no fingerprint predates the check and is
+    # packaged as it was.
+    from . import hazard as hazard_registry  # noqa: PLC0415
+
+    if hazard_registry.rebuild_status(hazard_set)["intensity_bins_current"] is False:
+        raise PackageBuildError(
+            f"{hazard_set.reference} was binned against intensity bins that have since "
+            "changed, so its footprint would be read against the wrong intensities. "
+            "Rebuild its footprint from the hazard set's page, then attach the rebuilt "
+            "set."
         )
-        for imt in hazard_set.imts
-    }
+    current = hazard_registry.current_intensity_bins_checksum()
+    if vulnerability.intensity_bins_checksum and vulnerability.intensity_bins_checksum != current:
+        raise PackageBuildError(
+            f"{vulnerability} was discretised against intensity bins that have since "
+            "changed, so its damage would be read against the wrong intensities. Build "
+            "the vulnerability set again from its GEM release, then build the package."
+        )
+
+    def footprint(imt: str):
+        role = f"{HAZARD_ROLE_PREFIX}footprint_{measure_stem(imt)}"
+        description = f"{hazard_set.reference} {imt} footprint"
+        if workspace is None:
+            return asset_bytes(hazard_set, "hazard_set", role, description)
+        return asset_file(hazard_set, "hazard_set", role, description, workspace)
+
+    footprints = {imt: footprint(imt) for imt in hazard_set.imts}
     # The hazard set's own effective time, not a second multiplication here: two
     # places computing the span of the same catalogue is two places to forget a
     # factor, and the factor this one forgot was the logic-tree paths (ADR 18).

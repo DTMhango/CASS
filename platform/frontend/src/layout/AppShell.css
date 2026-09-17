@@ -130,9 +130,35 @@
 }
 
 .rail__footer {
-  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  /* The same inset as the navigation list, so the sign-out glyph lines up
+     with the glyphs above it. */
+  padding: var(--space-3);
   border-top: 1px solid var(--surface-rail-border);
   font-size: var(--text-xs);
+}
+
+.rail__identity {
+  padding: var(--space-1) var(--space-3) 0;
+}
+
+/* Sign out sits under the name it signs out, aligned with the items above. */
+.rail__signout {
+  justify-content: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding-inline: var(--space-3);
+  color: var(--surface-rail-ink);
+  font-weight: 500;
+}
+
+.rail__signout-error {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  color: var(--status-error);
 }
 
 .rail__user {
@@ -194,15 +220,30 @@
   flex-shrink: 0;
 }
 
-/* Sits beside the button rather than above it: the header is a fixed height,
-   and a message that grew it would move every screen down. */
-.topbar__signout-error {
-  margin: 0;
-  max-width: 22rem;
-  font-size: var(--text-xs);
-  line-height: var(--leading-tight);
-  color: var(--status-error);
-  text-align: right;
+.topbar__guide {
+  text-decoration: none;
+}
+
+.topbar__guide:hover {
+  text-decoration: none;
+}
+
+.topbar__guide--active {
+  background: var(--kre-blue-subtle);
+  color: var(--kre-blue);
+}
+
+.topbar__guide-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .canvas {
@@ -227,8 +268,35 @@
 
   .rail__label,
   .rail__brand-text,
-  .rail__footer {
+  .rail__identity,
+  .rail__signout-label {
     display: none;
+  }
+
+  /* Sign out stays reachable when the rail is only glyphs. */
+  .rail__footer {
+    padding: var(--space-3) var(--space-2);
+  }
+
+  .rail__signout {
+    justify-content: center;
+    padding-inline: var(--space-2);
+  }
+
+  /* The collapsed rail is too narrow to hold a sentence, and it scrolls, so it
+     would clip one placed beside it. Fixed to the frame, the message still
+     appears next to the button that failed. */
+  .rail__signout-error {
+    position: fixed;
+    left: calc(var(--rail-width-collapsed) + var(--space-2));
+    bottom: var(--space-4);
+    z-index: 30;
+    max-width: 18rem;
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-raised);
+    border: 1px solid var(--status-error);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
   }
 
   .rail__brand {

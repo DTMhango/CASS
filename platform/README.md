@@ -36,7 +36,7 @@ platform/
     src/components/        Design system primitives
     src/layout/            Navigation rail and the persistent context bar
     src/pages/             The screens of build plan section 3
-  deploy/                  Compose file, Dockerfiles, environment template
+  deploy/                  Compose file, Dockerfiles, environment templates
   docs/                    Decision records and schemas
   tests/fixtures/          Cross-service fixtures, including official PiWind
 ```

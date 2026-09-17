@@ -335,6 +335,7 @@ def build_hazard_from_datastore(
         facts = datastore.metadata(location)
         table = datastore.events(location)
         keys = datastore.site_keys(location)
+        stated = datastore.provenance(location)
     except datastore.DatastoreError as exc:
         raise HazardBuildError(str(exc)) from exc
 
@@ -350,8 +351,9 @@ def build_hazard_from_datastore(
     else:
         sets, counted = span, 1
     metadata = CalculationMetadata(
-        engine_version="",
-        checksum="",
+        engine_version=stated["engine_version"],
+        checksum=stated["checksum"],
+        start_date=stated["start_date"],
         investigation_time=facts.investigation_time,
         ses_per_logic_tree_path=sets,
         realization_count=counted,
@@ -524,6 +526,27 @@ def intensity_bins_csv(bins: IntensityBinSet) -> bytes:
             [item.bin_index, item.lower, item.upper, item.interpolation, 1201]
         )
     return buffer.getvalue().encode("utf-8")
+
+
+def intensity_bins_checksum(bins: Mapping[str, IntensityBinSet]) -> str:
+    """One fingerprint over every measure's intensity-bin dictionary.
+
+    A footprint is ground motion counted into these bins, so it is only as
+    current as the bins it was counted into. Recorded with a hazard set, this is
+    what lets the platform say that a set was binned against dictionaries that
+    have since changed -- and that its footprint needs rebuilding from the
+    stored calculation rather than a new one. Computed over the tables exactly
+    as they are written into a package, so two dictionaries with the same
+    fingerprint write the same files.
+    """
+    import hashlib  # noqa: PLC0415 - only needed here
+
+    digest = hashlib.sha256()
+    for imt in sorted(bins):
+        digest.update(imt.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(intensity_bins_csv(bins[imt]))
+    return digest.hexdigest()
 
 
 def tables(hazard: HazardSet) -> dict[str, bytes]:

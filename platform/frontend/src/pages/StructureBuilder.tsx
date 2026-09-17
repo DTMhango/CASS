@@ -162,7 +162,7 @@ function PolicyForm({ exposure, accounts }: { exposure: ExposureVersion; account
       description="A policy's layers are evaluated in order: each attaches where its cover begins and pays up to its limit, and the signed share is the proportion of the layer written."
     >
       <Refused error={add.error} />
-      <div className="grid-builder__row">
+      <div className="grid-builder__row form-row">
         <Field label="Account" htmlFor="policy-account" required>
           <Combobox
             id="policy-account"
@@ -189,7 +189,7 @@ function PolicyForm({ exposure, accounts }: { exposure: ExposureVersion; account
       </div>
 
       {layers.map((layer, index) => (
-        <div className="grid-builder__row" key={index}>
+        <div className="grid-builder__row form-row" key={index}>
           <Field label={`Layer ${index + 1} attachment`} htmlFor={`layer-${index}-attachment`}>
             <TextInput
               id={`layer-${index}-attachment`}
@@ -322,7 +322,7 @@ function ContractForm({
   return (
     <Card title="Add a reinsurance contract" description={CONTRACT_TYPES[type].explains}>
       <Refused error={add.error} />
-      <div className="grid-builder__row">
+      <div className="grid-builder__row form-row">
         <Field label="Contract type" htmlFor="contract-type" required>
           <Select
             id="contract-type"
@@ -356,7 +356,7 @@ function ContractForm({
         </Field>
       </div>
 
-      <div className="grid-builder__row">
+      <div className="grid-builder__row form-row">
         {type === "CXL" ? (
           <>
             <Field label="Attachment per event" htmlFor="contract-attachment" required>
@@ -445,7 +445,7 @@ function ContractForm({
           A surplus share names each risk it cedes, with the share ceded on it.
         </p>
       ) : (
-        <div className="grid-builder__row">
+        <div className="grid-builder__row form-row">
           <Field label="Covers" htmlFor="contract-covers">
             <Select
               id="contract-covers"
@@ -461,7 +461,7 @@ function ContractForm({
 
       {named
         ? scope.map((row, index) => (
-            <div className="grid-builder__row" key={index}>
+            <div className="grid-builder__row form-row" key={index}>
               <Field label={`Risk ${index + 1} account`} htmlFor={`scope-${index}-account`}>
                 <Combobox
                   id={`scope-${index}-account`}

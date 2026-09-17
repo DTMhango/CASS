@@ -123,7 +123,7 @@ export function GemReleaseCard() {
         </p>
       ) : null}
 
-      <div className="grid-builder__row">
+      <div className="grid-builder__row form-row">
         <Field
           label="Or name the folder"
           htmlFor="gem-release-path"

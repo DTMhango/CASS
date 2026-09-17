@@ -1,0 +1,57 @@
+{
+  "country_code": "MV",
+  "version": "1.0.0-seed",
+  "label": "Maldives seed grid",
+  "base_resolution_deg": "0.0125",
+  "mapping_tolerance_km": "0",
+  "domain": {
+    "clip_to_land": false,
+    "coast_buffer_km": "5",
+    "skip_unsettled": true,
+    "settlement_buffer_km": "5"
+  },
+  "tiles": [
+    {
+      "name": "Northern atolls",
+      "reason": "Haa Alifu to Raa and Baa.",
+      "min_latitude": "5.0",
+      "max_latitude": "7.2",
+      "min_longitude": "72.5",
+      "max_longitude": "73.8"
+    },
+    {
+      "name": "Central atolls",
+      "reason": "Kaafu, with Male and Hulhumale, to Laamu.",
+      "min_latitude": "1.8",
+      "max_latitude": "5.0",
+      "min_longitude": "72.6",
+      "max_longitude": "73.8"
+    },
+    {
+      "name": "Southern atolls",
+      "reason": "Gaafu, Fuvahmulah and Addu.",
+      "min_latitude": "-0.8",
+      "max_latitude": "1.8",
+      "min_longitude": "72.8",
+      "max_longitude": "73.6"
+    }
+  ],
+  "refinements": [],
+  "open_questions": [
+    "Not clipped to land, because Natural Earth draws only 176 of about 1,190 islands; cells are kept within 5 km of any building or resident GHSL records instead, which includes the lagoon and reef around them.",
+    "Ground-shaking hazard in the Maldives is low. Its earthquake-related losses have come from tsunami, as in 2004, which CASS does not model.",
+    "Site conditions are not represented. No cell carries Vs30, soil class or basin depth, so a hazard run applies the hazard model's own site model or its reference conditions to every cell.",
+    "Refinement follows where people and buildings concentrate, not hazard gradient. A durable rule would also follow active faults and site-condition gradients.",
+    "Mapping tolerance is zero, so a location outside the grid is reported rather than snapped to the nearest cell.",
+    "No hazard has been computed on these cells. They are geometry only until a hazard run is made on the grid."
+  ],
+  "notes": "Seed grid shipped with CASS. The base resolution is the finest of 0.0125 degrees (about 1.4 km) and 0.025 degrees at which the country's inhabited land fits in 300,000 cells, leaving room under the 500,000-cell limit for refinement; where only 0.025 fits, its largest cities are refined to 0.0125. Finer than about a kilometre adds cells without adding information, because global site-condition data is no finer. Tiles name regions and do not follow the coast: the domain removes the sea, and land more than 5 km from any building or resident.",
+  "measured": {
+    "cells": 16185,
+    "cells_by_refinement": {},
+    "removed_as_sea": 0,
+    "removed_as_unsettled": 40007,
+    "uncovered_land_cells": 0,
+    "builder_version": "1.1.0"
+  }
+}

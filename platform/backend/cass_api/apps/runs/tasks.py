@@ -126,6 +126,29 @@ def execute_hazard(hazard_run_id: str) -> dict:
     }
 
 
+@shared_task(name="cass.runs.rebuild_hazard")
+def rebuild_hazard(hazard_run_id: str) -> dict:
+    """Rebuild a hazard set's footprint from its stored calculation.
+
+    A national footprint takes minutes to bin, so this runs in the background
+    and is followed on the run monitor, as a hazard calculation is.
+    """
+    hazard_run = HazardRun.objects.select_related("run").get(id=hazard_run_id)
+    try:
+        hazard_service.rebuild(hazard_run, actor=hazard_run.created_by)
+    except (AdapterError, hazard_service.HazardExecutionError) as exc:
+        logger.warning("hazard rebuild %s failed: %s", hazard_run_id, exc)
+        hazard_run.run.refresh_from_db()
+        return {
+            "hazard_run": str(hazard_run_id),
+            "state": hazard_run.run.state,
+            "stage": hazard_run.run.failure_stage,
+            "summary": hazard_run.run.failure_summary,
+        }
+    hazard_run.run.refresh_from_db()
+    return {"hazard_run": str(hazard_run_id), "state": hazard_run.run.state}
+
+
 @shared_task(name="cass.runs.cancel_hazard")
 def cancel_hazard(hazard_run_id: str, actor_id: str | None = None) -> dict:
     """Stop a calculation on OpenQuake as well as in CASS."""

@@ -9,13 +9,14 @@ count.
 
 from __future__ import annotations
 
+import gzip
 import tracemalloc
 from decimal import Decimal
 
 import pytest
 
 from cass_converter.footprint import FootprintError, FootprintRow
-from cass_converter.footprint_tables import FootprintTableWriter
+from cass_converter.footprint_tables import FootprintTableWriter, open_table
 
 
 def row(event, cell, imt, bin_id, probability):
@@ -66,13 +67,44 @@ def test_the_file_is_the_table_a_sorted_rendering_would_produce(written):
             key=lambda item: (item.event_id, item.area_peril_id, item.intensity_bin_id),
         )
     ]
-    produced = written.path_for("PGA").read_text(encoding="utf-8").splitlines()
+    with gzip.open(written.path_for("PGA"), "rt", encoding="utf-8") as handle:
+        produced = handle.read().splitlines()
     assert produced == expected
 
 
 def test_a_measure_becomes_its_own_file(written):
-    assert sorted(written.paths()) == ["footprint_PGA.csv", "footprint_SA0p3.csv"]
+    assert sorted(written.paths()) == ["footprint_PGA.csv.gz", "footprint_SA0p3.csv.gz"]
     assert written.imts == ("PGA", "SA(0.3)")
+
+
+# -- stored once, and compactly --------------------------------------------------------
+
+def test_the_footprint_is_compressed_as_it_is_written(written):
+    """The largest table a hazard set stores is never kept as uncompressed text."""
+    assert written.path_for("PGA").read_bytes()[:2] == bytes((0x1F, 0x8B))
+    assert written.csv_bytes("PGA").startswith(b"event_id,areaperil_id")
+
+
+def test_the_same_rows_write_the_same_bytes(tmp_path):
+    """gzip records a time and a filename by default; left out, a rebuild is identical."""
+    first = FootprintTableWriter(tmp_path / "first")
+    first.extend(ROWS)
+    one = first.close()
+    second = FootprintTableWriter(tmp_path / "second")
+    second.extend(ROWS)
+    two = second.close()
+    assert one.path_for("PGA").read_bytes() == two.path_for("PGA").read_bytes()
+
+
+def test_a_table_stored_before_compression_still_reads(tmp_path):
+    """Hazard sets registered earlier hold plain CSV, and must still build a package."""
+    plain = tmp_path / "footprint_PGA.csv"
+    plain.write_text("event_id,areaperil_id,intensity_bin_id,probability\n1,10,3,1.0\n")
+    compressed = gzip.compress(plain.read_bytes())
+
+    for source in (plain, plain.read_bytes(), compressed):
+        with open_table(source) as handle:
+            assert handle.read().splitlines()[1] == "1,10,3,1.0"
 
 
 def test_a_row_arriving_out_of_order_is_refused(tmp_path):

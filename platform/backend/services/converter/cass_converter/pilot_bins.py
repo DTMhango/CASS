@@ -33,7 +33,7 @@ from .bins import DamageBinSet, IntensityBinSet, log_bins, oasis_damage_bins
 #: Bumped with any change to either dictionary. A loss computed against one set
 #: of bins is not comparable with a loss computed against another, so the bin
 #: version travels with the vulnerability set that used it.
-PILOT_BIN_VERSION = "0.1.0-draft"
+PILOT_BIN_VERSION = "0.2.0-draft"
 
 #: Interior damage bins between the two point bins, giving 22 in total.
 #: Twenty divides the unit interval at a resolution finer than the differences
@@ -45,15 +45,25 @@ DAMAGE_BIN_INTERIOR = 20
 #: orders of magnitude and vulnerability functions are steepest at the low end,
 #: so equal ratios carry more information than equal differences.
 #:
-#: Raised from 40 when the ranges below were widened, so widening the top did
-#: not coarsen the resolution where the functions are steep.
-INTENSITY_BIN_COUNT = 50
+#: Raised from 40 when the ranges below were first widened, and from 50 when they
+#: were widened again, so widening the top has never coarsened the resolution
+#: where the functions are steep. Measured over the range from 0.005 g, 55 would
+#: have left SA(0.6)'s bins 0.6% wider than before, so 56; with the floor now at
+#: 0.05 g, every measure's bins are about a third narrower than they were.
+INTENSITY_BIN_COUNT = 56
 
 #: Lowest and highest ground motion each measure is binned over, in g.
 #:
-#: The floor is below any motion that causes reportable damage. The ceiling is
-#: the asymmetric one: motion above the top bin has nowhere to go, and dropping
-#: it removes precisely the events that drive the loss.
+#: The floor is where damage begins. Every one of the 73,308 vulnerability
+#: functions in GEM v2026.0.0 -- 860 files, every country and loss type -- starts
+#: at 0.05 g, and below a function's lowest level both CASS and OpenQuake give no
+#: loss. Motion beneath the floor is dropped by the engine before it is stored, so
+#: nothing that could produce a loss is lost. It was 0.005 g, a tenth of that, and
+#: the difference was most of what a hazard set stored: on the Jakarta-Bandung and
+#: Java calculations, only 9% of site-events reached 0.05 g on any measure.
+#:
+#: The ceiling is the asymmetric one: motion above the top bin has nowhere to go,
+#: and dropping it removes precisely the events that drive the loss.
 #:
 #: These are now derived from a footprint rather than guessed. An event-based
 #: run of the PuSGeN 2024 Indonesia model over the Jakarta-Bandung cells --
@@ -71,11 +81,21 @@ INTENSITY_BIN_COUNT = 50
 #: The short-period measures keep the higher ceilings because that is the shape
 #: of a response spectrum -- a near-field record reaches further above 1 g at
 #: 0.3 s than at 1.0 s.
+#:
+#: Widened again on 17 September 2026, by the same rule, when longer catalogues
+#: and larger regions reached past those ceilings. Measured on this platform with
+#: the same model: over the 4,149 cells of Java, 1,000 years reached 13.47 g at
+#: 0.3 s and 9.75 g at 0.6 s; over Jakarta-Bandung, 10,000 years reached 14.05 g
+#: at 0.3 s; and the largest PGA seen was 5.69 g, at 1,000 years. The first two
+#: clipped the old 13 g and 9 g ceilings, so a national run, or the new default
+#: of ten thousand years, would have been refused publication. The strongest
+#: value each measure has reached in any run is doubled again, as before: PGA
+#: 5.69 to 12, SA(0.3) 14.05 to 28, SA(0.6) 9.75 to 20, SA(1.0) 6.84 to 14.
 INTENSITY_RANGE: Mapping[str, tuple[str, str]] = {
-    "PGA": ("0.005", "6.0"),
-    "SA(0.3)": ("0.005", "13.0"),
-    "SA(0.6)": ("0.005", "9.0"),
-    "SA(1.0)": ("0.005", "8.0"),
+    "PGA": ("0.05", "12.0"),
+    "SA(0.3)": ("0.05", "28.0"),
+    "SA(0.6)": ("0.05", "20.0"),
+    "SA(1.0)": ("0.05", "14.0"),
 }
 
 #: The measures GEM's pilot-country functions demand. Not a choice: it is what

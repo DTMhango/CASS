@@ -86,3 +86,15 @@
 .build__package-note {
   font-size: var(--text-sm);
 }
+
+/* Whether a hazard set's footprint matches the current intensity bins, under its
+   measures, with the rebuild beside the reason for it. */
+.build__footprint {
+  margin: var(--space-1) 0 0;
+  max-width: 28rem;
+  font-size: var(--text-sm);
+}
+
+.build__footprint p {
+  margin: 0 0 var(--space-1);
+}

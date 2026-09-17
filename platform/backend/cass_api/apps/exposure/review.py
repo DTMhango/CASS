@@ -587,6 +587,12 @@ def import_results(batch: ImportBatch) -> dict[str, Any]:
             "id": str(batch.id),
             "filename": batch.source_filename,
             "source_checksum": batch.source_checksum,
+            # The date the schedule describes, where whoever imported it said
+            # so. It is provenance rather than an input: nothing here reads it,
+            # and two imports of the same book are told apart by it.
+            "snapshot_date": (
+                batch.snapshot_date.isoformat() if batch.snapshot_date else None
+            ),
             "parser_version": batch.parser_version,
             "cohort_rule_version": batch.cohort_rule_version,
             "overlay_version": OVERLAY_VERSION,

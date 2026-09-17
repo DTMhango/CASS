@@ -381,6 +381,16 @@ class HazardRun(BaseModel):
     grid = models.ForeignKey(
         "modelregistry.AreaPerilGrid", on_delete=models.PROTECT, related_name="hazard_runs"
     )
+    #: Set where this run rebuilds an existing hazard set's footprint from its
+    #: stored datastore rather than computing new ground motion. Such a run
+    #: skips submitting and monitoring: the calculation already happened.
+    rebuild_of = models.ForeignKey(
+        "modelregistry.HazardSet",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="rebuild_runs",
+    )
 
     openquake_calculation_id = models.CharField(max_length=32, blank=True)
     openquake_version = models.CharField(max_length=32, blank=True)

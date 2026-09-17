@@ -13,6 +13,12 @@
   align-items: start;
 }
 
+/* Side by side, a card's stacking margin would drop it below its neighbour;
+   the grid's gap spaces the cards. */
+.dashboard__grid > .card + .card {
+  margin-top: 0;
+}
+
 .dashboard__inline-list {
   display: flex;
   flex-direction: column;

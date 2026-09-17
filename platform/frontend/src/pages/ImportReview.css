@@ -155,15 +155,12 @@
 /* The rationale field takes the width, because the rule of this screen is
    that a decision without a reason is not a decision. */
 .queue__form {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.7fr) minmax(120px, 0.6fr) minmax(240px, 2fr) auto;
-  gap: var(--space-3);
-  align-items: end;
+  --form-row-columns: minmax(140px, 0.7fr) minmax(120px, 0.6fr) minmax(240px, 2fr) auto;
 }
 
 @media (max-width: 900px) {
   .queue__form {
-    grid-template-columns: minmax(0, 1fr);
+    --form-row-columns: minmax(0, 1fr);
   }
 }
 
@@ -184,9 +181,7 @@
 /* The promotion form: assumptions chosen side by side, because they are read
    together -- a cohort and an allocation only make sense against each other. */
 .promotion__form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--space-3);
+  --form-row-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   margin-bottom: var(--space-3);
 }
 

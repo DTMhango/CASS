@@ -19,7 +19,7 @@
  * finishes on the import review screen.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
@@ -43,6 +43,7 @@ import {
   Combobox,
   EmptyState,
   Field,
+  FileInput,
   MetricTile,
   Notice,
   PageHeader,
@@ -83,9 +84,29 @@ const FILE_KINDS: { kind: OEDFileKind; label: string; requirement: string }[] = 
 export function ExposureWorkspace({ embedded = false }: { embedded?: boolean } = {}) {
   const context = useWorkingContext();
   const { data: versions, isLoading } = useExposureVersions(context.projectId);
+  const { data: projects } = useProjects();
   const [selectedId, setSelectedId] = useState<string | undefined>(context.exposureId);
+  const [adding, setAdding] = useState(false);
 
   const selected = versions?.find((item) => item.id === selectedId);
+
+  /* The two ways in used to sit under the list, in a third of the screen,
+     while the other two thirds held one sentence asking for a selection. They
+     are the same master-and-detail pair as everything else on the screen: the
+     list chooses, and the wide side shows either the portfolio chosen or, when
+     there is nothing to show, how to add one. */
+  const showAdd = adding || !selected;
+
+  const projectNames = useMemo(
+    () => new Map((projects ?? []).map((project) => [project.id, project.name])),
+    [projects],
+  );
+
+  function choose(version: ExposureVersion) {
+    setSelectedId(version.id);
+    context.setExposure(version);
+    setAdding(false);
+  }
 
   return (
     <>
@@ -101,7 +122,14 @@ export function ExposureWorkspace({ embedded = false }: { embedded?: boolean } =
             description={
               context.project
                 ? `In ${context.project.name}`
-                : "Select a project to scope the list."
+                : "Every project you can see."
+            }
+            actions={
+              selected ? (
+                <Button size="sm" onClick={() => setAdding(!adding)}>
+                  {adding ? "Cancel" : "Add portfolio"}
+                </Button>
+              ) : null
             }
           >
             <ProjectPicker />
@@ -114,13 +142,12 @@ export function ExposureWorkspace({ embedded = false }: { embedded?: boolean } =
                     <button
                       type="button"
                       className={`exposure-list__item ${
-                        version.id === selectedId ? "exposure-list__item--active" : ""
+                        version.id === selectedId && !adding
+                          ? "exposure-list__item--active"
+                          : ""
                       }`.trim()}
-                      onClick={() => {
-                        setSelectedId(version.id);
-                        context.setExposure(version);
-                      }}
-                      aria-current={version.id === selectedId}
+                      onClick={() => choose(version)}
+                      aria-current={version.id === selectedId && !adding}
                     >
                       <span className="exposure-list__name">
                         {version.name}
@@ -132,32 +159,41 @@ export function ExposureWorkspace({ embedded = false }: { embedded?: boolean } =
                           {formatCount(version.location_count)} locations
                         </span>
                       </span>
+                      {/* Which project a portfolio belongs to matters only
+                          while the list is showing several of them. */}
+                      {!context.projectId && projectNames.get(version.project) ? (
+                        <span className="exposure-list__project muted">
+                          {projectNames.get(version.project)}
+                        </span>
+                      ) : null}
                     </button>
                   </li>
                 ))}
               </ul>
+            ) : projects && projects.length === 0 ? (
+              <EmptyState
+                title="No project yet"
+                description="A portfolio belongs to a project, and you are not in one yet. Create a project first; it is the workspace that owns portfolios, runs and results."
+                action={
+                  <Link className="btn btn--primary btn--md" to="/">
+                    Go to the Portfolio dashboard
+                  </Link>
+                }
+              />
             ) : (
               <EmptyState
                 title="No portfolios yet"
-                description="Create a portfolio version, then attach the OED files it is built from."
+                description="Bring one in from a spreadsheet with the intake template, or start from OED files if you already have them. Both ways in are under Add a portfolio."
               />
             )}
           </Card>
-
-          <IntakeImportForm />
-          <CreateVersionForm onCreated={setSelectedId} />
         </div>
 
         <div className="exposure-layout__detail">
-          {selected ? (
+          {selected && !showAdd ? (
             <ExposureDetail version={selected} />
           ) : (
-            <Card>
-              <EmptyState
-                title="Select a portfolio"
-                description="Choose a portfolio version on the left to review its files, findings and summaries."
-              />
-            </Card>
+            <AddPortfolio onCreated={choose} />
           )}
         </div>
       </div>
@@ -165,8 +201,55 @@ export function ExposureWorkspace({ embedded = false }: { embedded?: boolean } =
       {/* Full width rather than in the column beside the portfolio list: a
           location file is twenty-odd columns, and reading it through a third
           of the screen is how it stayed unread. */}
-      {selected ? <PortfolioRows version={selected} /> : null}
+      {selected && !showAdd ? <PortfolioRows version={selected} /> : null}
     </>
+  );
+}
+
+/**
+ * The two ways in, side by side, with the choice between them stated.
+ *
+ * Which route applies is decided by the source data rather than by preference,
+ * so each one is headed by the data it suits rather than by what it does. A
+ * person who was sent a spreadsheet and a person who was sent OED files can
+ * both find their own sentence and stop reading.
+ */
+function AddPortfolio({ onCreated }: { onCreated: (version: ExposureVersion) => void }) {
+  const { data: projects } = useProjects();
+  const context = useWorkingContext();
+
+  const hasProjects = Boolean(projects && projects.length > 0);
+
+  return (
+    <Card
+      title="Add a portfolio"
+      description="Two ways in. Which one you use is decided by what you were sent, not by preference."
+    >
+      {/* Both forms below need a project, and the screen used to say so twice,
+          in grey, under two disabled buttons. It is said once, before the
+          forms, with the way out of it. */}
+      {!context.projectId ? (
+        <Notice
+          tone="info"
+          title={hasProjects ? "Choose a project first" : "Create a project first"}
+        >
+          {hasProjects ? (
+            "A portfolio belongs to one project. Choose one in the Project list, and both routes here become available."
+          ) : (
+            <>
+              A portfolio belongs to one project, and you are not in one yet.{" "}
+              <Link to="/">Create a project on the Portfolio dashboard</Link>, then
+              come back here.
+            </>
+          )}
+        </Notice>
+      ) : null}
+
+      <div className="exposure-routes">
+        <IntakeImportForm />
+        <CreateVersionForm onCreated={onCreated} />
+      </div>
+    </Card>
   );
 }
 
@@ -181,7 +264,7 @@ export function ExposureWorkspace({ embedded = false }: { embedded?: boolean } =
  *
  * Nothing becomes a portfolio here. An import is staged, profiled and put in
  * front of a person, and only a promotion turns a reviewed cohort into an
- * exposure version -- so the finish line is the import review, not this card.
+ * exposure version -- so the finish line is the import review, not this form.
  */
 function IntakeImportForm() {
   const context = useWorkingContext();
@@ -189,81 +272,86 @@ function IntakeImportForm() {
   const importWorkbook = useImportWorkbook();
 
   const [file, setFile] = useState<File | null>(null);
-  const [snapshotDate, setSnapshotDate] = useState("");
+  const [asAtDate, setAsAtDate] = useState("");
 
   const projectId = context.projectId;
   const error = (template.error ?? importWorkbook.error) as ApiError | null;
 
   return (
-    <Card
-      title="Import a portfolio workbook"
-      description="For source data that is not already OED. The import is staged and profiled, then reviewed before any of it becomes a portfolio."
-    >
+    <section className="exposure-route">
+      <h3 className="exposure-route__title">Your data is a spreadsheet</h3>
+      <p className="exposure-route__lead">
+        The usual case: a schedule in whatever layout it arrived in. Copy it into the
+        CASS intake template, whose columns are the ones CASS reads. The import is
+        staged and profiled for review, and nothing becomes a portfolio until you
+        promote it.
+      </p>
+
       {error ? (
         <Notice tone="error" title="The import was refused">
           {error.message}
         </Notice>
       ) : null}
 
-      <Button
-        variant="secondary"
-        onClick={() => template.mutate(projectId)}
-        busy={template.isPending}
-      >
-        Download the intake template
-      </Button>
+      <div className="exposure-route__download">
+        <Button
+          variant="secondary"
+          onClick={() => template.mutate(projectId)}
+          busy={template.isPending}
+        >
+          Download the intake template
+        </Button>
+      </div>
 
       <Field
         label="Completed template"
         htmlFor="intake-file"
         hint="Read as it stands. Nothing in it is corrected on the way in."
       >
-        <input
+        <FileInput
           id="intake-file"
-          type="file"
           accept=".xlsx,.xls"
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
         />
       </Field>
 
       <Field
-        label="Snapshot date"
-        htmlFor="intake-snapshot"
-        hint="The date the schedule describes, where it differs from today."
+        label="As-at date"
+        htmlFor="intake-as-at"
+        hint="Optional. The date this schedule describes, if that is not today — the end of last quarter, say. It labels the import and is shown on the import review; it changes nothing CASS reads."
       >
         <TextInput
-          id="intake-snapshot"
+          id="intake-as-at"
           type="date"
-          value={snapshotDate}
-          onChange={(event) => setSnapshotDate(event.target.value)}
+          className="exposure-route__date"
+          value={asAtDate}
+          onChange={(event) => setAsAtDate(event.target.value)}
         />
       </Field>
 
-      <Button
-        variant="primary"
-        disabled={!file || !projectId}
-        busy={importWorkbook.isPending}
-        onClick={() => {
-          if (file && projectId) {
-            importWorkbook.mutate({
-              project: projectId,
-              file,
-              snapshot_date: snapshotDate || undefined,
-            });
+      <div className="exposure-route__actions">
+        <Button
+          variant="primary"
+          disabled={!file || !projectId}
+          busy={importWorkbook.isPending}
+          onClick={() => {
+            if (file && projectId) {
+              importWorkbook.mutate({
+                project: projectId,
+                file,
+                snapshot_date: asAtDate || undefined,
+              });
+            }
+          }}
+          title={
+            projectId
+              ? "Stage the workbook and profile what it contains."
+              : "Choose a project first."
           }
-        }}
-        title={
-          projectId
-            ? "Stage the workbook and profile what it contains."
-            : "Select a project first."
-        }
-      >
-        Import workbook
-      </Button>
-
-      {!projectId ? (
-        <p className="muted">Select a project before importing.</p>
-      ) : null}
+        >
+          Import workbook
+        </Button>
+      </div>
 
       {importWorkbook.isSuccess ? (
         <Notice tone="ok" title="Imported and profiled">
@@ -274,7 +362,7 @@ function IntakeImportForm() {
           , then promote a cohort to an exposure version.
         </Notice>
       ) : null}
-    </Card>
+    </section>
   );
 }
 
@@ -336,23 +424,27 @@ function ExposureStateBadge({ version }: { version: ExposureVersion }) {
 /**
  * Start a portfolio from OED files.
  *
- * This is the other way in. The card above takes a completed intake template
- * and stages it for review; this one makes an empty portfolio for source data
- * that is already OED, which the four attachments below then fill.
+ * This is the other way in. The route beside it takes a completed intake
+ * template and stages it for review; this one makes an empty portfolio for
+ * source data that is already OED, which the four attachments on the portfolio
+ * itself then fill.
  *
  * It asks for a name and nothing else. Everything else about a portfolio --
  * how many locations, what they are worth, which perspectives the files
  * support -- is read from the files rather than typed here, and a field a
  * person fills in that nothing then reads is a field that will eventually
  * disagree with the data.
+ *
+ * The project is the one that is chosen, never the first one that happens to
+ * come back from the API: a portfolio filed under a project nobody picked is
+ * found again only by whoever goes looking for it.
  */
-function CreateVersionForm({ onCreated }: { onCreated: (id: string) => void }) {
-  const { data: projects } = useProjects();
+function CreateVersionForm({ onCreated }: { onCreated: (version: ExposureVersion) => void }) {
   const context = useWorkingContext();
   const create = useCreateExposureVersion();
   const [name, setName] = useState("");
 
-  const projectId = context.projectId ?? projects?.[0]?.id;
+  const projectId = context.projectId;
   const error = create.error as ApiError | null;
 
   function submit(event: React.FormEvent) {
@@ -362,19 +454,24 @@ function CreateVersionForm({ onCreated }: { onCreated: (id: string) => void }) {
       { project: projectId, name },
       {
         onSuccess: (version) => {
-          onCreated(version.id);
           context.setExposure(version);
           setName("");
+          onCreated(version);
         },
       },
     );
   }
 
   return (
-    <Card
-      title="New portfolio version"
-      description="For source data that is already OED. Name it here, then attach the location, account and reinsurance files."
-    >
+    <section className="exposure-route">
+      <h3 className="exposure-route__title">Your data is already OED</h3>
+      <p className="exposure-route__lead">
+        OED is the industry-standard layout. If a colleague or another system has
+        already produced the location, account and reinsurance files, name the
+        portfolio here and attach them to it directly. No review step is needed:
+        the files are read where they stand.
+      </p>
+
       <form onSubmit={submit}>
         {error ? (
           <Notice tone="error" title="Could not create the version">
@@ -394,23 +491,23 @@ function CreateVersionForm({ onCreated }: { onCreated: (id: string) => void }) {
             required
           />
         </Field>
-        <div className="exposure-form__actions">
+        <div className="exposure-route__actions">
           <Button
             type="submit"
             variant="primary"
             busy={create.isPending}
             disabled={!projectId || !name}
+            title={
+              projectId
+                ? "Create version 1 of this portfolio, ready for its files."
+                : "Choose a project first."
+            }
           >
             Create version
           </Button>
         </div>
-        {!projectId ? (
-          <p className="muted exposure-form__hint">
-            Create a project before adding a portfolio.
-          </p>
-        ) : null}
       </form>
-    </Card>
+    </section>
   );
 }
 

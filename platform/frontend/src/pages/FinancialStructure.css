@@ -5,6 +5,11 @@
   gap: var(--space-4);
 }
 
+/* The gap between cards comes from the grid, not from each card. */
+.structure > .card + .card {
+  margin-top: 0;
+}
+
 .structure__findings {
   margin: 0;
   padding-left: var(--space-4);

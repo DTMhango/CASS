@@ -194,3 +194,31 @@ jobs:
           sed -i 's/^OASIS_ADMIN_PASS=$/OASIS_ADMIN_PASS=ci-only/' .env
           docker compose -f deploy/docker-compose.yml --env-file .env config --quiet
           docker compose -f deploy/docker-compose.yml --env-file .env --profile engines config --quiet
+
+      # Dokploy runs compose from the repository root rather than beside the
+      # compose file, and passes no --profile: paths that only resolve from the
+      # compose file's own folder build the wrong context, and engines that need
+      # a profile never start. Both are silent, so the template is resolved that
+      # way here on every change.
+      - name: Validate the compose file as Dokploy runs it
+        working-directory: ${{ github.workspace }}
+        run: |
+          cp platform/deploy/dokploy.env.example dokploy.env
+          sed -i 's/^CASS_SECRET_KEY=$/CASS_SECRET_KEY=ci-only-not-a-real-secret/' dokploy.env
+          sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci-only/' dokploy.env
+          sed -i 's/^MINIO_ROOT_PASSWORD=$/MINIO_ROOT_PASSWORD=ci-only-secret/' dokploy.env
+          sed -i 's/^OASIS_ADMIN_PASS=$/OASIS_ADMIN_PASS=ci-only/' dokploy.env
+          compose="docker compose -p cass --project-directory . --env-file dokploy.env -f platform/deploy/docker-compose.yml"
+          $compose config --quiet
+          $compose config --services | grep -qx openquake
+          $compose config --format json | python3 -c '
+          import json, sys
+          services = json.load(sys.stdin)["services"]
+          root = "${{ github.workspace }}"
+          for name, service in services.items():
+              if "build" in service:
+                  assert service["build"]["context"] == f"{root}/platform", (name, service["build"])
+          init = [v["source"] for v in services["postgres"]["volumes"] if "initdb.d" in v["target"]]
+          assert init == [f"{root}/platform/deploy/postgres-init"], init
+          print(f"{len(services)} services, paths under the repository")
+          '

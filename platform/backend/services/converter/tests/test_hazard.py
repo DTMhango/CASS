@@ -361,8 +361,8 @@ def test_one_footprint_is_produced_for_each_measure(export, bins):
     # as the conversion streams -- so they are named by path rather than handed
     # over as bytes. The small tables still come back as payloads.
     footprints = hazard_build.table_paths(hazard)
-    assert "footprint_PGA.csv" in footprints
-    assert "footprint_SA0p3.csv" in footprints
+    assert "footprint_PGA.csv.gz" in footprints
+    assert "footprint_SA0p3.csv.gz" in footprints
     assert all(path.is_file() for path in footprints.values())
     assert "occurrence.csv" in hazard_build.tables(hazard)
 

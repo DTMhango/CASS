@@ -23,6 +23,13 @@ revisit it. A decision that cannot name its alternatives was not a decision.
 | [0013](0013-product-areas-hold-tabs.md) | A product area holds its screens as tabs | Accepted |
 | [0014](0014-assumption-sets-as-vulnerability-sets.md) | An assumption set is a vulnerability set the engine selects per analysis | Accepted |
 | [0015](0015-research-tool-and-gem-permission.md) | CASS is a research tool, and GEM has permitted use of the data and models it publishes | Accepted |
+| [0016](0016-multi-measure-classes-as-sub-peril-channels.md) | A class spanning intensity measures is carried as one sub-peril item per measure | Accepted |
+| [0017](0017-an-oasis-event-is-a-simulated-occurrence.md) | An Oasis event is a simulated occurrence, not a rupture | Accepted |
+| [0018](0018-sampled-paths-pooled-as-one-catalogue.md) | Hazard is sampled along several logic-tree paths, pooled as one catalogue | Accepted, amended by 0021 |
+| [0019](0019-footprint-stays-a-ktools-binary.md) | A footprint is stored as the ktools binary, with compression measured and held in reserve | Accepted |
+| [0020](0020-grids-keep-land-and-settled-cells.md) | A grid keeps only cells on land and near settlement, and CASS ships seeds for ten countries | Accepted |
+| [0021](0021-ten-thousand-simulated-years.md) | A hazard run simulates ten thousand years by default, and the intensity ceilings are widened for it | Accepted |
+| [0022](0022-a-calculation-is-stored-once.md) | A calculation is stored once, streamed rather than held, and rebuilt rather than rerun | Accepted |
 
 Records 0007 to 0013 are where delivery moved the design away from build plan
 1.7. Plan 1.8 marks each affected statement *Changed in 1.8* and links here.

@@ -87,7 +87,7 @@ class HazardJob:
     #: dictionary, so the engine drops exactly what the converter would drop
     #: anyway -- doing it here keeps the export small rather than making the
     #: converter read and discard it.
-    minimum_intensity: float = 0.005
+    minimum_intensity: float = 0.05
     #: No site parameters are carried on the grid, so one reference value
     #: applies everywhere. This is a known limitation and not a modelling
     #: choice: it is stated on every pilot grid as an open question.

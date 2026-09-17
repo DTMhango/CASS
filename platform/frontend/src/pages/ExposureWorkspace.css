@@ -77,13 +77,77 @@
   font-size: var(--text-xs);
 }
 
-.exposure-form__actions {
-  margin-top: var(--space-4);
+.exposure-list__project {
+  font-size: var(--text-xs);
 }
 
-.exposure-form__hint {
-  margin-top: var(--space-2);
+/* The two ways in --------------------------------------------------------- */
+
+/* Side by side where there is room, because the choice between them is made by
+   comparing them. Stacked, a divider stands in for the column rule. */
+.exposure-routes {
+  display: grid;
+  gap: var(--space-5);
+}
+
+/* The one notice that covers both routes stands off them. */
+.notice + .exposure-routes {
+  margin-top: var(--space-5);
+}
+
+@media (min-width: 900px) {
+  .exposure-routes {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-8);
+  }
+
+  .exposure-route + .exposure-route {
+    padding-left: var(--space-8);
+    border-left: 1px solid var(--border-subtle);
+  }
+}
+
+@media (max-width: 899px) {
+  .exposure-route + .exposure-route {
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
+.exposure-route__title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--grey-900);
+}
+
+.exposure-route__lead {
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-4);
   font-size: var(--text-sm);
+  color: var(--grey-600);
+}
+
+/* A button above a field needs the space a field above a field gets. */
+.exposure-route__download {
+  margin-bottom: var(--space-4);
+}
+
+.exposure-route__actions {
+  margin-top: var(--space-5);
+}
+
+/* A date is eight characters wide however wide the column is. */
+.exposure-route__date {
+  max-width: 14rem;
+}
+
+.exposure-route .notice {
+  margin-bottom: var(--space-4);
+}
+
+.exposure-route__actions + .notice {
+  margin-top: var(--space-4);
+  margin-bottom: 0;
 }
 
 /* Metrics ----------------------------------------------------------------- */

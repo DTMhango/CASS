@@ -178,6 +178,84 @@ def metadata(path: str | pathlib.Path) -> DatastoreMetadata:
         )
 
 
+def provenance(path: str | pathlib.Path) -> dict[str, str]:
+    """Which engine wrote the calculation, when, and its own checksum.
+
+    The CSV exports carry these in a comment on their first line, and a hazard
+    set records them so two sets can be told apart by the calculation behind
+    them. The datastore keeps the same facts as attributes on its root, so
+    reading it instead of the exports loses none of them. They are rendered the
+    way the export header renders them -- ``OpenQuake engine 3.23.4`` and the
+    checksum as a decimal -- so a set built either way records the same text.
+    """
+    with _open(path) as store:
+        attributes = store.attrs
+        version = attributes.get("engine_version")
+        checksum = attributes.get("checksum32")
+        date = attributes.get("date")
+
+        def text(value: Any) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, bytes):
+                return value.decode("utf-8")
+            return str(value)
+
+        return {
+            "engine_version": f"OpenQuake engine {text(version)}" if version is not None else "",
+            "checksum": str(int(checksum)) if checksum is not None else "",
+            "start_date": text(date),
+        }
+
+
+#: Odd 64-bit constants for the row hash below. Any odd constants would do;
+#: these are the golden-ratio and SplitMix64 multipliers, chosen because they
+#: are well known to mix bits thoroughly.
+_MIX = (0x9E3779B97F4A7C15, 0xBF58476D1CE4E5B9, 0x94D049BB133111EB)
+
+
+def ground_motion_digest(path: str | pathlib.Path, *, chunk: int = DEFAULT_CHUNK) -> str:
+    """A fingerprint of the ground motion itself, whatever order it was written in.
+
+    Two calculations with the same inputs, on the same engine, write the same
+    ground motion -- measured, not assumed: the Jakarta--Bandung calculation run
+    twice produced the same rows to the bit. They do not write it in the same
+    order, because the engine's workers finish when they finish. So this hashes
+    each row -- event, site and every measure's value -- and adds the hashes
+    together, which gives the same answer in any order.
+
+    It is what lets a calculation removed from the engine be run again and
+    shown to be the one CASS stored, rather than trusted to be.
+
+    Read a slice at a time, so it costs a pass over the file and no more memory
+    than one slice.
+    """
+    _, numpy = _modules()
+    total = 0
+    rows = 0
+    with _open(path) as store:
+        group = _gmf(store)
+        names = _imts(group)
+        columns = [f"gmv_{index}" for index in range(len(names))]
+        length = int(len(group["eid"]))
+        mask = numpy.uint64(0xFFFFFFFFFFFFFFFF)
+        with numpy.errstate(over="ignore"):
+            for start in range(0, length, chunk):
+                stop = min(start + chunk, length)
+                row = group["eid"][start:stop].astype(numpy.uint64) * numpy.uint64(_MIX[0])
+                row ^= group["sid"][start:stop].astype(numpy.uint64) * numpy.uint64(_MIX[1])
+                for position, column in enumerate(columns):
+                    values = numpy.ascontiguousarray(group[column][start:stop], dtype="<f4")
+                    bits = values.view("<u4").astype(numpy.uint64)
+                    row = (row ^ (bits + numpy.uint64(position + 1))) * numpy.uint64(_MIX[2])
+                    row ^= row >> numpy.uint64(29)
+                row = (row ^ (row >> numpy.uint64(31))) * numpy.uint64(_MIX[1])
+                row &= mask
+                total = (total + int(row.sum(dtype=numpy.uint64))) % (1 << 64)
+                rows += stop - start
+    return f"{rows}:{' '.join(names)}:{total:016x}"
+
+
 def realization_weights(path: str | pathlib.Path) -> tuple[float, ...]:
     """The weight of each logic-tree realisation behind the calculation.
 

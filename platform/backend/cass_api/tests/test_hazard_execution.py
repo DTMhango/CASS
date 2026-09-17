@@ -15,7 +15,9 @@ run monitor as sentences a modeller can act on.
 from __future__ import annotations
 
 import io
+import tempfile
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +36,47 @@ pytestmark = pytest.mark.django_db
 
 
 # -- a scripted OpenQuake server --------------------------------------------
+
+def small_datastore(*, weights=(1.0,), engine_version="3.23.4") -> bytes:
+    """A datastore in the shape engine 3.23.4 writes, small enough to read by eye.
+
+    Two cells carrying their area perils as custom site ids, two events in the
+    years the engine assigned them, and the provenance a real datastore keeps on
+    its root: the engine version and the calculation's own checksum. The rows
+    are out of event order, as the engine's workers write them.
+    """
+    import h5py
+    import numpy
+
+    rows = ((1, 0, 0.1, 0.2), (0, 0, 0.2, 0.4), (0, 1, 0.3, 0.5))
+    with tempfile.TemporaryDirectory() as directory:
+        target = Path(directory) / "calc_77.hdf5"
+        with h5py.File(target, "w") as store:
+            store.attrs["engine_version"] = engine_version
+            store.attrs["checksum32"] = numpy.int64(556311143)
+            store.attrs["date"] = "2026-09-12T16:30:50"
+            group = store.create_group("gmf_data")
+            group.create_dataset("eid", data=numpy.array([r[0] for r in rows], dtype="u4"))
+            group.create_dataset("sid", data=numpy.array([r[1] for r in rows], dtype="u4"))
+            group.create_dataset("gmv_0", data=numpy.array([r[2] for r in rows], dtype="f4"))
+            group.create_dataset("gmv_1", data=numpy.array([r[3] for r in rows], dtype="f4"))
+            group.attrs["imts"] = "PGA SA(0.3)"
+            group.attrs["investigation_time"] = 50.0
+            group.attrs["effective_time"] = 1000.0
+            group.attrs["num_events"] = 2
+            sites = store.create_group("sitecol")
+            sites.create_dataset("sids", data=numpy.arange(2, dtype="u4"))
+            sites.create_dataset(
+                "custom_site_id", data=numpy.array([b"101", b"102"], dtype="S8")
+            )
+            store.create_dataset(
+                "events",
+                data=numpy.array([(0, 90), (1, 774)], dtype=[("id", "u4"), ("year", "u4")]),
+            )
+            if weights is not None:
+                store.create_dataset("weights", data=numpy.array(weights, dtype="f8"))
+        return target.read_bytes()
+
 
 class FakeResponse:
     def __init__(self, status_code=200, body=None, text=None, chunks=None):
@@ -66,14 +109,17 @@ class FakeEngine:
         version="3.23.0",
         statuses=("executing", "complete"),
         submit_status=200,
-        datastore=b"HDF5 datastore",
+        datastore=None,
         publishes_realizations=True,
+        remove_status=200,
         log=(["t", "INFO", "job", "computing gmfs"],),
     ):
         self.version = version
         self.statuses = list(statuses)
         self.submit_status = submit_status
-        self.datastore = datastore
+        self.datastore = small_datastore() if datastore is None else datastore
+        self.remove_status = remove_status
+        self.removed: list[str] = []
         self.log = [list(line) for line in log]
         self.calls: list[tuple[str, str]] = []
         self.submitted: dict[str, bytes] = {}
@@ -190,6 +236,11 @@ class FakeEngine:
             )
         if url.endswith("/abort"):
             return FakeResponse(200, {"status": "aborted"})
+        if url.endswith("/remove"):
+            if self.remove_status != 200:
+                return FakeResponse(self.remove_status, text="cannot remove")
+            self.removed.append(url)
+            return FakeResponse(200, {"success": True})
         raise AssertionError(f"unscripted call {method} {url}")
 
 
@@ -325,7 +376,7 @@ def test_every_stage_of_the_pipeline_is_recorded(hazard_run):
     assert {"prepare", "validate_settings", "submit", "monitor", "export"} <= set(stages)
 
 
-def test_a_completed_run_registers_a_hazard_set_from_its_exports(hazard_run):
+def test_a_completed_run_registers_a_hazard_set_from_its_datastore(hazard_run):
     """A hazard run whose output nothing can consume was the gap this closes."""
     from apps.modelregistry.models import HazardSet
 
@@ -375,18 +426,18 @@ def test_a_set_registered_before_the_id_was_kept_is_backfilled_from_its_run(haza
     assert hazard_set.openquake_calculation_id == "77"
 
 
-def test_a_calculation_with_no_realizations_output_still_registers_its_hazard(
+def test_a_calculation_with_no_realisation_weights_still_registers_its_hazard(
     hazard_run,
 ):
-    """One branch, no logic tree to describe, and no such export to fetch.
+    """One branch, no logic tree to describe, and no weights recorded for it.
 
-    The engine publishes a realizations output only where there are several
-    realisations. Treating its absence as a failed export stopped the first
-    Indonesia run after the ground motion had already been computed.
+    The engine records weights only where there are realisations to weigh.
+    Treating their absence as a failure stopped the first Indonesia run after
+    the ground motion had already been computed.
     """
     from apps.modelregistry.models import HazardSet
 
-    run_it(hazard_run, FakeEngine(publishes_realizations=False))
+    run_it(hazard_run, FakeEngine(datastore=small_datastore(weights=None)))
 
     hazard_run.run.refresh_from_db()
     assert hazard_run.run.state == RunState.SUCCEEDED, hazard_run.run.failure_summary
@@ -401,6 +452,444 @@ def test_the_benchmark_gate_is_recorded_as_not_performed(hazard_run):
     outstanding = hazard_run.run.manifest["stages_not_performed"]
     assert "benchmark" in outstanding
     assert "has not been approved" in outstanding["benchmark"]
+
+
+# -- a calculation held once, and never in memory ---------------------------
+#
+# A national datastore is gigabytes and the worker holding it is not. The
+# export used to fetch the ground motion a second time as CSV text and hold both
+# in memory; it now streams the datastore to disk, builds the hazard set from it
+# a slice at a time, and removes the engine's own copy once CASS holds one.
+
+def test_the_export_never_asks_the_engine_for_csv_copies(hazard_run):
+    engine = FakeEngine()
+
+    run_it(hazard_run, engine)
+
+    assert not any("calc/result/" in url for _, url in engine.calls)
+
+
+def test_the_datastore_is_streamed_to_a_file_rather_than_held_in_memory(
+    hazard_run, monkeypatch
+):
+    sinks: list = []
+    original = OpenQuakeAdapter.download_datastore
+
+    def recording(self, calculation_id, sink, **kwargs):
+        sinks.append(sink)
+        return original(self, calculation_id, sink, **kwargs)
+
+    monkeypatch.setattr(OpenQuakeAdapter, "download_datastore", recording)
+
+    run_it(hazard_run, FakeEngine())
+
+    assert sinks
+    assert not isinstance(sinks[0], io.BytesIO)
+    assert hasattr(sinks[0], "fileno")
+
+
+def test_the_hazard_set_carries_the_provenance_the_datastore_records(hazard_run, spec):
+    """Nothing the CSV header used to carry is lost by reading the datastore."""
+    from apps.modelregistry import hazard as hazard_registry
+    from apps.modelregistry.models import HazardSet
+
+    run_it(hazard_run, FakeEngine())
+
+    hazard_set = HazardSet.objects.get()
+    assert hazard_set.engine_version == "OpenQuake engine 3.23.4"
+    assert hazard_set.calculation_checksum == "556311143"
+    assert hazard_set.datastore_uri.endswith(f"hazard/{hazard_run.run_id}/datastore.hdf5")
+    assert hazard_set.intensity_bins_checksum == (
+        hazard_registry.current_intensity_bins_checksum()
+    )
+    assert hazard_set.job_spec_id == spec.id
+    assert hazard_set.job_checksum == hazard_run.job_settings["job_checksum"]
+    assert hazard_set.effective_time == 1000.0
+
+
+def test_the_engine_copy_is_removed_once_cass_holds_the_calculation(hazard_run):
+    """A calculation stored on the engine and in CASS is a calculation stored twice."""
+    from apps.modelregistry.models import HazardSet
+
+    engine = FakeEngine()
+
+    run_it(hazard_run, engine)
+
+    assert engine.removed and engine.removed[0].endswith("/calc/77/remove")
+    assert HazardSet.objects.get().openquake_calculation_removed is True
+    hazard_run.run.refresh_from_db()
+    assert hazard_run.run.manifest["hazard"]["engine_copy"]["removed"] is True
+    messages = hazard_run.run.events.filter(stage="export").values_list("message", flat=True)
+    assert any("only copy" in message for message in messages)
+
+
+def test_an_installation_can_keep_calculations_on_the_engine(hazard_run, settings):
+    from apps.modelregistry.models import HazardSet
+
+    settings.CASS_OPENQUAKE_KEEP_CALCULATIONS = True
+    engine = FakeEngine()
+
+    run_it(hazard_run, engine)
+
+    assert not engine.removed
+    assert HazardSet.objects.get().openquake_calculation_removed is False
+
+
+def test_a_removal_the_engine_refuses_does_not_cost_the_result(hazard_run):
+    """Disk, not a hazard set: the run succeeds and says the copy is still there."""
+    from apps.modelregistry.models import HazardSet
+
+    run_it(hazard_run, FakeEngine(remove_status=500))
+
+    hazard_run.run.refresh_from_db()
+    assert hazard_run.run.state == RunState.SUCCEEDED
+    assert HazardSet.objects.get().openquake_calculation_removed is False
+    messages = hazard_run.run.events.filter(stage="export").values_list("message", flat=True)
+    assert any("stored twice" in message for message in messages)
+
+
+def test_a_calculation_that_cannot_be_converted_keeps_its_engine_copy(hazard_run):
+    """A failed run stays readable where it ran (section 12)."""
+    engine = FakeEngine(datastore=b"not a datastore at all")
+
+    with pytest.raises(hazard_service.HazardExecutionError):
+        run_it(hazard_run, engine)
+
+    hazard_run.run.refresh_from_db()
+    assert hazard_run.run.failure_stage == "export"
+    assert not engine.removed
+
+
+# -- running a removed calculation again, checked -----------------------------
+
+def registered_and_removed(hazard_run):
+    from apps.modelregistry.models import HazardSet
+
+    run_it(hazard_run, FakeEngine())
+    hazard_set = HazardSet.objects.get()
+    assert hazard_set.openquake_calculation_removed
+    return hazard_set
+
+
+def test_a_removed_calculation_is_run_again_and_shown_to_be_the_same(hazard_run):
+    hazard_set = registered_and_removed(hazard_run)
+    engine = FakeEngine()
+
+    calculation = hazard_service.restore_calculation(
+        hazard_set, adapter_for(engine), poll_interval=0
+    )
+
+    assert calculation == 77
+    assert "job.ini" in engine.submitted
+    # Reproduced, so it is left on the engine for the caller to chain onto.
+    assert not engine.removed
+
+
+def test_a_calculation_that_does_not_reproduce_is_refused_and_removed(hazard_run):
+    """Different ground motion chained onto would look exactly like a comparison."""
+    import h5py
+
+    hazard_set = registered_and_removed(hazard_run)
+    changed = small_datastore()
+    with tempfile.TemporaryDirectory() as directory:
+        target = Path(directory) / "changed.hdf5"
+        target.write_bytes(changed)
+        with h5py.File(target, "a") as store:
+            store["gmf_data"]["gmv_0"][0] = 0.9
+        changed = target.read_bytes()
+    engine = FakeEngine(datastore=changed)
+
+    with pytest.raises(hazard_service.HazardExecutionError, match="its ground motion"):
+        hazard_service.restore_calculation(hazard_set, adapter_for(engine), poll_interval=0)
+
+    assert engine.removed
+
+
+def test_a_set_without_its_configuration_cannot_be_run_again(hazard_run):
+    hazard_set = registered_and_removed(hazard_run)
+    hazard_set.job_spec = None
+
+    with pytest.raises(hazard_service.HazardExecutionError, match="does not record"):
+        hazard_service.restore_calculation(
+            hazard_set, adapter_for(FakeEngine()), poll_interval=0
+        )
+
+
+def test_a_configuration_that_now_resolves_differently_is_not_run_again(hazard_run):
+    hazard_set = registered_and_removed(hazard_run)
+    hazard_set.job_checksum = "b" * 64
+    engine = FakeEngine()
+
+    with pytest.raises(hazard_service.HazardExecutionError, match="different job"):
+        hazard_service.restore_calculation(hazard_set, adapter_for(engine), poll_interval=0)
+
+    assert not any(url.endswith("calc/run") for _, url in engine.calls)
+
+
+# -- rebuilding a footprint from the stored calculation ---------------------------------
+#
+# A footprint is ground motion counted into intensity bins. When the bins change,
+# the ground motion has not: CASS keeps the datastore, and a rebuild reads it again
+# instead of asking OpenQuake for hours of new motion.
+
+@pytest.fixture()
+def computed(hazard_run):
+    """A hazard set computed on the platform, with its datastore stored."""
+    from apps.modelregistry.models import HazardSet
+
+    run_it(hazard_run, FakeEngine())
+    return HazardSet.objects.get()
+
+
+@pytest.fixture()
+def changed_bins(monkeypatch):
+    """The platform's intensity bins, changed since the set was computed."""
+    from cass_converter import pilot_bins
+
+    monkeypatch.setattr(pilot_bins, "INTENSITY_BIN_COUNT", 40)
+
+
+def rebuild_run(hazard_set, actor):
+    run = Run.objects.create(
+        kind=RunKind.HAZARD, label="Rebuild", execution_profile="model_build", created_by=actor
+    )
+    return HazardRun.objects.create(
+        run=run,
+        grid=hazard_set.grid,
+        rebuild_of=hazard_set,
+        openquake_calculation_id=hazard_set.openquake_calculation_id,
+        created_by=actor,
+    )
+
+
+def footprint_states(hazard_set):
+    from apps.artifacts.models import ArtifactLink
+
+    return sorted(
+        ArtifactLink.objects.filter(
+            subject_type="hazard_set",
+            subject_id=hazard_set.id,
+            role__startswith="hazard_footprint_",
+        ).values_list("artifact__state", flat=True)
+    )
+
+
+def test_a_set_binned_against_the_current_bins_is_not_rebuilt(computed, client_for, modeller):
+    from apps.modelregistry import hazard as hazard_registry
+
+    assert hazard_registry.rebuild_status(computed)["intensity_bins_current"] is True
+
+    refused = client_for(modeller).post(f"{API}/hazard-sets/{computed.id}/rebuild/")
+
+    assert refused.status_code == 409
+    assert "same footprint" in refused.data["detail"]
+
+
+def test_a_changed_bin_dictionary_shows_on_the_set(computed, changed_bins, client_for, modeller):
+    listed = client_for(modeller).get(f"{API}/hazard-sets/{computed.id}/")
+
+    status_ = listed.data["rebuild"]
+    assert status_["intensity_bins_current"] is False
+    assert status_["datastore_available"] is True
+    assert status_["datastore_expires_at"]
+
+
+def test_rebuilding_is_launched_as_a_run(computed, changed_bins, client_for, modeller, monkeypatch):
+    queued: list[str] = []
+    monkeypatch.setattr("apps.runs.tasks.rebuild_hazard.delay", lambda run_id: queued.append(run_id))
+
+    launched = client_for(modeller).post(f"{API}/hazard-sets/{computed.id}/rebuild/")
+
+    assert launched.status_code == 202, launched.data
+    hazard_run = HazardRun.objects.get(id=queued[0])
+    assert hazard_run.rebuild_of == computed
+    assert hazard_run.run.label == f"Rebuild footprint of {computed.reference}"
+
+
+def test_a_footprint_is_rebuilt_from_the_stored_calculation(computed, changed_bins, modeller):
+    from apps.modelregistry import hazard as hazard_registry
+    from apps.modelregistry.models import HazardSet
+
+    hazard_run = rebuild_run(computed, modeller)
+
+    hazard_service.rebuild(hazard_run, actor=modeller)
+
+    rebuilt = HazardSet.objects.exclude(pk=computed.pk).get()
+    assert rebuilt.rebuilt_from == computed
+    assert rebuilt.version.endswith(
+        "-b" + hazard_registry.current_intensity_bins_checksum()[:8]
+    )
+    # The same calculation, stored once, and the same facts about it.
+    assert rebuilt.datastore_uri == computed.datastore_uri
+    assert rebuilt.calculation_checksum == computed.calculation_checksum
+    assert rebuilt.openquake_calculation_removed == computed.openquake_calculation_removed
+    assert rebuilt.event_count == computed.event_count
+    assert rebuilt.footprint_row_count > 0
+    assert hazard_registry.rebuild_status(rebuilt)["intensity_bins_current"] is True
+
+    hazard_run.run.refresh_from_db()
+    assert hazard_run.run.state == RunState.SUCCEEDED
+    stages = set(hazard_run.run.events.values_list("stage", flat=True))
+    assert {"prepare", "export"} <= stages
+    assert "submit" not in stages
+
+
+def test_the_replaced_footprint_is_removed_once_nothing_uses_it(computed, changed_bins, modeller):
+    """The largest table a set stores, kept twice, is what the rebuild must not leave."""
+    from apps.modelregistry import hazard as hazard_registry
+
+    hazard_service.rebuild(rebuild_run(computed, modeller), actor=modeller)
+
+    assert set(footprint_states(computed)) == {"expired"}
+    assert hazard_registry.rebuild_status(computed)["rebuilt_as"]
+    # Only the footprints: the record, its occurrence table and the calculation stay.
+    from apps.artifacts.models import Artifact, ArtifactLink
+
+    occurrence = ArtifactLink.objects.get(
+        subject_type="hazard_set", subject_id=computed.id, role="hazard_occurrence"
+    )
+    assert occurrence.artifact.state == "registered"
+    assert Artifact.objects.get(uri=computed.datastore_uri).state == "registered"
+
+
+def test_a_footprint_a_model_version_uses_is_kept_until_the_rebuilt_set_replaces_it(
+    computed, changed_bins, modeller
+):
+    from apps.modelregistry import hazard as hazard_registry
+    from apps.modelregistry.models import HazardSet
+
+    from . import fixture_model
+
+    model = fixture_model.register("ID", actor=modeller)
+    model.hazard_set = computed
+    model.save()
+
+    hazard_service.rebuild(rebuild_run(computed, modeller), actor=modeller)
+
+    assert set(footprint_states(computed)) == {"registered"}
+    messages = HazardRun.objects.get(rebuild_of=computed).run.events.values_list("message", flat=True)
+    assert any("still use it" in message for message in messages)
+
+    rebuilt = HazardSet.objects.exclude(pk=computed.pk).get()
+    model.refresh_from_db()
+    # The fixture's functions demand four measures; this calculation carries two.
+    model.vulnerability_set.imts_used = ["PGA", "SA(0.3)"]
+    model.vulnerability_set.save(update_fields=["imts_used"])
+    hazard_registry.attach(model, rebuilt, actor=modeller)
+
+    assert set(footprint_states(computed)) == {"expired"}
+
+
+def test_a_set_whose_calculation_has_expired_cannot_be_rebuilt(computed, changed_bins, client_for, modeller):
+    from apps.artifacts.models import Artifact
+
+    Artifact.objects.filter(uri=computed.datastore_uri).update(state="expired")
+
+    refused = client_for(modeller).post(f"{API}/hazard-sets/{computed.id}/rebuild/")
+
+    assert refused.status_code == 409
+    assert "no longer stored" in refused.data["detail"]
+
+
+def test_a_set_registered_from_exports_has_nothing_to_rebuild_from(computed, changed_bins, client_for, modeller):
+    computed.datastore_uri = ""
+    computed.save()
+
+    refused = client_for(modeller).post(f"{API}/hazard-sets/{computed.id}/rebuild/")
+
+    assert refused.status_code == 409
+    assert "registered from exported tables" in refused.data["detail"]
+
+
+def test_a_set_rebuilt_already_is_not_rebuilt_twice(computed, changed_bins, client_for, modeller):
+    hazard_service.rebuild(rebuild_run(computed, modeller), actor=modeller)
+
+    refused = client_for(modeller).post(f"{API}/hazard-sets/{computed.id}/rebuild/")
+
+    assert refused.status_code == 409
+    assert "already been rebuilt" in refused.data["detail"]
+
+
+def test_an_analyst_cannot_rebuild_a_footprint(computed, changed_bins, api):
+    assert api.post(f"{API}/hazard-sets/{computed.id}/rebuild/").status_code == 403
+
+
+def test_a_package_is_not_built_from_a_footprint_binned_against_old_bins(computed, changed_bins, modeller):
+    from apps.modelregistry import package
+    from apps.modelregistry.package import PackageBuildError
+
+    from . import fixture_model
+
+    model = fixture_model.register("ID", actor=modeller)
+    model.hazard_set = computed
+    model.save()
+
+    with pytest.raises(PackageBuildError, match="since changed"):
+        package.gather(model)
+
+
+# -- the other half of a package: functions discretised against the same bins ---------
+
+def test_a_package_is_not_built_from_functions_discretised_against_old_bins(computed, modeller):
+    """A damage table and a footprint read against each other bin by bin must share bins."""
+    from apps.modelregistry import package
+    from apps.modelregistry.package import PackageBuildError
+
+    from . import fixture_model
+
+    model = fixture_model.register("ID", actor=modeller)
+    model.hazard_set = computed
+    model.save()
+    model.vulnerability_set.intensity_bins_checksum = "f" * 64
+    model.vulnerability_set.save(update_fields=["intensity_bins_checksum"])
+
+    with pytest.raises(PackageBuildError, match="Build the vulnerability set again"):
+        package.gather(model)
+
+
+def test_a_vulnerability_set_says_whether_its_bins_are_current(modeller, client_for):
+    from . import fixture_model
+
+    model = fixture_model.register("ID", actor=modeller)
+    vulnerability = model.vulnerability_set
+    listed = client_for(modeller).get(f"{API}/vulnerability-sets/{vulnerability.id}/")
+    assert listed.data["intensity_bins_current"] in (True, None)
+
+    vulnerability.intensity_bins_checksum = "f" * 64
+    vulnerability.save(update_fields=["intensity_bins_checksum"])
+    listed = client_for(modeller).get(f"{API}/vulnerability-sets/{vulnerability.id}/")
+    assert listed.data["intensity_bins_current"] is False
+
+
+def test_sets_registered_before_fingerprints_are_marked_with_the_bins_they_used(
+    computed, modeller
+):
+    """Migration 0015: everything registered earlier used the dictionary this change widened."""
+    import importlib
+
+    from django.apps import apps as django_apps
+
+    from apps.modelregistry import hazard as hazard_registry
+    from apps.modelregistry.models import HazardSet
+
+    from . import fixture_model
+
+    model = fixture_model.register("ID", actor=modeller)
+    HazardSet.objects.update(intensity_bins_checksum="", datastore_uri="")
+    type(model.vulnerability_set).objects.update(intensity_bins_checksum="")
+
+    migration = importlib.import_module(
+        "apps.modelregistry.migrations.0015_domain_rebuild_and_intensity_bins"
+    )
+    migration.backfill(django_apps, None)
+
+    backfilled = HazardSet.objects.get()
+    assert backfilled.intensity_bins_checksum == migration.PREVIOUS_BINS_CHECKSUM
+    assert backfilled.datastore_uri.endswith("/datastore.hdf5")
+    model.vulnerability_set.refresh_from_db()
+    assert model.vulnerability_set.intensity_bins_checksum == migration.PREVIOUS_BINS_CHECKSUM
+    # And the platform then knows both need rebuilding.
+    assert hazard_registry.rebuild_status(backfilled)["intensity_bins_current"] is False
 
 
 # -- refusals and failures --------------------------------------------------

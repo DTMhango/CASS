@@ -148,7 +148,7 @@ function Comparisons({ results }: { results: ResultSet[] }) {
         </Notice>
       ) : null}
 
-      <div className="compare__form">
+      <div className="compare__form form-row">
         <Field
           label="Baseline"
           htmlFor="compare-baseline"

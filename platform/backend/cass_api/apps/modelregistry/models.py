@@ -75,6 +75,10 @@ class AreaPerilGrid(BaseModel, FreezableModel):
     )
 
     cell_count = models.BigIntegerField(default=0)
+    #: The specification the cells were generated from, as it was built. Kept
+    #: whole because it is the artefact a reviewer argues with, and because a
+    #: grid can then be opened again as the starting point of its next version.
+    specification = models.JSONField(default=dict, blank=True)
     excludes_offshore = models.BooleanField(
         default=True,
         help_text="Indonesia's grid should avoid unnecessary calculation points over ocean.",
@@ -176,6 +180,12 @@ class VulnerabilitySet(BaseModel, FreezableModel):
     licence_note = models.TextField(blank=True, default=INTERNAL_USE_LICENCE)
 
     function_count = models.IntegerField(default=0)
+    #: The fingerprint of the intensity-bin dictionaries the functions were
+    #: discretised against. A damage table is a probability per intensity bin,
+    #: so a set discretised against one dictionary and a footprint counted into
+    #: another would be read against each other bin by bin and mean nothing --
+    #: silently. Recorded so a package refuses the pair.
+    intensity_bins_checksum = models.CharField(max_length=64, blank=True)
     imts_used = models.JSONField(
         default=list, help_text="Distinct intensity measures the functions demand."
     )
@@ -430,6 +440,48 @@ class HazardSet(BaseModel, FreezableModel):
     #: which one, so a later job -- the OpenQuake reference comparison -- can be
     #: chained onto the ground-motion fields this footprint was built from.
     openquake_calculation_id = models.CharField(max_length=32, blank=True)
+    #: Where the calculation's datastore is kept. A footprint is ground motion
+    #: counted into intensity bins, and the datastore is the ground motion
+    #: itself -- so it is what a footprint is rebuilt from when the bins change,
+    #: without running the calculation again. Blank where the set was
+    #: registered from exports rather than from a run on this platform.
+    datastore_uri = models.CharField(max_length=500, blank=True)
+    #: The fingerprint of the intensity-bin dictionaries this footprint was
+    #: counted into. A set whose fingerprint differs from the platform's current
+    #: bins was built against dictionaries that have since changed. Blank for a
+    #: set registered before the fingerprint was recorded.
+    intensity_bins_checksum = models.CharField(max_length=64, blank=True)
+    #: Whether OpenQuake's own copy of the calculation has been removed. CASS
+    #: holds the datastore once a set is registered, so the engine's copy is a
+    #: duplicate; and once it is gone, the calculation number may later be
+    #: reused by the engine for a different calculation.
+    openquake_calculation_removed = models.BooleanField(default=False)
+    #: A fingerprint of the ground motion in the datastore, in any row order.
+    #: The engine writes the same motion for the same inputs, so a calculation
+    #: removed from the engine can be run again and checked against this before
+    #: anything is chained onto it.
+    ground_motion_digest = models.CharField(max_length=120, blank=True)
+    #: The saved configuration the calculation ran, where it ran on this
+    #: platform. With ``job_checksum`` it is what lets the calculation be run
+    #: again and shown to be the same one.
+    job_spec = models.ForeignKey(
+        "HazardJobSpec",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="hazard_sets",
+    )
+    rebuilt_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="rebuilds",
+        help_text=(
+            "The set this one was rebuilt from: the same calculation, binned "
+            "again against the intensity bins current when it was rebuilt."
+        ),
+    )
 
     investigation_time = models.FloatField(default=0.0)
     stochastic_event_sets = models.IntegerField(default=0)

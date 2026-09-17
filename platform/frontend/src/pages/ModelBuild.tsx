@@ -25,6 +25,7 @@ import {
   useBuildPackage,
   useHazardSets,
   useModelVersions,
+  useRebuildHazardSet,
   usePublishModelVersion,
   useRequestApproval,
   useRuns,
@@ -358,7 +359,7 @@ function ModelVersionRow({ version }: { version: ModelVersion }) {
  * once a hazard set computed on its grid, carrying every measure its functions
  * demand, is attached. The API refuses any other pairing and says why.
  */
-function HazardSets({ versions }: { versions: ModelVersion[] }) {
+export function HazardSets({ versions }: { versions: ModelVersion[] }) {
   const { data: sets } = useHazardSets();
   const { data: session } = useSession();
   const attach = useAttachHazardSet();
@@ -407,11 +408,14 @@ function HazardSets({ versions }: { versions: ModelVersion[] }) {
                     {formatCount(item.event_count)}
                     <span className="muted">
                       {" "}
-                      / {formatCount(item.investigation_time * item.stochastic_event_sets)} yrs
+                      / {formatCount(item.effective_time)} yrs
                     </span>
                   </td>
                   <td className="numeric">{formatCount(item.cell_count)}</td>
-                  <td>{item.imts.join(", ")}</td>
+                  <td>
+                    {item.imts.join(", ")}
+                    <Footprint item={item} mayPublish={mayPublish} />
+                  </td>
                   <td>
                     {attachedTo.length ? (
                       <span className="muted">
@@ -456,6 +460,61 @@ function HazardSets({ versions }: { versions: ModelVersion[] }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * Whether a hazard set's footprint matches the intensity bins CASS uses now.
+ *
+ * A footprint is ground motion counted into intensity bins. When the bins
+ * change, the ground motion has not, and CASS keeps each calculation it ran:
+ * the footprint is rebuilt from that rather than from a new calculation. A set
+ * binned against old bins cannot be packaged, so it says so here, where the
+ * set is chosen.
+ */
+function Footprint({ item, mayPublish }: { item: HazardSet; mayPublish: boolean }) {
+  const rebuild = useRebuildHazardSet();
+  const status = item.rebuild;
+  const failure = rebuild.error as ApiError | null;
+  if (!status) return null;
+
+  if (status.rebuilt_from) {
+    return <p className="muted build__footprint">Rebuilt from {status.rebuilt_from}.</p>;
+  }
+  if (status.intensity_bins_current !== false) return null;
+
+  return (
+    <div className="build__footprint">
+      <p className="muted">
+        Binned against intensity bins that have since changed, so it cannot be
+        packaged.{" "}
+        {status.rebuilt_as
+          ? `It has been rebuilt as ${status.rebuilt_as}.`
+          : status.datastore_available
+            ? "Its calculation is stored, so the footprint can be rebuilt without running it again."
+            : status.unavailable_reason}
+      </p>
+      {mayPublish && status.datastore_available && !status.rebuilt_as ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          busy={rebuild.isPending}
+          onClick={() => rebuild.mutate(item.id)}
+        >
+          Rebuild the footprint
+        </Button>
+      ) : null}
+      {rebuild.isSuccess ? (
+        <p>
+          Rebuilding. <Link to={`/runs/${rebuild.data.run}`}>Follow it on the run monitor</Link>.
+        </p>
+      ) : null}
+      {failure ? (
+        <Notice tone="error" title="Not rebuilt">
+          {failure.message}
+        </Notice>
+      ) : null}
+    </div>
   );
 }
 

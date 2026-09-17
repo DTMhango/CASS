@@ -100,6 +100,7 @@ _MEDIA_TYPES = {
     "txt": "text/plain",
     "hdf5": "application/x-hdf5",
     "csv": "text/csv",
+    "gz": "application/gzip",
 }
 
 GRID_COLUMNS = (
@@ -267,6 +268,30 @@ def asset_bytes(subject, subject_type: str, role: str, description: str) -> byte
         )
     with get_store().open(link.artifact.uri) as handle:
         return handle.read()
+
+
+def asset_file(
+    subject, subject_type: str, role: str, description: str, directory
+) -> pathlib.Path:
+    """One registered asset downloaded into ``directory``, refusing one that is missing.
+
+    For the tables too large to hold: the store streams the object to the file,
+    and the caller reads the file a row at a time. The caller owns the directory
+    and removes it, so the downloaded copy lasts only as long as it is needed.
+    """
+    link = (
+        ArtifactLink.objects.filter(subject_type=subject_type, subject_id=subject.id, role=role)
+        .select_related("artifact")
+        .order_by("-created_at")
+        .first()
+    )
+    if link is None or not link.artifact.is_readable:
+        raise ModelAssetError(
+            f"{description} has no registered {role.replace('_', ' ')}, so it cannot "
+            "be packaged."
+        )
+    name = pathlib.PurePosixPath(link.artifact.uri).name
+    return get_store().download(link.artifact.uri, pathlib.Path(directory) / name)
 
 
 def load_grid(grid) -> KeysGrid:
@@ -442,6 +467,15 @@ def attach_vulnerability_dictionary(
     )
 
 
+def _hazard_role(filename: str) -> str:
+    """The role a hazard set's file is stored under: its name before the first dot.
+
+    So ``footprint_PGA.csv.gz`` is stored under the role ``footprint_PGA.csv``
+    was. The role names the table; how it is encoded is the file's business.
+    """
+    return HAZARD_ROLE_PREFIX + pathlib.PurePosixPath(filename).name.split(".", 1)[0]
+
+
 def attach_hazard_asset(hazard_set, filename: str, payload: bytes, *, actor=None):
     """Register one file of a hazard set: a footprint, the occurrence table,
     an intensity dictionary, or the job that produced them.
@@ -450,7 +484,7 @@ def attach_hazard_asset(hazard_set, filename: str, payload: bytes, *, actor=None
     the converter has already validated it -- probabilities summing to one,
     every event covered, nothing clipped -- before it reaches here.
     """
-    role = HAZARD_ROLE_PREFIX + pathlib.PurePosixPath(filename).stem
+    role = _hazard_role(filename)
     return _attach(hazard_set, "hazard_set", role, payload, filename, actor)
 
 
@@ -462,7 +496,7 @@ def attach_hazard_asset_file(hazard_set, filename: str, source, *, actor=None):
     uploaded from that file, which the store does through a file object rather
     than by reading it whole.
     """
-    role = HAZARD_ROLE_PREFIX + pathlib.PurePosixPath(filename).stem
+    role = _hazard_role(filename)
     return _attach(
         hazard_set, "hazard_set", role, None, filename, actor, source=source
     )

@@ -6,6 +6,12 @@
   align-items: start;
 }
 
+/* Side by side, a card's stacking margin would drop it below its neighbour;
+   the grid's gap spaces the cards. */
+.admin-grid > .card + .card {
+  margin-top: 0;
+}
+
 .admin-facts {
   display: flex;
   flex-direction: column;
@@ -57,9 +63,7 @@
 }
 
 .admin-audit__filters {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-3);
+  --form-row-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   padding: var(--space-4);
   border-bottom: 1px solid var(--grey-100);
 }

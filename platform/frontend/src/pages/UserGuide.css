@@ -1,0 +1,501 @@
+/* The guide carries more sections than any other area, so its tab strip wraps
+   onto a second line rather than scrolling the last one out of sight behind an
+   edge nobody thinks to drag. */
+.user-guide .tabs {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
+/* The guide fills the canvas, like every other area of CASS. */
+.guide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* The gap between cards comes from the column, not from each card. */
+.guide .card + .card {
+  margin-top: 0;
+}
+
+/* Prose, tables, steps and notices follow one another in any order inside a
+   card, so the spacing between them is the body's rather than each pair's. */
+.guide .card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* A notice or a definition here can hold several paragraphs, which the reset
+   leaves touching. Spaced as siblings rather than as a flex column, because the
+   same element also holds running text with links and bold words in it, and a
+   flex column would put each of those on a line of its own. */
+.guide .notice__content {
+  line-height: var(--leading-relaxed);
+}
+
+.guide .notice__content > p + p,
+.guide-terms .definition-row dd > p + p {
+  margin-top: var(--space-2);
+}
+
+.guide-prose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  line-height: var(--leading-relaxed);
+}
+
+/* -- lists: the global reset removes markers, so they are put back here ---- */
+
+.guide-bullets {
+  list-style: disc;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  line-height: var(--leading-relaxed);
+}
+
+.guide-numbered {
+  list-style: decimal;
+  padding-left: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  line-height: var(--leading-relaxed);
+}
+
+.guide-bullets li::marker,
+.guide-numbered li::marker {
+  color: var(--grey-500);
+}
+
+/* -- steps ----------------------------------------------------------------- */
+
+.guide-steps {
+  display: flex;
+  flex-direction: column;
+}
+
+.guide-step {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+.guide-step:first-child {
+  padding-top: 0;
+}
+
+.guide-step:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.guide-step__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--kre-blue-subtle);
+  border: 1px solid var(--kre-blue-border);
+  color: var(--kre-blue);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.guide-step__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.guide-step__title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 2rem;
+  color: var(--grey-900);
+}
+
+/* Where on screen the step happens. Styled as a path, not a button, so it is
+   not mistaken for something to press. */
+.guide-step__where {
+  align-self: flex-start;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--grey-600);
+  background: var(--grey-100);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  line-height: var(--leading-normal);
+}
+
+.guide-step .guide-table,
+.guide-step .guide-bullets {
+  margin-top: var(--space-1);
+}
+
+/* -- definitions ----------------------------------------------------------- */
+
+.guide-terms {
+  margin: 0;
+}
+
+.guide-terms .definition-row {
+  grid-template-columns: minmax(9rem, 15rem) minmax(0, 1fr);
+  line-height: var(--leading-relaxed);
+  /* A term linked to from elsewhere is scrolled to the top of the canvas, and
+     lands under the card header without this. */
+  scroll-margin-top: var(--space-6);
+}
+
+/* Held briefly after a link or a search result lands on it, so the eye finds
+   the right one among a hundred. Set from the page rather than with :target,
+   which does not follow an address that changes without a page load. */
+.guide-terms .definition-row.guide-found,
+.guide-step.guide-found {
+  background: var(--kre-blue-subtle);
+  box-shadow: 0 0 0 var(--space-2) var(--kre-blue-subtle);
+  border-radius: var(--radius-sm);
+  transition: background-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+.card.guide-found {
+  box-shadow: var(--shadow-sm), 0 0 0 2px var(--kre-blue);
+  transition: box-shadow 0.4s ease;
+}
+
+/* Nothing scrolled to should arrive tight against the top of the canvas, and a
+   card or a step given focus by a search result must not show a focus ring it
+   did not earn by being tabbed to. */
+.guide .card,
+.guide-step {
+  scroll-margin-top: var(--space-4);
+}
+
+.guide .card:focus,
+.guide-step:focus,
+.definition-row:focus {
+  outline: none;
+}
+
+.guide-terms .definition-row dt {
+  color: var(--grey-900);
+  font-weight: 600;
+}
+
+/* -- tables ---------------------------------------------------------------- */
+
+.guide-table {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.guide-table .data-table th[scope="row"] {
+  white-space: normal;
+  min-width: 9rem;
+}
+
+/* -- worked examples --------------------------------------------------------- */
+
+/* Set apart from the instructions around it, so made-up numbers are never read
+   as something to type. */
+.guide-example {
+  background: var(--evidence-assumed-surface);
+  border: 1px solid var(--grey-200);
+  border-left: 3px solid var(--evidence-assumed-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.guide-example__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--evidence-assumed-ink);
+  margin-bottom: var(--space-2);
+}
+
+/* -- API line -------------------------------------------------------------- */
+
+.guide-api {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--border-subtle);
+  font-size: var(--text-xs);
+  color: var(--grey-600);
+}
+
+.guide-api__label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--grey-500);
+}
+
+.guide-api code {
+  overflow-wrap: anywhere;
+}
+
+/* -- the grid diagram ------------------------------------------------------ */
+
+.guide-figure {
+  margin: 0 0 var(--space-2);
+}
+
+.guide-figure__frame {
+  overflow-x: auto;
+  background: var(--grey-25);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.guide-grid {
+  display: block;
+  width: 100%;
+  max-width: 40rem;
+  min-width: 22rem;
+  height: auto;
+  margin: 0 auto;
+}
+
+.guide-grid__base-line {
+  fill: none;
+  stroke: var(--grey-300);
+  stroke-width: 1;
+}
+
+.guide-grid__fine-line {
+  fill: none;
+  stroke: var(--kre-blue-light);
+  stroke-width: 0.6;
+}
+
+.guide-grid__cells {
+  fill: url(#guide-base);
+}
+
+.guide-grid__refinement {
+  fill: var(--kre-blue-subtle);
+}
+
+.guide-grid__fine {
+  fill: url(#guide-fine);
+}
+
+.guide-grid__tile {
+  fill: none;
+  stroke: var(--grey-700);
+  stroke-width: 2;
+}
+
+.guide-grid__refinement-edge {
+  fill: none;
+  stroke: var(--kre-blue);
+  stroke-width: 2;
+}
+
+.guide-grid__leader {
+  fill: none;
+  stroke: var(--grey-500);
+  stroke-width: 1;
+}
+
+.guide-grid__label {
+  font-size: 13px;
+  font-weight: 600;
+  fill: var(--grey-900);
+}
+
+.guide-grid__label--accent {
+  fill: var(--kre-blue);
+}
+
+.guide-grid__note {
+  font-size: 11px;
+  fill: var(--grey-600);
+}
+
+.guide-grid__axis {
+  font-size: 11px;
+  fill: var(--grey-500);
+}
+
+.guide-figure__caption {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--grey-600);
+  line-height: var(--leading-relaxed);
+}
+
+@media (max-width: 640px) {
+  .guide-terms .definition-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+}
+
+/* -- searching the guide ----------------------------------------------------- */
+
+.guide-search {
+  display: block;
+  position: relative;
+  margin-bottom: var(--space-5);
+  max-width: 44rem;
+}
+
+.guide-search__field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.guide-search__icon {
+  position: absolute;
+  left: var(--space-3);
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--grey-500);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.guide-search__input {
+  width: 100%;
+  padding-left: calc(var(--space-3) * 2 + 16px);
+  padding-right: var(--space-8);
+}
+
+/* The shortcut, shown where a shortcut is shown: on the key it stands for. */
+.guide-search__key {
+  position: absolute;
+  right: var(--space-3);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--grey-50);
+  color: var(--grey-600);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.guide-search__hint {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* Drawn over the sections rather than pushing them down: a list that moved the
+   page each time a letter was typed would be unreadable. */
+.guide-search__panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% - var(--space-4));
+  left: 0;
+  right: 0;
+  max-height: min(32rem, 60vh);
+  overflow-y: auto;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.guide-search__empty {
+  padding: var(--space-4);
+  color: var(--grey-700);
+  line-height: var(--leading-relaxed);
+}
+
+.guide-search__group + .guide-search__group {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.guide-search__group-name {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface-sunken);
+  color: var(--grey-600);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.guide-search__hit {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--grey-100);
+  cursor: pointer;
+}
+
+.guide-search__group-name + ul > .guide-search__hit:first-child {
+  border-top: none;
+}
+
+.guide-search__hit--active {
+  background: var(--kre-blue-subtle);
+}
+
+.guide-search__hit-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--grey-900);
+}
+
+.guide-search__kind {
+  flex-shrink: 0;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--grey-50);
+  color: var(--grey-600);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+.guide-search__hit-where {
+  margin-top: 2px;
+  color: var(--grey-600);
+  font-size: var(--text-xs);
+}
+
+.guide-search__hit-text {
+  margin-top: var(--space-1);
+  color: var(--grey-700);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.guide-search__hit-text mark {
+  background: var(--status-warning-subtle);
+  color: inherit;
+  font-weight: 600;
+}
+
+.guide-search__more {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--grey-25);
+  color: var(--grey-600);
+  font-size: var(--text-xs);
+}

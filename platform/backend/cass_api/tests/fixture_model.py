@@ -163,10 +163,12 @@ NEPAL_GRID = {
             "name": "Kathmandu valley",
             "reason": "The valley concentrates exposure and its sediments amplify strongly.",
             "resolution_deg": "0.025",
+            # On the 0.1-degree lattice. It was drawn at 27.85 and 85.55, which put
+            # a sliver of the valley in two cells; the builder now refuses that.
             "min_latitude": "27.6",
-            "max_latitude": "27.85",
+            "max_latitude": "27.9",
             "min_longitude": "85.2",
-            "max_longitude": "85.55",
+            "max_longitude": "85.6",
         },
         {
             "name": "Pokhara",
