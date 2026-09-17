@@ -20,9 +20,16 @@ export function Portfolio() {
           <p>
             Everything in this section happens in <Link to="/exposure">Exposure</Link>,
             which has three tabs: <strong>Portfolios</strong>,{" "}
-            <strong>Import review</strong> and <strong>Financial structure</strong>. Make
-            sure you have chosen a project on the Portfolio dashboard first; the project
-            name appears in the header.
+            <strong>Import review</strong> and <strong>Financial structure</strong>.
+          </p>
+          <p>
+            First, though, you need a project, because a portfolio belongs to one and
+            the screens below stay empty without it. On the{" "}
+            <Link to="/">Portfolio dashboard</Link>, click a project&apos;s name to work
+            in it, or press <strong>New project</strong> if there is none to click;
+            anyone can create one, whatever their role. The project you are working in
+            is named in the header at the top of every screen, and the Portfolios tab
+            says so too when you have not chosen one.
           </p>
         </div>
       </Card>

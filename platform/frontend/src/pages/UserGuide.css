@@ -39,6 +39,12 @@
   margin-top: var(--space-2);
 }
 
+/* A definition long enough to need a list needs the list spaced off the prose
+   on both sides, or the bullets read as part of the sentence above them. */
+.guide-terms .definition-row dd > :is(p, .guide-bullets) + :is(p, .guide-bullets) {
+  margin-top: var(--space-3);
+}
+
 .guide-prose {
   display: flex;
   flex-direction: column;

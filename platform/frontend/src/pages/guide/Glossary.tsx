@@ -1,5 +1,5 @@
 
-import { Card, SectionLink, Terms, Term } from "./parts";
+import { Bullets, Card, SectionLink, Terms, Term } from "./parts";
 
 /**
  * Every term the screens use, explained for a reader who has not met it.
@@ -461,8 +461,34 @@ export function Glossary() {
       >
         <Terms>
           <Term term="Project">
-            A folder for one piece of work. It holds the portfolios, runs and results
-            that belong together, and decides who can see them.
+            <p>
+              A folder for one piece of work. It holds the portfolios, the imports, the
+              runs and the results that belong together. Anyone can create a project,
+              whatever their role, and the person who creates it owns it; everybody else
+              sees it only once they are made a member.
+            </p>
+            <p>A project does three jobs, and each one matters at a different moment.</p>
+            <Bullets>
+              <li>
+                <strong>It decides who can see the work.</strong> Membership of the
+                project, not your role, is what grants access to a portfolio or a result.
+              </li>
+              <li>
+                <strong>It names the files.</strong> The short reference you give it
+                labels every file the project stores, which is why it cannot be changed
+                afterwards and why it is worth keeping short.
+              </li>
+              <li>
+                <strong>It is the unit of deletion.</strong> Delete a project and its
+                portfolios, imports, runs and results go with it.
+              </li>
+            </Bullets>
+            <p>
+              What a project does <em>not</em> hold is the model. Grids, vulnerability
+              sets, hazard sets and model versions belong to the whole installation, not
+              to any project: your run borrows one, your colleague&apos;s project uses the
+              same one, and deleting your project leaves it untouched.
+            </p>
           </Term>
           <Term term="Portfolio (exposure version)">
             Your list of insured properties, as CASS stores it. Each time it is changed,

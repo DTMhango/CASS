@@ -35,6 +35,18 @@ export function Problems() {
               <td>Go to the Portfolio dashboard and click a project&apos;s name.</td>
             </tr>
             <tr>
+              <th scope="row">There are no projects to choose from</th>
+              <td>
+                Nobody has created one yet, or you have not been made a member of any
+                that exist. A new installation starts with none.
+              </td>
+              <td>
+                Press <strong>New project</strong> on the Portfolio dashboard. Anyone
+                can create one, whatever their role, and you own the one you create. If
+                you believe a project already exists, ask its owner to add you.
+              </td>
+            </tr>
+            <tr>
               <th scope="row">The grid cell counter shows a yellow warning</th>
               <td>
                 The specification would make more cells than the limit, or a refinement&apos;s

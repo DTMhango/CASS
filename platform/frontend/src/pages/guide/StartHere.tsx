@@ -312,7 +312,52 @@ export function StartHere() {
         </Example>
       </Card>
 
-      <Card title="The journey, in five stages">
+      <Card title="The journey: two tracks that meet at a run">
+        <div className="guide-prose">
+          <p>
+            CASS builds two things separately and joins them at the very end. Knowing
+            which one you are on saves a lot of confusion later.
+          </p>
+        </div>
+        <Bullets>
+          <li>
+            <strong>The model</strong> is the science for a whole country: where
+            earthquakes happen, how hard the ground shakes at each place, and how
+            buildings respond. A modeller builds it once. It belongs to no project, and
+            every project in the installation uses the same one.
+          </li>
+          <li>
+            <strong>Your work</strong> is a project, the portfolio of properties inside
+            it, and the results that come out. All of that belongs to the project, and
+            only people who are members of it can see any of it.
+          </li>
+        </Bullets>
+        <div className="guide-prose">
+          <p>
+            The two meet at the moment you start a <strong>run</strong>, which takes one
+            published portfolio and one model version and calculates the losses. That is
+            the only point at which they touch. The model for Indonesia may have been
+            built months before your project existed; it sits outside your project, it
+            is not yours, and deleting your project does not remove it.
+          </p>
+          <p>
+            Which track you start on depends on your role. A modeller may work on the
+            first one. Everybody else starts on the second, at{" "}
+            <strong>Create or choose a project</strong>: for you that is step one, and
+            nothing else you do on the platform is possible until it is done.
+          </p>
+        </div>
+      </Card>
+
+      <Card title="Track 1: the model, built once for a country">
+        <div className="guide-prose">
+          <p>
+            Most people never do either of these steps, and neither of them needs a
+            project. Both are usually finished long before a new analyst signs in for
+            the first time, so read this to know what has already happened rather than
+            as something to do.
+          </p>
+        </div>
         <Steps>
           <Step number={1} title="Set up the platform" where="An administrator, once for each installation">
             <p>
@@ -329,8 +374,35 @@ export function StartHere() {
               <SectionLink section="model">Build a model</SectionLink> walks through
               every step.
             </p>
+            <p>
+              None of it is filed under a project. A model version is an asset of the
+              whole installation, which is why a colleague&apos;s project can use the one
+              you built, and why it survives when a project is deleted.
+            </p>
           </Step>
-          <Step number={3} title="Bring in a portfolio" where="Exposure">
+        </Steps>
+      </Card>
+
+      <Card title="Track 2: your work, inside a project">
+        <Steps>
+          <Step number={1} title="Create or choose a project" where="Portfolio dashboard">
+            <p>
+              A project is the folder that owns everything that follows: the
+              portfolios, the runs and the results. Nothing can be brought in or run
+              until one is chosen, which is why screens ask for a project before they
+              show you anything.
+            </p>
+            <p>
+              On the <Link to="/">Portfolio dashboard</Link>, click a project&apos;s name
+              to work in it, or press <strong>New project</strong> to make one. Anyone
+              can create a project, whatever their role, and whoever creates it owns it.
+              A new project needs a name, a short reference (used to label its files, so
+              keep it short and do not change it later) and a purpose. On a new
+              installation there are no projects at all, so this is the first thing to
+              do.
+            </p>
+          </Step>
+          <Step number={2} title="Bring in a portfolio" where="Exposure">
             <p>
               An analyst uploads the list of properties, checks and corrects how CASS
               has read it, adds the insurance and reinsurance details, and then
@@ -338,14 +410,19 @@ export function StartHere() {
               <SectionLink section="portfolio">Bring in a portfolio</SectionLink>.
             </p>
           </Step>
-          <Step number={4} title="Run it" where="Analysis builder, then Run monitor">
+          <Step number={3} title="Run it" where="Analysis builder, then Run monitor">
             <p>
               The analyst chooses the portfolio, the model version and the
               perspective, starts the run, and watches it progress.{" "}
               <SectionLink section="run">Run and read results</SectionLink>.
             </p>
+            <p>
+              This is where the two tracks meet: your portfolio, from this project, and
+              a model version from the shared catalogue. The run itself belongs to the
+              project, and so do the results it produces.
+            </p>
           </Step>
-          <Step number={5} title="Read the answer" where="Results">
+          <Step number={4} title="Read the answer" where="Results">
             <p>
               The results show the average yearly loss, how large the rare bad years
               are, which earthquakes and which places caused the most loss, and how
@@ -402,6 +479,13 @@ export function StartHere() {
             find, your role is the first thing to check. Your role is shown under
             your name at the bottom of the sidebar.
           </p>
+          <p>
+            Two things are the same for everybody, whatever their role.{" "}
+            <strong>Anyone can create a project</strong>, and whoever creates one owns
+            it. And a role is not access: it says what you may do in a project, while
+            which projects you can see at all is decided separately, by being made a
+            member of them.
+          </p>
         </div>
         <GuideTable>
           <thead>
@@ -414,8 +498,8 @@ export function StartHere() {
             <tr>
               <th scope="row">Portfolio analyst</th>
               <td>
-                Create projects, bring in portfolios, run analyses and read results.
-                Most day-to-day work happens with this role.
+                Bring in portfolios, run analyses and read results. Most day-to-day
+                work happens with this role.
               </td>
             </tr>
             <tr>
@@ -436,7 +520,9 @@ export function StartHere() {
               <td>
                 Check other people&apos;s work and approve or reject it at the points
                 where CASS requires a second person&apos;s agreement (called gates), and
-                approve results. Nobody, in any role, can approve their own request.
+                approve results. Nobody, in any role, can approve their own request. A
+                reviewer can also create a project and do an analyst&apos;s work inside
+                it; approving is what the role adds, not all it allows.
               </td>
             </tr>
             <tr>
@@ -481,7 +567,9 @@ export function StartHere() {
             the name of a project to choose it, or press{" "}
             <strong>New project</strong> to make one. A new project needs a name, a
             short reference (used to label its files, so keep it short and do not
-            change it later) and a purpose.
+            change it later) and a purpose. Anyone can create one, whatever their role,
+            and the person who creates it becomes its owner; if the list is empty,
+            either nobody has made one yet or you have not been added to any.
           </Term>
           <Term term="Model version (in the bar)">
             The model the next run will use. You choose it in the{" "}
