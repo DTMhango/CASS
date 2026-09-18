@@ -334,6 +334,9 @@ def compare(
             allocation_method=method,
             component_split=component_split,
             occupancy=occupancy,
+            # Where value sits is the whole question; policy terms and
+            # reinsurance do not move it, and are not read.
+            policy_terms=promotion.PolicyTerms.GROUND_UP,
         )
         result = lookup(prepared.rows, grid=grid, vulnerability=vulnerability)
 

@@ -397,6 +397,11 @@ class ImportBatch(BaseModel):
     #: stated facts rather than a reconstruction that did not converge.
     intake_report = models.JSONField(default=dict, blank=True)
     cohort_profile = models.JSONField(default=dict, blank=True)
+    #: The two reinsurance sheets, as canonical records: ``contracts`` one per
+    #: contract layer, ``scope`` one per row of what they cover. A handful of
+    #: rows per portfolio, read whole at promotion and never queried, so they
+    #: are kept with the batch rather than as rows of their own.
+    reinsurance = models.JSONField(default=dict, blank=True)
 
     #: The exposure versions promoted out of this batch. A batch can produce
     #: more than one -- a cohort A benchmark and a multi-location sensitivity
@@ -415,11 +420,14 @@ class ImportBatch(BaseModel):
     class Meta:
         ordering = ["-created_at"]
         constraints = [
-            # Re-reading the same file into the same project is idempotent: it
-            # returns the batch that already exists rather than a second copy
-            # whose counts a reader would have to reconcile against the first.
+            # Re-reading the same file into the same project under the same
+            # rules is idempotent: it returns the batch that already exists
+            # rather than a second copy whose counts a reader would have to
+            # reconcile against the first. Under newer rules the read differs,
+            # so it is a new batch and the old one stays as the earlier record.
             models.UniqueConstraint(
-                fields=["project", "source_checksum"], name="unique_import_per_source"
+                fields=["project", "source_checksum", "parser_version", "cohort_rule_version"],
+                name="unique_import_per_source_and_rules",
             )
         ]
         indexes = [models.Index(fields=["project", "state", "-created_at"])]

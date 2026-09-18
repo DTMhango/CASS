@@ -149,22 +149,86 @@ def test_the_country_is_staged_as_the_iso_code_the_template_asks_for(batch):
     assert nepal.country_code == "NP"
 
 
-def test_a_country_with_no_grid_is_staged_and_left_unclassified(project, analyst):
-    """Not refused: the row is real, and a person has to see it to fix it.
+def test_any_country_is_screened_not_only_the_pilot_ones(project, analyst):
+    """1.1.0 left every country but Indonesia and Nepal unclassified.
 
-    What must not happen is a coordinate in a country CASS cannot screen being
-    treated as eligible, so the cohort rules place it nowhere.
+    A risk in Paris, coded FR, is checked against France's outline and placed
+    by its precision like any other.
     """
-
     risks, policies = structural_template()
-    risks[0]["Country"] = "FR"
+    risks[0].update({"Country": "FR", "Latitude": "48.8566", "Longitude": "2.3522"})
     result = import_portfolio(
         project, as_template(risks, policies), filename="p.xlsx", actor=analyst
     )
     row = SourceRiskLocation.objects.get(batch=result, business_id="B-SINGLE")
     assert row.country_code == "FR"
+    assert row.cohort == str(extract.Cohort.A)
+    assert row.cohort_rule_version == extract.COHORT_RULE_VERSION
+
+
+def test_a_coordinate_outside_its_country_is_staged_flagged_and_explained(
+    project, analyst
+):
+    """Not refused: the row is real, and a person has to see it to fix it."""
+    risks, policies = structural_template()
+    risks[0]["Country"] = "BD"  # the coordinate is still Jakarta's
+    result = import_portfolio(
+        project, as_template(risks, policies), filename="p.xlsx", actor=analyst
+    )
+    row = SourceRiskLocation.objects.get(batch=result, business_id="B-SINGLE")
     assert row.cohort == str(extract.Cohort.UNCLASSIFIED)
-    assert "No country screen" in row.cohort_reason
+    assert "outside Bangladesh (BD)" in row.cohort_reason
+    assert row.review_state == ReviewState.PENDING
+
+    [finding] = [item for item in result.findings if item["code"] == "coordinate_outside_country"]
+    assert finding["sheet"] == intake_profile.RISK_SHEET
+    assert finding["field"] == "Latitude"
+    assert "import the file again" in finding["message"]
+    assert "confirm that row into a cohort in the review queue" in finding["message"]
+    assert finding["message"].startswith("1 risk coded BD has a coordinate more than 5 km")
+    assert finding["value"] == "BD"
+    assert result.intake_report["findings_by_code"]["coordinate_outside_country"] == 1
+
+
+def test_a_code_that_names_no_country_is_flagged_with_the_code_meant(project, analyst):
+    risks, policies = structural_template()
+    risks[0]["Country"] = "UK"
+    result = import_portfolio(
+        project, as_template(risks, policies), filename="p.xlsx", actor=analyst
+    )
+    row = SourceRiskLocation.objects.get(batch=result, business_id="B-SINGLE")
+    assert row.cohort == str(extract.Cohort.UNCLASSIFIED)
+    [finding] = [item for item in result.findings if item["code"] == "unknown_country_code"]
+    assert finding["field"] == "Country"
+    assert finding["value"] == "UK"
+    assert "the United Kingdom is GB" in finding["message"]
+
+
+def test_the_screen_reports_each_country_once_however_many_rows(project, analyst):
+    """Every latitude's sign lost is one finding a country, not one a row."""
+    risks, policies = structural_template()
+    for row in risks:
+        row["Latitude"] = str(-Decimal(str(row["Latitude"])))
+    result = import_portfolio(
+        project, as_template(risks, policies), filename="p.xlsx", actor=analyst
+    )
+    outside = [item for item in result.findings if item["code"] == "coordinate_outside_country"]
+    assert sorted(item["value"] for item in outside) == ["ID", "NP"]
+    [indonesia] = [item for item in outside if item["value"] == "ID"]
+    assert indonesia["message"].startswith("10 risks coded ID have coordinates")
+
+
+def test_the_same_file_under_newer_cohort_rules_is_read_again(project, analyst, monkeypatch):
+    """The old batch stays as the record of what the old rules made of it."""
+    payload = as_template(*structural_template())
+    first = import_portfolio(project, payload, filename="p.xlsx", actor=analyst)
+    assert import_portfolio(project, payload, filename="p.xlsx", actor=analyst) == first
+
+    monkeypatch.setattr(extract, "COHORT_RULE_VERSION", "99.0.0")
+    second = import_portfolio(project, payload, filename="p.xlsx", actor=analyst)
+    assert second != first
+    assert second.cohort_rule_version == "99.0.0"
+    assert ImportBatch.objects.filter(project=project).count() == 2
 
 
 # -- versions in the audit trail -----------------------------------------------

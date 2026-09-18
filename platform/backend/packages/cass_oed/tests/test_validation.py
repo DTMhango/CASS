@@ -253,6 +253,69 @@ def test_layer_gap_is_reported_as_a_warning():
     assert any(f.code == "layer_gap" for f in report.findings)
 
 
+DEDUCTIBLE_LOCATION_HEADER = (
+    b"PortNumber,AccNumber,LocNumber,BuildingID,CountryCode,Latitude,Longitude,"
+    b"OccupancyCode,LocPerilsCovered,BuildingTIV,LocCurrency,LocDed6All,LocDedType6All,"
+    b"LocPeril\n"
+)
+DEDUCTIBLE_ACCOUNT_HEADER = (
+    b"PortNumber,AccNumber,AccCurrency,PolNumber,PolPerilsCovered,LayerNumber,"
+    b"PolDed6All,PolDedType6All,PolPeril\n"
+)
+
+
+def test_a_single_location_deductible_at_both_levels_is_a_warning():
+    """The engine takes both off, one after the other: 25,000 twice is 50,000."""
+    location = read_bytes(
+        FileKind.LOCATION,
+        DEDUCTIBLE_LOCATION_HEADER + b"1,A1,L1,1,ID,-6.2,106.8,1050,QEQ,200000,USD,25000,0,QEQ\n",
+    )
+    account = read_bytes(
+        FileKind.ACCOUNT,
+        DEDUCTIBLE_ACCOUNT_HEADER + b"1,A1,USD,P1,QEQ,1,25000,0,QEQ\n",
+    )
+
+    report = validate(PortfolioFiles(location=location, account=account))
+
+    finding = next(f for f in report.findings if f.code == "deductible_at_risk_and_policy")
+    assert finding.severity.value == "warning"
+    assert finding.field == "LocDed6All"
+    assert "50,000" in finding.message
+    assert report.publishable
+
+
+def test_several_locations_may_carry_their_own_deductibles_under_a_policy_one():
+    location = read_bytes(
+        FileKind.LOCATION,
+        DEDUCTIBLE_LOCATION_HEADER
+        + b"1,A1,L1,1,ID,-6.2,106.8,1050,QEQ,200000,USD,25000,0,QEQ\n"
+        + b"1,A1,L2,1,ID,-6.2,106.8,1050,QEQ,200000,USD,25000,0,QEQ\n",
+    )
+    account = read_bytes(
+        FileKind.ACCOUNT,
+        DEDUCTIBLE_ACCOUNT_HEADER + b"1,A1,USD,P1,QEQ,1,100000,0,QEQ\n",
+    )
+
+    report = validate(PortfolioFiles(location=location, account=account))
+
+    assert not [f for f in report.findings if f.code == "deductible_at_risk_and_policy"]
+
+
+def test_a_single_location_deductible_at_one_level_is_not_reported():
+    location = read_bytes(
+        FileKind.LOCATION,
+        DEDUCTIBLE_LOCATION_HEADER + b"1,A1,L1,1,ID,-6.2,106.8,1050,QEQ,200000,USD,0,,\n",
+    )
+    account = read_bytes(
+        FileKind.ACCOUNT,
+        DEDUCTIBLE_ACCOUNT_HEADER + b"1,A1,USD,P1,QEQ,1,25000,0,QEQ\n",
+    )
+
+    report = validate(PortfolioFiles(location=location, account=account))
+
+    assert not [f for f in report.findings if f.code == "deductible_at_risk_and_policy"]
+
+
 TERM_HEADER = (
     "PortNumber,AccNumber,LocNumber,BuildingID,CountryCode,Latitude,Longitude,"
     "OccupancyCode,ConstructionCode,LocPerilsCovered,BuildingTIV,ContentsTIV,"

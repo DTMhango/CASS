@@ -527,6 +527,9 @@ class ExposureVersionViewSet(viewsets.ModelViewSet):
                 risk_level=data.get("risk_level") or "",
                 risk_attachment=data.get("risk_attachment"),
                 risk_limit=data.get("risk_limit"),
+                reinstatements=data.get("reinstatements"),
+                reinstatement_rate=data.get("reinstatement_rate"),
+                reinstatement_premium=data.get("reinstatement_premium"),
                 scope=data.get("scope") or [],
                 whole_portfolio=bool(data.get("whole_portfolio")),
                 actor=request.user,
@@ -965,6 +968,10 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
         ``country`` narrows the selection to one country, because a model
         version covers one. A business with sites in two is excluded from both
         rather than split, for the same reason a partial schedule is.
+
+        ``policy_terms`` says what to do with the workbook's policy terms and
+        reinsurance: ``apply`` writes them for every account, flagging those
+        with no limit as possibly overstated, and ``ground_up`` leaves them out.
         """
         batch = self.get_object()
         if not batch.project.may_write(request.user):
@@ -988,6 +995,9 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
                     or cass_extract.AllocationMethod.EQUAL_LOCATION
                 )
             )
+            policy_terms = promotion.PolicyTerms(
+                str(request.data.get("policy_terms") or promotion.PolicyTerms.APPLY)
+            )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1003,6 +1013,7 @@ class PortfolioImportViewSet(viewsets.ReadOnlyModelViewSet):
                 allocation_method=method,
                 component_split=_requested_split(request.data),
                 occupancy=_requested_occupancy(request.data),
+                policy_terms=policy_terms,
                 actor=request.user,
                 request=request,
             )
@@ -1253,6 +1264,7 @@ class AssumptionCatalogueView(APIView):
                 "coverage_splits": serializers.ListField(),
                 "coverages": serializers.ListField(),
                 "occupancy_assumptions": serializers.ListField(),
+                "policy_terms": serializers.ListField(),
             },
         )
     )
@@ -1301,6 +1313,14 @@ class AssumptionCatalogueView(APIView):
                         cass_extract.OCCUPANCY_PRESETS.values(),
                         key=lambda entry: entry.name,
                     )
+                ],
+                "policy_terms": [
+                    {
+                        "value": str(item),
+                        "label": item.label,
+                        "default": item is promotion.PolicyTerms.APPLY,
+                    }
+                    for item in promotion.PolicyTerms
                 ],
                 "default_coverage_split": cass_extract.DEFAULT_SPLIT.name,
                 "default_occupancy": cass_extract.DEFAULT_OCCUPANCY.name,

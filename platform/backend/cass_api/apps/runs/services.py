@@ -124,7 +124,7 @@ from cass_oed.perspectives import Perspective, available_perspectives
 from cass_oed.validation import validate as validate_portfolio
 
 from . import admission
-from .models import AnalysisRun
+from .models import AnalysisRun, ReinsuranceCover
 
 #: Which Oasis portfolio endpoint each CASS artifact role belongs to. The order
 #: matters: Oasis validates a reinsurance scope against the contracts it
@@ -232,6 +232,14 @@ LOCATION_SUMMARY_ID = 2
 LOCATION_FIELDS: tuple[str, ...] = ("AccNumber", "LocNumber")
 LOCATION_ORD_OUTPUT: dict[str, bool] = {"alt_period": True}
 
+#: The insured summary a limited-cover run adds: one summary per cover class,
+#: the set of contracts reaching a location, with the loss of every event
+#: occurrence in every simulated year and sample. It is the table the limited
+#: calculation reads, and the one output such a run adds to the package.
+COVER_SUMMARY_ID = 3
+COVER_FIELD = "LocUserDef5"
+COVER_ORD_OUTPUT: dict[str, bool] = {"plt_sample": True}
+
 
 def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
     """The analysis settings document Oasis is given.
@@ -290,7 +298,22 @@ def build_analysis_settings(analysis_run: AnalysisRun, model=None) -> dict:
                     "ord_output": dict(LOCATION_ORD_OUTPUT),
                 },
             ]
+    if limited_cover_requested(analysis_run):
+        settings_document["il_summaries"].append(
+            {
+                "id": COVER_SUMMARY_ID,
+                "oed_fields": [COVER_FIELD],
+                "ord_output": dict(COVER_ORD_OUTPUT),
+            }
+        )
     return settings_document
+
+
+def limited_cover_requested(analysis_run: AnalysisRun) -> bool:
+    """Whether this run also computes the net loss with contract limits."""
+    return analysis_run.reinsurance_cover == ReinsuranceCover.CONTRACT_TERMS and str(
+        Perspective.REINSURANCE
+    ) in {str(item) for item in (analysis_run.perspectives or [])}
 
 
 def vulnerability_set_for(analysis_run: AnalysisRun) -> str | None:
@@ -913,6 +936,10 @@ def _publish_oed(analysis_run, engine, actor) -> dict:
             },
         }
 
+    cover: dict = {}
+    if limited_cover_requested(analysis_run):
+        payloads, cover = _write_cover_classes(analysis_run, payloads, actor)
+
     portfolio_id = engine.create_portfolio(f"cass-{run.id}")
     uploaded = {}
     for role, filename, payload in payloads:
@@ -935,6 +962,12 @@ def _publish_oed(analysis_run, engine, actor) -> dict:
                 if peril_scope
                 else ""
             )
+            + (
+                f" Locations marked with {len(cover['classes'])} cover class(es) for "
+                "limited cover."
+                if cover
+                else ""
+            )
         ),
         metrics={
             "oasis_portfolio_id": portfolio_id,
@@ -947,7 +980,67 @@ def _publish_oed(analysis_run, engine, actor) -> dict:
         "files": uploaded,
         "currency_conversion": conversion,
         "peril_scope": peril_scope,
+        "cover_classes": cover,
     }
+
+
+def _write_cover_classes(analysis_run, payloads, actor):
+    """Mark each location with its cover class, on the engine's copy only.
+
+    The class is the set of catastrophe contracts whose scope reaches the
+    location, so the engine can report insured loss per class and the limited
+    calculation can add up each contract's loss. The terms are read from the
+    files as they are about to be sent, after any currency conversion, and
+    recorded on the run: the calculation afterwards applies the terms the
+    engine was given, not a later reading of the portfolio.
+    """
+    from cass_oed.limited_cover import CoverError, cover_classes, location_key
+    from cass_oed.reader import read_bytes
+    from cass_oed.schema import FileKind as OedFile
+
+    by_role = {role: payload for role, _, payload in payloads}
+    try:
+        info = read_bytes(OedFile.REINS_INFO, by_role["oed_reins_info"]).rows
+        scope = read_bytes(OedFile.REINS_SCOPE, by_role["oed_reins_scope"]).rows
+    except KeyError as exc:
+        raise AnalysisExecutionError(
+            "Limited cover was asked for, but the portfolio sent to the engine has no "
+            "reinsurance files."
+        ) from exc
+    reader = csv.DictReader(io.StringIO(by_role["oed_location"].decode("utf-8-sig")))
+    locations = list(reader)
+    try:
+        layers, classes = cover_classes(info, scope, locations)
+    except CoverError as exc:
+        raise AnalysisExecutionError(str(exc)) from exc
+
+    fields = list(reader.fieldnames or [])
+    if COVER_FIELD not in fields:
+        fields.append(COVER_FIELD)
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    for row in locations:
+        writer.writerow({**row, COVER_FIELD: classes[location_key(row)]})
+    marked = buffer.getvalue().encode("utf-8")
+
+    counts: dict[str, int] = {}
+    for code in classes.values():
+        counts[code] = counts.get(code, 0) + 1
+    record = {
+        "field": COVER_FIELD,
+        "classes": dict(sorted(counts.items())),
+        "layers": [layer.as_dict() for layer in layers],
+        "artifact": _store_keys_file(
+            analysis_run.run, "oed_location_cover_classes", marked, actor
+        ),
+    }
+    analysis_run.cover_terms = record
+    analysis_run.save(update_fields=["cover_terms", "updated_at"])
+    return [
+        (role, filename, marked if role == "oed_location" else payload)
+        for role, filename, payload in payloads
+    ], record
 
 
 def carries_sub_peril_channels(analysis_run: AnalysisRun) -> bool:
@@ -1584,6 +1677,7 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
 
     published: list[dict] = []
     requested = [str(item) for item in (analysis_run.perspectives or [])]
+    engine_metrics: dict[str, Any] = {}
 
     # How the losses were calculated, apart from the assumption set. Recorded
     # only where the settings rebuilt here are exactly the ones the run hashed
@@ -1602,6 +1696,7 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
         except ord_results.OrdError as exc:
             published.append({"perspective": perspective, "not_published": str(exc)})
             continue
+        engine_metrics[perspective] = metrics
 
         label = (
             f"{analysis_run.exposure_version.name} "
@@ -1637,7 +1732,7 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
                 "model_version_reference": model_version.reference,
                 "assumption_set_reference": _assumption_reference(analysis_run),
                 "valuation_date": analysis_run.exposure_version.valuation_date,
-                "exposure_quality": _exposure_quality(analysis_run),
+                "exposure_quality": _exposure_quality(analysis_run, perspective),
                 "peril_scope": model_version.peril_scope,
                 "material_exclusions": _material_exclusions(analysis_run, model_version),
                 # The basis travels with the number, because a package carries
@@ -1671,7 +1766,177 @@ def _ingest_results(analysis_run, payload: bytes, actor) -> dict:
             after={"state": result.state, "perspective": perspective},
         )
 
+    if limited_cover_requested(analysis_run):
+        published.append(
+            _publish_limited_cover(
+                analysis_run, package, engine_metrics, document, calculation, actor
+            )
+        )
+
     return {"published": published}
+
+
+#: Where CASS's own reading of the engine's cover may differ from the engine's
+#: number before the limited result is marked as not agreeing with it. The two
+#: read the same losses; float32 tables and rounding account for far less.
+COVER_CHECK_TOLERANCE = 0.005
+
+
+def _share_difference(ours: float, engine: Any) -> float | None:
+    if engine is None:
+        return None
+    engine_value = float(engine)
+    if engine_value == 0:
+        return 0.0 if ours == 0 else None
+    return abs(ours - engine_value) / abs(engine_value)
+
+
+def _publish_limited_cover(analysis_run, package, engine_metrics, document, calculation, actor):
+    """The net loss with each catastrophe layer's reinstatements and premiums.
+
+    Read from the engine's own year-by-year insured loss per cover class, and
+    checked twice against the engine: the insured loss it adds up must be the
+    engine's insured loss, and the same arithmetic without the annual limit must
+    be the engine's net of reinsurance. A result that fails either check is
+    still published, because its detail says what disagreed, but it says so.
+    """
+    from apps.results.models import ResultSet, ResultState
+    from cass_oed.limited_cover import CoverError, EventLosses, LayerTerms, calculate
+
+    perspective = "ri_terms"
+    engine_net = engine_metrics.get(str(Perspective.REINSURANCE))
+    engine_insured = engine_metrics.get(str(Perspective.INSURED))
+    if engine_net is None:
+        return {
+            "perspective": perspective,
+            "not_published": "The engine's net-of-reinsurance result was not read, so there "
+            "is nothing to check a limited result against.",
+        }
+    info = package.rows(str(Perspective.INSURED), COVER_SUMMARY_ID, "summary-info")
+    table = package.raw(str(Perspective.INSURED), COVER_SUMMARY_ID, "splt")
+    if not info or table is None:
+        return {
+            "perspective": perspective,
+            "not_published": "The output package has no insured loss per cover class, so "
+            "limited cover could not be calculated.",
+        }
+    summary_classes = {
+        int(row["summary_id"]): str(row.get(COVER_FIELD) or "").strip() for row in info
+    }
+    layers = [LayerTerms.from_dict(item) for item in analysis_run.cover_terms.get("layers", [])]
+    return_periods = [float(key) for key in engine_net.return_period_losses]
+    try:
+        losses = EventLosses.from_splt(
+            table,
+            summary_classes=summary_classes,
+            samples=int(document.get("number_of_samples") or 0),
+        )
+        result = calculate(losses, layers, return_periods=return_periods)
+    except CoverError as exc:
+        return {"perspective": perspective, "not_published": str(exc)}
+
+    check = {
+        "unlimited_net_aal": round(result.unlimited.average_annual_loss, 2),
+        "engine_net_aal": str(engine_net.average_annual_loss),
+        "net_difference_share": _share_difference(
+            result.unlimited.average_annual_loss, engine_net.average_annual_loss
+        ),
+        "insured_aal": round(result.insured.average_annual_loss, 2),
+        "engine_insured_aal": (
+            str(engine_insured.average_annual_loss) if engine_insured else None
+        ),
+        "insured_difference_share": _share_difference(
+            result.insured.average_annual_loss,
+            engine_insured.average_annual_loss if engine_insured else None,
+        ),
+        "tolerance": COVER_CHECK_TOLERANCE,
+    }
+    check["agrees"] = all(
+        value is not None and value <= COVER_CHECK_TOLERANCE
+        for value in (check["net_difference_share"], check["insured_difference_share"])
+    )
+    as_engine = [
+        f"contract {item['contract']} layer {item['layer']}"
+        for item in result.layers
+        if item["applied_as_engine"]
+    ]
+    notes = [
+        "Within a year, events are applied in event-number order: the catalogue places "
+        "every event on the first of January of its year, so there is no date to order "
+        "by. The order can move a year's largest single loss once an aggregate is used "
+        "up; it never moves the year's total.",
+        "Warranties on the event cover, such as a minimum number of risks in one loss "
+        "occurrence, are not modelled.",
+    ]
+    if as_engine:
+        notes.append(
+            "These layers state no number of reinstatements, so they are applied as the "
+            "engine applies them, in full on every event: " + ", ".join(as_engine) + "."
+        )
+    if not check["agrees"]:
+        notes.append(
+            "CASS's reading of the engine's losses does not agree with the engine within "
+            f"{COVER_CHECK_TOLERANCE:.1%}; see the check before relying on this result."
+        )
+
+    model_version = analysis_run.model_version
+    run = analysis_run.run
+    detail = {**result.as_dict(), "check": check, "notes": notes}
+    label = (
+        f"{analysis_run.exposure_version.name} "
+        f"v{analysis_run.exposure_version.version} — net of reinsurance, limited cover"
+    )
+    rp_losses = {
+        (str(int(rp)) if float(rp).is_integer() else str(rp)): f"{loss:.2f}"
+        for rp, loss in sorted(result.limited.aep.items())
+    }
+    stored, _ = ResultSet.objects.update_or_create(
+        run=run,
+        perspective=perspective,
+        defaults={
+            "project": run.project,
+            "label": label,
+            "state": (
+                ResultState.RESEARCH
+                if model_version.is_research_prototype
+                or _assumption_is_unapproved(analysis_run)
+                or not analysis_run.may_produce_decision_output
+                else ResultState.DRAFT
+            ),
+            "run_mode": analysis_run.mode,
+            "calculation_digest": calculation,
+            "average_annual_loss": Decimal(f"{result.limited.average_annual_loss:.2f}"),
+            "standard_deviation": Decimal(f"{result.limited.standard_deviation:.2f}"),
+            "currency": analysis_run.run_currency or analysis_run.exposure_version.run_currency,
+            "return_period_losses": rp_losses,
+            "model_version_reference": model_version.reference,
+            "assumption_set_reference": _assumption_reference(analysis_run),
+            "valuation_date": analysis_run.exposure_version.valuation_date,
+            "exposure_quality": _exposure_quality(analysis_run, str(Perspective.REINSURANCE)),
+            "peril_scope": model_version.peril_scope,
+            "material_exclusions": _material_exclusions(analysis_run, model_version),
+            "uncertainty_attribution": {
+                "ord_basis": {**engine_net.basis, "computed_by": "CASS limited cover"}
+            },
+            "cover_detail": detail,
+            "created_by": actor,
+            "updated_by": actor,
+        },
+    )
+    audit.record(
+        action=AuditAction.CREATE,
+        subject_type="result_set",
+        subject_id=stored.id,
+        actor=actor,
+        project=run.project,
+        subject_label=str(stored),
+        after={"state": stored.state, "perspective": perspective, "agrees": check["agrees"]},
+    )
+    return {
+        "perspective": perspective,
+        "result_set": str(stored.id),
+        "agrees_with_engine": check["agrees"],
+    }
 
 
 def _store_event_losses(run, result, package, perspective: str, actor) -> int:
@@ -1908,9 +2173,31 @@ def _assumption_reference(analysis_run) -> str:
     return ""
 
 
-def _exposure_quality(analysis_run) -> dict:
-    """What the keys lookup said about how much of the book was modelled."""
+def _exposure_quality(analysis_run, perspective: str | None = None) -> dict:
+    """What the keys lookup said about how much of the book was modelled.
+
+    And, for a number the policy terms shape, which policies it may overstate:
+    those the workbook gave no limit, no attachment or no policy row, whose
+    insured loss is therefore their ground-up loss. The list travels with the
+    number because a PML nobody can trace to its blanks reads as complete.
+    """
     summary = analysis_run.keys_summary or {}
+    financial = (analysis_run.exposure_version.source_lineage or {}).get(
+        "financial_structure"
+    ) or {}
+    flagged = financial.get("possibly_overstated") or {}
+    overstated = (
+        {
+            "policy_count": len(flagged.get("policy_ids") or []),
+            "tiv": flagged.get("tiv"),
+            "uncapped": len(flagged.get("uncapped") or []),
+            "attachment_read_as_zero": len(flagged.get("attachment_read_as_zero") or []),
+            "no_policy_row": len(flagged.get("no_policy_row") or []),
+            "first": list((flagged.get("policy_ids") or [])[:10]),
+        }
+        if perspective != str(Perspective.GROUND_UP) and flagged.get("policy_ids")
+        else None
+    )
     return {
         "location_count": analysis_run.exposure_version.location_count,
         "source_tiv": str(analysis_run.exposure_version.total_tiv or ""),
@@ -1921,6 +2208,7 @@ def _exposure_quality(analysis_run) -> dict:
         # Section 8: the rate a number rests on travels with the number, not
         # only with the run that produced it.
         "currency_conversion": analysis_run.currency_conversion or {},
+        **({"possibly_overstated": overstated} if overstated else {}),
     }
 
 

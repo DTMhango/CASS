@@ -158,6 +158,38 @@ def overlays(locations: Iterable[SourceRiskLocation]) -> dict[int, Overlay]:
     return {item.id: overlay(item) for item in locations}
 
 
+def standing_assignments(locations: Sequence[SourceRiskLocation]) -> list[extract.Assignment]:
+    """Each location's cohort as it stands: the rules' at import, then any decision.
+
+    What promotion selects by. A row a reviewer confirmed into a cohort is
+    promoted with it and one pushed out is not, so the counts on the review
+    screen are the counts a promotion takes -- and a coordinate the country
+    screen could not place, which a person has established is right, has a way
+    in that does not involve editing the source.
+    """
+    applied = overlays(locations)
+    standing = []
+    for item in locations:
+        decided = applied[item.id]
+        try:
+            number = int(item.location_number or 0)
+        except (TypeError, ValueError):
+            number = 0
+        standing.append(
+            extract.Assignment(
+                business_id=item.business_id,
+                location_number=number,
+                cohort=extract.Cohort(decided.cohort),
+                reason=(
+                    "Decided in review." if decided.cohort_is_reviewed else item.cohort_reason
+                ),
+                rule_version=item.cohort_rule_version,
+                rule="reviewed" if decided.cohort_is_reviewed else "",
+            )
+        )
+    return standing
+
+
 def _validated(field: str, value: Any) -> str:
     """The stored form of a decided value, refusing one that means nothing."""
     if field == DecisionField.COHORT:
@@ -595,6 +627,9 @@ def import_results(batch: ImportBatch) -> dict[str, Any]:
             ),
             "parser_version": batch.parser_version,
             "cohort_rule_version": batch.cohort_rule_version,
+            # What a fresh import would apply. Where the two differ, importing
+            # the same file again reads it into a new batch under these rules.
+            "current_cohort_rule_version": extract.COHORT_RULE_VERSION,
             "overlay_version": OVERLAY_VERSION,
             "policy_row_count": batch.policy_row_count,
             "risk_row_count": batch.risk_row_count,

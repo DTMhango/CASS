@@ -52,6 +52,9 @@ platform/model_data/
 
 # Confidential portfolio extracts. Commit only masked/synthetic structural fixtures.
 premium_policies_2026-06-30_geocoded.xlsx
+CASS_DATA_PREP.xlsx
+# The intake templates completed from it, one per country.
+CASS_intake_templates_2026/
 # Excel's owner-lock files, which appear beside a workbook while it is open
 # and carry the name of whoever opened it.
 ~$*

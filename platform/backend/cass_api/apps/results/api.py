@@ -34,7 +34,7 @@ class ResultSetSerializer(serializers.ModelSerializer):
             "return_period_losses", "model_version_reference",
             "assumption_set_reference", "run_mode", "calculation_digest", "valuation_date",
             "exposure_quality", "peril_scope", "material_exclusions", "uncertainty_attribution",
-            "usable_for_decisions", "caveats", "approved_at", "is_frozen",
+            "cover_detail", "usable_for_decisions", "caveats", "approved_at", "is_frozen",
             "created_at",
         ]
         read_only_fields = [

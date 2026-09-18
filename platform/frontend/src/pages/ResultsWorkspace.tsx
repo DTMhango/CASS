@@ -523,6 +523,8 @@ function ResultCard({ result }: { result: ResultSet }) {
         </Disclosure>
       ) : null}
 
+      <LimitedCoverPanel result={result} />
+
       <EventLossTable result={result} />
 
       <ScenarioRangePanel result={result} />
@@ -907,6 +909,115 @@ function GeographicPanel({ result }: { result: ResultSet }) {
   );
 }
 
+/**
+ * What limited cover changed, layer by layer, and how the number was checked.
+ *
+ * The engine pays every catastrophe layer in full on every event. This result
+ * applies each layer's reinstatements and their premiums instead, and carries
+ * the same arithmetic without them beside it: that reading must match the
+ * engine's own net-of-reinsurance result, and the panel says whether it did.
+ */
+function LimitedCoverPanel({ result }: { result: ResultSet }) {
+  const detail = result.cover_detail;
+  if (!detail?.layers?.length || !detail.limited || !detail.unlimited) return null;
+  const check = detail.check;
+  const added = detail.limited.average_annual_loss - detail.unlimited.average_annual_loss;
+  const returnPeriods = Object.keys(detail.limited.aep).sort((a, b) => Number(b) - Number(a));
+
+  return (
+    <Disclosure summary="Limited cover: reinstatements and their premiums" defaultOpen>
+      {check ? (
+        <Notice
+          tone={check.agrees ? "ok" : "warning"}
+          title={
+            check.agrees
+              ? "Checked against the engine"
+              : "Does not agree with the engine: read the check before relying on this"
+          }
+        >
+          Read without the annual limits, CASS gets an average annual net loss of{" "}
+          {formatMoney(check.unlimited_net_aal)} against the engine&apos;s{" "}
+          {formatMoney(check.engine_net_aal)} (
+          {formatPercent(check.net_difference_share, 2)} apart), and an insured loss of{" "}
+          {formatMoney(check.insured_aal)} against {formatMoney(check.engine_insured_aal)} (
+          {formatPercent(check.insured_difference_share, 2)} apart). The tolerance is{" "}
+          {formatPercent(check.tolerance, 1)}.
+        </Notice>
+      ) : null}
+      <p>
+        Limiting each layer to its reinstatements, and charging their premiums, adds{" "}
+        <strong>{formatMoney(added)}</strong> a year on average to the loss kept, over{" "}
+        {formatCount(detail.periods)} simulated years and {formatCount(detail.samples)}{" "}
+        samples.
+      </p>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Contract / layer</th>
+            <th scope="col">Layer</th>
+            <th scope="col">Reinstatements</th>
+            <th scope="col" className="numeric">Recovered a year</th>
+            <th scope="col" className="numeric">As the engine pays it</th>
+            <th scope="col" className="numeric">Reinstatement premium a year</th>
+            <th scope="col" className="numeric">Years it runs out</th>
+          </tr>
+        </thead>
+        <tbody>
+          {detail.layers.map((layer) => (
+            <tr key={`${layer.contract}-${layer.layer}`}>
+              <td>
+                {layer.contract} / {layer.layer}
+                {layer.name ? <span className="muted"> {layer.name}</span> : null}
+              </td>
+              <td className="numeric">
+                {formatMoney(layer.limit)} xs {formatMoney(layer.attachment)}
+              </td>
+              <td>
+                {layer.reinstatements === null
+                  ? "not stated: applied as the engine does"
+                  : `${layer.reinstatements}${
+                      layer.rates.length
+                        ? ` at ${layer.rates.map((rate) => formatPercent(rate, 0)).join(", ")}`
+                        : " free"
+                    }`}
+              </td>
+              <td className="numeric">{formatMoney(layer.recovered_aal)}</td>
+              <td className="numeric">{formatMoney(layer.unlimited_recovered_aal)}</td>
+              <td className="numeric">{formatMoney(layer.premium_aal)}</td>
+              <td className="numeric">{formatPercent(layer.exhausted_share, 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Return period (years)</th>
+            <th scope="col" className="numeric">Kept, limited cover</th>
+            <th scope="col" className="numeric">Kept, the engine&apos;s cover</th>
+          </tr>
+        </thead>
+        <tbody>
+          {returnPeriods.map((period) => (
+            <tr key={period}>
+              <td>{period}</td>
+              <td className="numeric">{formatMoney(detail.limited?.aep[period])}</td>
+              <td className="numeric">{formatMoney(detail.unlimited?.aep[period])}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {detail.notes?.length ? (
+        <ul className="muted">
+          {detail.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      ) : null}
+    </Disclosure>
+  );
+}
+
 /** The block section 9 requires beside every decision metric. */
 function CaveatBlock({ result }: { result: ResultSet }) {
   const caveats = result.caveats;
@@ -916,6 +1027,8 @@ function CaveatBlock({ result }: { result: ResultSet }) {
   // number rather than only in the run that produced it.
   const conversion = (caveats.exposure_quality as ExposureQuality | undefined)
     ?.currency_conversion;
+  const overstated = (caveats.exposure_quality as ExposureQuality | undefined)
+    ?.possibly_overstated;
 
   return (
     <div className="caveats">
@@ -950,6 +1063,27 @@ function CaveatBlock({ result }: { result: ResultSet }) {
           loss.
         </Notice>
       )}
+
+      {overstated && overstated.policy_count > 0 ? (
+        <Notice
+          tone="warning"
+          title={`Possibly overstated: ${formatCount(overstated.policy_count)} ${
+            overstated.policy_count === 1 ? "policy" : "policies"
+          } without complete terms`}
+        >
+          {overstated.uncapped > 0
+            ? `${formatCount(overstated.uncapped)} have no layer or policy limit, so their insured loss is their ground-up loss. `
+            : ""}
+          {overstated.attachment_read_as_zero > 0
+            ? `${formatCount(overstated.attachment_read_as_zero)} have no stated attachment, read as paying from the first loss. `
+            : ""}
+          {overstated.no_policy_row > 0
+            ? `${formatCount(overstated.no_policy_row)} have no policy row at all. `
+            : ""}
+          Together they hold {formatMoney(overstated.tiv)} of insured value. First:{" "}
+          <span className="mono">{overstated.first.join(", ")}</span>.
+        </Notice>
+      ) : null}
 
       {uncertainty.length > 0 ? (
         <Disclosure summary="Where the uncertainty comes from">

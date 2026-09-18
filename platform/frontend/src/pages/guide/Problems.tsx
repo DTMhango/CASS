@@ -102,15 +102,34 @@ export function Problems() {
                 Nothing qualified. Usually the <strong>Geocode precision</strong> column is
                 blank or holds a word CASS does not recognise, or{" "}
                 <strong>Class of business</strong> is not exactly{" "}
-                <span className="mono">Fire</span>, or the country is one CASS has no
-                coordinate check for (only Indonesia and Nepal today). It can also be one
-                unresolved property taking its whole account out with it.
+                <span className="mono">Fire</span>, or the coordinates are outside the
+                country the rows name. It can also be one unresolved property taking its
+                whole account out with it.
               </td>
               <td>
-                Open <strong>What was included</strong> on the import review to see which
-                cohort the rows landed in, fix the columns in the template, and import it
+                Open <strong>What the workbook check found</strong> and{" "}
+                <strong>What was included</strong> on the import review to see which cohort
+                the rows landed in and why, fix the columns in the template, and import it
                 again. Bring in a portfolio, Route A, step 2 lists the exact values each
                 column takes.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">A risk is flagged as outside its country</th>
+              <td>
+                Its coordinates are more than 5 km outside the country in its{" "}
+                <strong>Country</strong> column. Usually the geocoder matched the wrong
+                place, a latitude lost its minus sign, or the country code is wrong.
+                Sometimes the coordinate is right and the country&apos;s outline stops at
+                the coast: an offshore platform, or a site on a small island the map does
+                not draw.
+              </td>
+              <td>
+                If the data is wrong, correct the coordinate or the code in the workbook and
+                import it again. If the coordinate is right, find the row in the review
+                queue, choose <strong>Cohort</strong>, enter the cohort it belongs in (for
+                example <span className="mono">A</span>) and say how you know. Promotion
+                then includes it.
               </td>
             </tr>
             <tr>

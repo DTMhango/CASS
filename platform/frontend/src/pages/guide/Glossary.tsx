@@ -524,7 +524,9 @@ export function Glossary() {
           <Term term="Deductible">
             The part of a loss the policyholder pays themselves before the insurance
             pays anything. For example, with a deductible of 20,000 and damage of
-            120,000, the insurance pays 100,000.
+            120,000, the insurance pays 100,000. A deductible can be set for one property
+            or for a whole policy; when a policy covers only one property, set it once,
+            on the policy, or it is taken off twice.
           </Term>
           <Term term="Limit">
             The most the insurance will pay. For example, with a limit of 500,000, damage
@@ -608,12 +610,18 @@ export function Glossary() {
             <p>
               <strong>Unclassified</strong> is the fourth, and the one that catches people
               out. A row lands there when it has no coordinates, when they are 0 and 0, when
-              they fall outside the country the row names, when CASS has no check for that
-              country (only Indonesia and Nepal today), or when its{" "}
+              they are more than 5 km outside the country the row names, when the{" "}
+              <strong>Country</strong> is not a two-letter ISO code (<span className="mono">UK</span>{" "}
+              instead of <span className="mono">GB</span>, say), or when its{" "}
               <strong>Geocode precision</strong> is blank or a word CASS does not recognise.
-              Unclassified rows are not offered when promoting and can never be included, so
-              a template filled in without Geocode precision produces an import that cannot
-              become a portfolio.
+            </p>
+            <p>
+              Unclassified rows are left out of every promotion, so a template filled in
+              without Geocode precision produces an import with nothing to promote. Most are
+              fixed in the workbook, which is then imported again. A coordinate outside its
+              country that is in fact right, such as an offshore platform&apos;s, can instead
+              be confirmed into a cohort in the review queue, with the reason; promotion then
+              includes it.
             </p>
           </Term>
           <Term term="Promote">
@@ -679,6 +687,19 @@ export function Glossary() {
           <Term term="Placed share">
             The part of a treaty actually sold to reinsurers. If only 80% of a treaty
             was placed, only 80% of what it would pay is recovered.
+          </Term>
+          <Term term="Reinstatement">
+            Restoring a catastrophe layer&apos;s limit after it has paid a loss, so it can
+            pay again later in the year. A contract allows a set number, each at a rate of
+            the reinstatement premium. For example, with one reinstatement at 100% on a
+            premium of 1,000,000, restoring 70% of the limit costs 700,000, which is taken
+            off the recovery. The loss engine treats reinstatements as unlimited and free;
+            a run with limited cover applies the real terms.
+          </Term>
+          <Term term="MDP (minimum and deposit premium)">
+            The premium a reinsurance layer charges at the start of the year, subject to
+            adjustment later. Reinstatements are normally charged on it at 100%, so it is
+            what goes in the Reinstatement premium column.
           </Term>
         </Terms>
       </Card>

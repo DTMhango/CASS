@@ -11,13 +11,19 @@ fields into three cohorts, every source row is preserved, and the rule version
 that made the assignment is recorded with it. A later rule change produces a
 new assignment rather than silently reinterpreting an old run.
 
-A coarse country screen runs before either field, because mapping the real
-extract to the pilot grids found five rows whose coordinates are not in the
-country they name -- one in Beirut and one on the Adriatic coast, both at
-street or better precision with no review flag. A geocoder can be confident and
-wrong, so neither the provider's precision nor the absence of a human flag is
-sufficient on its own. Those rows are unclassified: not eligible for anything,
-and in the queue for a person.
+A country screen runs before either field, because mapping the real extract
+to the pilot grids found five rows whose coordinates are not in the country
+they name -- one in Beirut and one on the Adriatic coast, both at street or
+better precision with no review flag. A geocoder can be confident and wrong, so
+neither the provider's precision nor the absence of a human flag is sufficient
+on its own. Those rows are unclassified: not eligible for anything, and in the
+queue for a person, who can correct the workbook or, where the coordinate is
+right after all, confirm the row into a cohort with a reason.
+
+The screen is handed in rather than held here. The rules say what to do with
+its answer; where the country outlines come from, and how near a coast counts
+as ashore, belong to the code that owns the outlines. Every call has to name
+one, so no path can assign cohorts without screening.
 
 The cohorts are not a quality ranking of the geocoder. They are a statement
 about what each row is fit for: A for automated mapping, B for mapping whose
@@ -29,12 +35,15 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 #: Bumped whenever an eligibility rule changes. Stored with each assignment.
-COHORT_RULE_VERSION = "1.1.0"
+#: 1.2.0 screens every country against its outline, where 1.1.0 screened
+#: Indonesia and Nepal against a box each and left every other country
+#: unclassified.
+COHORT_RULE_VERSION = "1.2.0"
 
 
 class Cohort(enum.StrEnum):
@@ -62,39 +71,96 @@ class Cohort(enum.StrEnum):
         }[self]
 
 
-#: Generous national bounds for the pilot countries, as a coarse screen only.
-#:
-#: Not a boundary polygon and not a substitute for one: they are wide enough to
-#: include water and neighbouring territory, and they exist to catch a geocode
-#: that landed on the wrong continent rather than one that landed a mile over a
-#: border. The 30 June 2026 extract carries five such rows, two of them at
-#: street or better precision with no review flag -- a geocoder can be confident
-#: and wrong, which is why precision alone cannot decide eligibility.
-#: Keyed by ISO code rather than country name. The intake template asks for the
-#: code, because a name has spellings and a code does not, and a screen that
-#: matched on "Indonesia" would silently pass "indonesia " or "INDONESIA".
-NATIONAL_BOUNDS: Mapping[str, tuple[Decimal, Decimal, Decimal, Decimal]] = {
-    "ID": (Decimal("-11.5"), Decimal("6.5"), Decimal("94.5"), Decimal("141.5")),
-    "NP": (Decimal("26.0"), Decimal("30.7"), Decimal("79.9"), Decimal("88.4")),
+class CountryScreen(Protocol):
+    """Checks coordinates against the country their rows name.
+
+    ``within`` answers, for each ``(latitude, longitude)``, whether it lies in
+    the country the code names, allowing ``buffer_km`` for a coast or border
+    drawn at map scale. It answers ``None`` for a code that names no country.
+    Keyed by ISO code rather than country name: the intake template asks for
+    the code, because a name has spellings and a code does not.
+    """
+
+    buffer_km: Decimal
+    source: str
+
+    def within(self, code: str, points: Sequence[tuple[Any, Any]]) -> Sequence[bool] | None: ...
+
+    def name(self, code: str) -> str | None: ...
+
+
+#: Codes people write for a country that ISO 3166-1 spells otherwise, so a
+#: message can say which was meant rather than only that this one is wrong.
+COMMON_MISCODES: Mapping[str, tuple[str, str]] = {
+    "UK": ("GB", "the United Kingdom"),
+    "EL": ("GR", "Greece"),
 }
 
 
-def within_stated_country(location: Mapping[str, Any]) -> bool | None:
-    """Whether a coordinate is plausibly inside the country the row names.
+class Placement(enum.Enum):
+    """What the screen said about one row's coordinate."""
 
-    ``None`` where the country is not one the screen knows, so an unrecognised
-    country is reported as unscreened rather than quietly passed or failed.
-    """
-    bounds = NATIONAL_BOUNDS.get(str(location.get("country_code") or "").strip().upper())
-    if bounds is None:
-        return None
+    INSIDE = "inside"
+    OUTSIDE = "outside"
+    UNKNOWN_COUNTRY = "unknown_country"
+    UNCHECKED = "unchecked"
+    """No usable coordinate, so there was nothing to check."""
+
+
+def place(locations: Sequence[Mapping[str, Any]], screen: CountryScreen) -> list[Placement]:
+    """Screen every row at once, a country at a time."""
+    placements = [Placement.UNCHECKED] * len(locations)
+    by_country: dict[str, list[int]] = {}
+    for index, location in enumerate(locations):
+        if _usable(location):
+            code = str(location.get("country_code") or "").strip().upper()
+            by_country.setdefault(code, []).append(index)
+    for code, members in by_country.items():
+        points = [(locations[index]["latitude"], locations[index]["longitude"]) for index in members]
+        answers = screen.within(code, points) if code else None
+        for position, index in enumerate(members):
+            if answers is None:
+                placements[index] = Placement.UNKNOWN_COUNTRY
+            elif answers[position]:
+                placements[index] = Placement.INSIDE
+            else:
+                placements[index] = Placement.OUTSIDE
+    return placements
+
+
+def _usable(location: Mapping[str, Any]) -> bool:
     latitude, longitude = location.get("latitude"), location.get("longitude")
     if latitude is None or longitude is None:
-        return None
-    minimum_latitude, maximum_latitude, minimum_longitude, maximum_longitude = bounds
+        return False
+    return not (Decimal(str(latitude)) == 0 and Decimal(str(longitude)) == 0)
+
+
+def _plain(value: Decimal) -> str:
+    text = format(Decimal(value), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _outside_reason(code: str, screen: CountryScreen) -> str:
+    # Kept under the 200 characters a staged row stores, so it is never cut.
     return (
-        minimum_latitude <= Decimal(str(latitude)) <= maximum_latitude
-        and minimum_longitude <= Decimal(str(longitude)) <= maximum_longitude
+        f"The coordinate is more than {_plain(screen.buffer_km)} km outside "
+        f"{screen.name(code) or code} ({code}), the country the row names. Correct "
+        "it or the Country code, or confirm the row in review if it is right."
+    )
+
+
+def unknown_country_reason(code: str) -> str:
+    """Why a row's country code stops its coordinate being checked, and what to do."""
+    if not code:
+        return (
+            "The row names no country, so its coordinate cannot be checked against "
+            "one. Fill in the Country column."
+        )
+    hint = COMMON_MISCODES.get(code)
+    meant = f" ({hint[1]} is {hint[0]})" if hint else ""
+    return (
+        f"{code!r} is not an ISO 3166-1 country code{meant}, so the coordinate "
+        "cannot be checked against a country. Correct the Country column."
     )
 
 
@@ -123,6 +189,10 @@ class Assignment:
     cohort: Cohort
     reason: str
     rule_version: str = COHORT_RULE_VERSION
+    #: Which rule decided, as a stable code, so a caller can act on the kind of
+    #: reason -- report every row outside its country, say -- without parsing
+    #: the sentence.
+    rule: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -131,15 +201,35 @@ class Assignment:
             "cohort": str(self.cohort),
             "reason": self.reason,
             "rule_version": self.rule_version,
+            "rule": self.rule,
         }
 
 
-def assign(location: Mapping[str, Any]) -> Assignment:
-    """Assign one location row to a cohort.
+def assign(location: Mapping[str, Any], *, screen: CountryScreen) -> Assignment:
+    """Assign one location row to a cohort; ``assign_all`` for more than one."""
+    return assign_all([location], screen=screen)[0]
 
-    ``needs_review`` is tested first and wins outright. A row a reviewer has
-    flagged does not become eligible because its precision happens to look
-    good: the flag is a person's judgement about the row, and precision is the
+
+def assign_all(
+    locations: Iterable[Mapping[str, Any]], *, screen: CountryScreen
+) -> list[Assignment]:
+    """Assign every row, screening the coordinates a country at a time."""
+    locations = list(locations)
+    placements = place(locations, screen)
+    return [
+        _assign(location, placement, screen)
+        for location, placement in zip(locations, placements, strict=True)
+    ]
+
+
+def _assign(
+    location: Mapping[str, Any], placement: Placement, screen: CountryScreen
+) -> Assignment:
+    """One row's cohort, given what the screen said about its coordinate.
+
+    ``needs_review`` wins over precision outright. A row a reviewer has flagged
+    does not become eligible because its precision happens to look good: the
+    flag is a person's judgement about the row, and precision is the
     provider's about the match.
     """
     business_id = str(location.get("business_id") or "").strip()
@@ -147,17 +237,21 @@ def assign(location: Mapping[str, Any]) -> Assignment:
         location_number = int(location.get("location_number") or 0)
     except (TypeError, ValueError):
         location_number = 0
+    code = str(location.get("country_code") or "").strip().upper()
 
-    def made(cohort: Cohort, reason: str) -> Assignment:
-        return Assignment(business_id, location_number, cohort, reason)
+    def made(cohort: Cohort, rule: str, reason: str) -> Assignment:
+        return Assignment(business_id, location_number, cohort, reason, rule=rule)
 
     latitude = location.get("latitude")
     longitude = location.get("longitude")
     if latitude is None or longitude is None:
-        return made(Cohort.UNCLASSIFIED, "The row has no usable coordinate pair.")
+        return made(
+            Cohort.UNCLASSIFIED, "no_coordinates", "The row has no usable coordinate pair."
+        )
     if Decimal(str(latitude)) == 0 and Decimal(str(longitude)) == 0:
         return made(
             Cohort.UNCLASSIFIED,
+            "null_island",
             "The coordinate is (0, 0), which is a failed geocode rather than a place.",
         )
 
@@ -165,45 +259,34 @@ def assign(location: Mapping[str, Any]) -> Assignment:
     # in the wrong country is wrong however confident the provider was and
     # whatever nobody flagged. Two rows in the 30 June 2026 extract reach
     # street or better precision, carry no review flag, and sit on another
-    # continent.
-    consistent = within_stated_country(location)
-    if consistent is False:
-        return made(
-            Cohort.UNCLASSIFIED,
-            f"The coordinate is outside {location.get('country_code')}, so it does "
-            "not describe the risk the row names.",
-        )
+    # continent. A code that names no country is the same kind of mistake:
+    # nothing can be said about where the risk is until it is corrected.
+    if placement is Placement.OUTSIDE:
+        return made(Cohort.UNCLASSIFIED, "outside_country", _outside_reason(code, screen))
+    if placement is Placement.UNKNOWN_COUNTRY:
+        return made(Cohort.UNCLASSIFIED, "unknown_country", unknown_country_reason(code))
 
     if _is_yes(location.get("needs_review")):
-        return made(Cohort.C, "A reviewer has flagged this location for review.")
-
-    if consistent is None:
-        return made(
-            Cohort.UNCLASSIFIED,
-            "No country screen exists for "
-            f"{location.get('country_code') or 'an unnamed country'}, so the "
-            "coordinate could not be checked against it.",
-        )
+        return made(Cohort.C, "review_flag", "A reviewer has flagged this location for review.")
 
     precision = str(location.get("precision") or "").strip().lower()
     if precision in PRECISE:
         return made(
             Cohort.A,
+            "precise",
             f"No review needed and the geocode resolves to {precision} precision.",
         )
     if precision in COARSE:
         return made(
             Cohort.B,
+            "coarse",
             f"No review needed, but the geocode resolves only to {precision} precision.",
         )
     return made(
         Cohort.UNCLASSIFIED,
+        "unknown_precision",
         f"Geocode precision {precision or 'unknown'!r} is not a recognised level.",
     )
-
-
-def assign_all(locations: Iterable[Mapping[str, Any]]) -> list[Assignment]:
-    return [assign(location) for location in locations]
 
 
 @dataclasses.dataclass(slots=True)

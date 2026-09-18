@@ -37,6 +37,43 @@ SHARED_LAT = Decimal("-6.200000")
 SHARED_LON = Decimal("106.800000")
 
 
+class BoxScreen:
+    """A country screen for the rules' own tests: one box per country.
+
+    The real outlines are tested where they live, in the keys service. Here what
+    matters is what the rules do with an answer, so the answers are simple and
+    every call is counted.
+    """
+
+    buffer_km = Decimal("5")
+    source = "test boxes"
+    boxes = {
+        "ID": (-11.5, 6.5, 94.5, 141.5),
+        "NP": (26.0, 30.7, 79.9, 88.4),
+    }
+    names = {"ID": "Indonesia", "NP": "Nepal"}
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def within(self, code: str, points) -> list[bool] | None:
+        self.calls.append(code)
+        box = self.boxes.get(code)
+        if box is None:
+            return None
+        south, north, west, east = box
+        return [
+            south <= float(latitude) <= north and west <= float(longitude) <= east
+            for latitude, longitude in points
+        ]
+
+    def name(self, code: str) -> str | None:
+        return self.names.get(code)
+
+
+SCREEN = BoxScreen()
+
+
 def priced(policy_id: str, business_id: str, policy_tiv: str, **extra: Any) -> dict[str, Any]:
     """One policy as the allocation engine reads it.
 
@@ -383,6 +420,8 @@ def structural_template() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 def as_template(
     risks: list[dict[str, Any]] | None = None,
     policies: list[dict[str, Any]] | None = None,
+    contracts: list[dict[str, Any]] | None = None,
+    scope: list[dict[str, Any]] | None = None,
 ) -> bytes:
     """Write rows to a real intake workbook, so the reader is tested on its own path."""
     from cass_extract import template
@@ -393,4 +432,90 @@ def as_template(
         project_reference="idn-fac-2026",
         risks=risks or [],
         policies=policies or [],
+        contracts=contracts or [],
+        scope=scope or [],
     )
+
+
+def layer_row(
+    account: str,
+    reference: str,
+    layer: int,
+    *,
+    attachment: str,
+    limit: str,
+    share: str = "1",
+    deductible: str = "",
+    total: str = "",
+    **extra: Any,
+) -> dict[str, Any]:
+    """One layer of one policy, with the terms that let insured loss be calculated."""
+    return policy_row(
+        account,
+        reference,
+        total,
+        **{
+            "Layer": str(layer),
+            "Layer attachment": attachment,
+            "Layer limit": limit,
+            "Signed share": share,
+            "Policy deductible": deductible,
+            **extra,
+        },
+    )
+
+
+def contract_row(number: int, layer: int, kind: str, priority: int, **terms: str) -> dict[str, Any]:
+    """One layer of one reinsurance contract, in template column names."""
+    return {
+        "Contract number": str(number),
+        "Layer": str(layer),
+        "Contract type": kind,
+        "Inuring priority": str(priority),
+        **terms,
+    }
+
+
+def financial_template() -> tuple[list[dict[str, Any]], ...]:
+    """A small book with every kind of financial term the template carries.
+
+    Three accounts, all in cohort A Fire: a single risk with one layer at a 20%
+    signed share, a single risk with two layers and a deductible of its own,
+    and a two-site account valued on its policy. Then a 30% quota share on the
+    first account and a two-layer catastrophe excess over the whole portfolio,
+    written the way the template's example rows show it.
+    """
+    risks = [
+        risk_row("F-ONE", "1", "-6.200000", "106.800000", total="1000000.00"),
+        risk_row(
+            "F-TWO", "1", "-6.210000", "106.810000", total="2000000.00",
+            **{"Risk deductible": "10000.00"},
+        ),
+        risk_row("F-MULTI", "1", "-6.220000", "106.820000"),
+        risk_row("F-MULTI", "2", "-6.230000", "106.830000", primary="No"),
+    ]
+    policies = [
+        layer_row("F-ONE", "P-1", 1, attachment="0", limit="1000000.00", share="0.2",
+                  deductible="25000.00"),
+        layer_row("F-TWO", "P-2", 1, attachment="0", limit="500000.00", deductible="50000.00"),
+        layer_row("F-TWO", "P-2", 2, attachment="500000.00", limit="1500000.00", share="0.5",
+                  deductible="50000.00"),
+        layer_row("F-MULTI", "P-3", 1, attachment="0", limit="3000000.00", total="3000000.00"),
+    ]
+    contracts = [
+        contract_row(1, 1, "QS", 1, **{"Ceded share": "0.3", "Contract name": "Quota share"}),
+        contract_row(2, 1, "CXL", 2, **{
+            "Attachment per event": "100000.00", "Limit per event": "400000.00",
+            "Reinstatements": "2", "Reinstatement rate": "1.25;1",
+            "Reinstatement premium": "150000.00",
+        }),
+        contract_row(2, 2, "CXL", 2, **{
+            "Attachment per event": "500000.00", "Limit per event": "1000000.00",
+            "Placed share": "0.85",
+        }),
+    ]
+    scope = [
+        {"Contract number": "1", "Policy ID": "F-ONE"},
+        {"Contract number": "2"},
+    ]
+    return risks, policies, contracts, scope

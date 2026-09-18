@@ -4,7 +4,17 @@ import { Link } from "react-router-dom";
 
 import { Notice } from "@/components/primitives";
 
-import { Card, Step, Steps, Bullets, Api, GuideTable, GlossaryLink } from "./parts";
+import {
+  Card,
+  Step,
+  Steps,
+  Bullets,
+  Api,
+  GuideTable,
+  GlossaryLink,
+  Example,
+  SectionLink,
+} from "./parts";
 
 export function Portfolio() {
   return (
@@ -94,16 +104,23 @@ export function Portfolio() {
                   </td>
                   <td>
                     Blank coordinates, or 0 and 0, make the row unclassified, and an
-                    unclassified row can never be promoted.
+                    unclassified row is left out of every promotion until the workbook is
+                    corrected and imported again.
                   </td>
                 </tr>
                 <tr>
                   <th scope="row">Country</th>
                   <td>The two-letter ISO code, such as ID.</td>
                   <td>
-                    CASS checks the coordinates fall inside the country. It can only do that
-                    for Indonesia (ID) and Nepal (NP) today; a row in any other country is
-                    unclassified, however good its data.
+                    CASS checks the coordinates fall inside the country, or within 5 km of
+                    its coast or border, against country outlines it ships with for every
+                    ISO code. A row further out is unclassified and listed under{" "}
+                    <strong>What the workbook check found</strong>. Correct the coordinate
+                    or the code and import again; or, if the coordinate is right (an
+                    offshore platform, say), confirm the row into a cohort in the review
+                    queue and record why. A code that is not an ISO code, such as{" "}
+                    <span className="mono">UK</span> for the United Kingdom (
+                    <span className="mono">GB</span>), makes the row unclassified too.
                   </td>
                 </tr>
                 <tr>
@@ -190,7 +207,207 @@ export function Portfolio() {
                 <strong>Policy ID</strong> joins a property to its policy row, and{" "}
                 <strong>Risk reference</strong> identifies the property itself.
               </li>
+              <li>
+                <strong>Deductibles and limits.</strong> There are two places for them: Risk
+                deductible and Risk limit on the Risks sheet, and Policy deductible and Policy
+                limit on the Policies sheet. CASS takes the risk&apos;s deductible off first, then
+                the policy&apos;s deductible off what is left. So for a policy that covers{" "}
+                <strong>one property</strong>, which is most policies, fill in the Policies sheet
+                only and leave the two risk columns blank. Written in both places, the same
+                deductible is taken off twice. Use the risk columns only when a policy covers
+                several properties that each have their own deductible or limit.
+              </li>
+              <li>
+                <strong>Layer</strong>: a policy with more than one layer has one row per layer
+                on the Policies sheet, each with the same Policy ID and Policy reference. Repeat
+                the policy deductible and limit on every layer&apos;s row, because each layer
+                reads them from its own row.
+              </li>
+              <li>
+                <strong>Layer attachment</strong> and <strong>Layer limit</strong>: fill in
+                both on every policy row. Write 0 as the attachment of a layer that pays from
+                the first loss, and the sum insured as the limit when the policy is a share
+                of the whole risk rather than of a layer. A blank is written as blank, which
+                the loss engine reads as no limit and no attachment: that policy&apos;s
+                insured loss becomes its ground-up loss. CASS still models it, and lists it
+                as <strong>possibly overstated</strong> on the portfolio and beside every
+                insured and net-of-reinsurance result.
+              </li>
+              <li>
+                <strong>Reinsurance contracts</strong> and <strong>Reinsurance scope</strong>{" "}
+                sheets: fill these in only if the portfolio is reinsured. The contracts sheet
+                has one row per layer of each contract. The scope sheet says what each
+                contract covers, once per contract: a row with only the contract number
+                covers the whole portfolio, and a row with a Policy ID covers that policy. The
+                contract types CASS applies are quota share (QS), surplus share (SS) and
+                catastrophe excess of loss (CXL). See the example below.
+              </li>
             </Bullets>
+            <Example title="A policy with one property: where the deductible goes">
+              <p>
+                An earthquake causes 120,000 of damage to a property. Its policy has a
+                deductible of 25,000.
+              </p>
+              <p>
+                Written on the Policies sheet only, the insurance pays 120,000 − 25,000 ={" "}
+                <strong>95,000</strong>. Written on both sheets, it is taken off twice and the
+                insurance pays 120,000 − 25,000 − 25,000 = <strong>70,000</strong>, which is
+                25,000 too little. CASS warns when a single-property policy has a deductible on
+                both sheets.
+              </p>
+            </Example>
+            <Example title="A policy with one property and two layers">
+              <p>
+                A warehouse has a building value of 8,000,000 and a contents value of
+                2,000,000. It is the only property on its policy, and the policy has two
+                layers, so it takes <strong>one row on the Risks sheet</strong> and{" "}
+                <strong>two rows on the Policies sheet</strong>:
+              </p>
+              <GuideTable>
+                <thead>
+                  <tr>
+                    <th scope="col">Policy ID</th>
+                    <th scope="col">Policy reference</th>
+                    <th scope="col">Layer</th>
+                    <th scope="col">Layer attachment</th>
+                    <th scope="col">Layer limit</th>
+                    <th scope="col">Signed share</th>
+                    <th scope="col">Policy deductible</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="mono">2026_06_PFAC8716</td>
+                    <td className="mono">P-10802-01</td>
+                    <td>1</td>
+                    <td>0</td>
+                    <td>3,000,000</td>
+                    <td>0.2</td>
+                    <td>100,000</td>
+                  </tr>
+                  <tr>
+                    <td className="mono">2026_06_PFAC8716</td>
+                    <td className="mono">P-10802-01</td>
+                    <td>2</td>
+                    <td>3,000,000</td>
+                    <td>7,000,000</td>
+                    <td>0.1</td>
+                    <td>100,000</td>
+                  </tr>
+                </tbody>
+              </GuideTable>
+              <p>An earthquake causes 6,000,000 of damage to the warehouse.</p>
+              <ol className="guide-numbered">
+                <li>The policy deductible comes off: 6,000,000 − 100,000 = 5,900,000.</li>
+                <li>
+                  Layer 1 pays the part of that from 0 to 3,000,000, at a 20% share: 3,000,000 ×
+                  0.2 = <strong>600,000</strong>.
+                </li>
+                <li>
+                  Layer 2 pays the part from 3,000,000 up to 10,000,000 (its attachment plus its
+                  limit), at a 10% share: (5,900,000 − 3,000,000) × 0.1 ={" "}
+                  <strong>290,000</strong>.
+                </li>
+                <li>The insured loss is 600,000 + 290,000 = <strong>890,000</strong>.</li>
+              </ol>
+              <p>
+                Both layers look at the same 5,900,000; layer 2 does not wait for layer 1 to
+                be used up. If the deductible were written on layer 1&apos;s row only, layer 2
+                would work from the full 6,000,000 and pay 300,000, so the insured loss would
+                come to 900,000. These figures were checked by running the same rows through
+                the loss engine.
+              </p>
+            </Example>
+            <Example title="A quota share and a two-layer catastrophe programme">
+              <p>
+                The template&apos;s own example rows show this programme. A 30% quota share
+                covers one policy and applies first. Then a catastrophe excess of loss in two
+                layers covers the whole portfolio: 20,000,000 in excess of 5,000,000, and
+                50,000,000 in excess of 25,000,000 with 85% of it placed. The Reinsurance
+                contracts sheet has three rows:
+              </p>
+              <GuideTable>
+                <thead>
+                  <tr>
+                    <th scope="col">Contract number</th>
+                    <th scope="col">Layer</th>
+                    <th scope="col">Contract type</th>
+                    <th scope="col">Inuring priority</th>
+                    <th scope="col">Ceded share</th>
+                    <th scope="col">Placed share</th>
+                    <th scope="col">Attachment per event</th>
+                    <th scope="col">Limit per event</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td>1</td>
+                    <td>QS</td>
+                    <td>1</td>
+                    <td>0.3</td>
+                    <td>1</td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <td>2</td>
+                    <td>1</td>
+                    <td>CXL</td>
+                    <td>2</td>
+                    <td></td>
+                    <td>1</td>
+                    <td>5,000,000</td>
+                    <td>20,000,000</td>
+                  </tr>
+                  <tr>
+                    <td>2</td>
+                    <td>2</td>
+                    <td>CXL</td>
+                    <td>2</td>
+                    <td></td>
+                    <td>0.85</td>
+                    <td>25,000,000</td>
+                    <td>50,000,000</td>
+                  </tr>
+                </tbody>
+              </GuideTable>
+              <p>The Reinsurance scope sheet has two:</p>
+              <GuideTable>
+                <thead>
+                  <tr>
+                    <th scope="col">Contract number</th>
+                    <th scope="col">Policy ID</th>
+                    <th scope="col">What it means</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td className="mono">2026_06_PFAC8716</td>
+                    <td>The quota share covers this policy only.</td>
+                  </tr>
+                  <tr>
+                    <td>2</td>
+                    <td></td>
+                    <td>Both layers of contract 2 cover the whole portfolio.</td>
+                  </tr>
+                </tbody>
+              </GuideTable>
+              <p>
+                The two catastrophe layers share contract number 2 and inuring priority 2.
+                That makes them one programme: both look at the same loss, the one left after
+                the quota share, and each pays its own slice. If layer 2 had priority 3, it
+                would only see what layer 1 left, and would usually pay nothing.
+              </p>
+              <p>
+                The example rows also fill in the three reinstatement columns: the first
+                layer has 2 reinstatements at a rate of 1 (100%) on a reinstatement premium of
+                900,000, and the second has 1 at 100% on 450,000. The loss engine ignores
+                these; a run with limited cover applies them (see{" "}
+                <SectionLink section="run">Run and read results</SectionLink>).
+              </p>
+            </Example>
             <Notice tone="warning" title="Two things this route fixes for you">
               <p>
                 However you fill the template in, promotion records{" "}
@@ -334,7 +551,8 @@ export function Portfolio() {
                 <strong>Geocoding-sensitivity cohort</strong> (B, the approximate ones) and{" "}
                 <strong>Analyst-review backlog</strong> (C, the flagged ones). The hint under
                 the field says how many properties the chosen group holds. Unclassified rows
-                are not offered, and can never be promoted.
+                are not offered. A row a reviewer has confirmed into a cohort, with a reason,
+                is promoted with that cohort.
               </li>
               <li>
                 <strong>Country</strong>: a model version covers one country, so a portfolio
@@ -356,18 +574,45 @@ export function Portfolio() {
                 <strong>Occupancy</strong>: what to assume a building is used for, where the
                 spreadsheet does not say.
               </li>
+              <li>
+                <strong>Policy terms and reinsurance</strong>: what to do with the Policies
+                and reinsurance sheets. The hint under the field says how many Policy IDs
+                have a layer attachment and limit on every row, and how many reinsurance
+                contracts the workbook holds.
+                <Bullets>
+                  <li>
+                    <strong>Apply them, flagging policies with no limit</strong> (the normal
+                    choice) writes every policy&apos;s terms and the reinsurance. A policy
+                    with no limit, no attachment or no row on the Policies sheet keeps its
+                    ground-up loss as insured loss. It is not left out, because leaving it
+                    out would understate the book; it is listed as possibly overstated
+                    instead.
+                  </li>
+                  <li>
+                    <strong>Leave them out: ground-up loss only</strong> ignores the
+                    policy terms and the reinsurance sheets.
+                  </li>
+                </Bullets>
+              </li>
             </Bullets>
             <p>
-              The last two are only used to fill gaps: anything your spreadsheet does state
-              is never overwritten. Press{" "}
-              <strong>Promote to an exposure version</strong>. This creates the portfolio as
-              a draft.
+              Coverage split and Occupancy are only used to fill gaps: anything your
+              spreadsheet does state is never overwritten. Press{" "}
+              <strong>Promote to an exposure version</strong>. CASS writes the OED files,
+              checks them, and publishes the portfolio in one step. If a reinsurance
+              contract breaks the contract rules, nothing is promoted and the message says
+              which contract and why; the same problems are listed in the import&apos;s
+              findings as soon as you upload the workbook.
             </p>
           </Step>
-          <Step number={9} title="Validate and publish the portfolio">
+          <Step number={9} title="Check what was written" where="Exposure → Portfolios, then Financial structure">
             <p>
-              Follow the link in the green message, or go to Exposure → Portfolios and click
-              the portfolio. Then continue from step 3 of Route B below.
+              The green message says what was written: how many policies, how many
+              reinsurance contract layers, and which policies may be overstated. Follow its link, or go to Exposure → Portfolios
+              and click the portfolio. The <strong>Perspectives this data supports</strong>{" "}
+              card says which losses you can now calculate: ground-up, insured, and net of
+              reinsurance. The Financial structure tab shows the policies and contracts
+              exactly as they will be applied.
             </p>
           </Step>
         </Steps>
@@ -446,6 +691,12 @@ export function Portfolio() {
             <strong>financial structure</strong>.
           </p>
           <p>
+            If you brought the portfolio in with the intake template and filled in its
+            Policies and reinsurance sheets, this is already done: promotion writes them.
+            The screen below is for a portfolio uploaded as OED files without them, or for
+            adding to one.
+          </p>
+          <p>
             You can only add these to a <strong>draft</strong> portfolio. If the portfolio is
             already published, press <strong>Correct in a new version</strong> first.
           </p>
@@ -472,7 +723,12 @@ export function Portfolio() {
               </li>
               <li>
                 <strong>Policy deductible</strong>: the amount the customer pays before the
-                policy pays anything. Leave it empty if there is none.
+                policy pays anything. Leave it empty if there is none. If the account has only
+                one property and your location file already gives that property a deductible,
+                leave this empty too: CASS takes off the property&apos;s deductible and then the
+                policy&apos;s, so the same amount would come off twice. If both are filled in,
+                the portfolio&apos;s Validation findings show a warning. You do not need to repeat
+                the deductible for each layer; CASS writes it on every layer for you.
               </li>
               <li>
                 For each <strong>layer</strong> of cover: the <strong>attachment</strong>{" "}

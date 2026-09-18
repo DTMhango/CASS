@@ -42,8 +42,14 @@ class ResultSet(BaseModel, FreezableModel):
             # Oasis's reinsurance stream is what is retained after the treaties,
             # not what they ceded.
             ("reinsurance", "Loss net of reinsurance"),
+            # The same, computed by CASS with each catastrophe layer's
+            # reinstatements and their premiums (ADR 24).
+            ("ri_terms", "Loss net of reinsurance, cover limited by contract terms"),
         ],
     )
+    #: For a result computed with limited cover: each layer's recoveries and
+    #: premiums, the engine-basis check, and what the calculation assumed.
+    cover_detail = models.JSONField(default=dict, blank=True)
     state = models.CharField(
         max_length=16, choices=ResultState.choices, default=ResultState.DRAFT
     )
@@ -140,6 +146,7 @@ class ResultSet(BaseModel, FreezableModel):
             "peril_scope": self.peril_scope,
             "material_exclusions": self.material_exclusions,
             "uncertainty_attribution": self.uncertainty_attribution,
+            "cover_detail": self.cover_detail,
         }
 
 

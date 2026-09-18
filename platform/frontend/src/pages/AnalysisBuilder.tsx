@@ -95,6 +95,7 @@ export function AnalysisBuilder() {
   const [profile, setProfile] = useState("");
   const [assumptionSet, setAssumptionSet] = useState("");
   const [mode, setMode] = useState<RunMode>("technical");
+  const [cover, setCover] = useState("engine");
 
   const exposure = exposures?.find((item) => item.id === context.exposureId);
   const model = models?.find((item) => item.id === context.modelId);
@@ -174,6 +175,7 @@ export function AnalysisBuilder() {
         execution_profile: profile || undefined,
         assumption_set: chosenSet?.id,
         mode: chosenMode,
+        reinsurance_cover: context.perspective === "reinsurance" ? cover : undefined,
       });
       await submit.mutateAsync(analysis.id);
       navigate(`/runs/${analysis.run}`);
@@ -310,6 +312,27 @@ export function AnalysisBuilder() {
               ))}
             </Select>
           </Field>
+
+          {context.perspective === "reinsurance" ? (
+            <Field
+              label="Reinsurance cover"
+              htmlFor="builder-cover"
+              hint="The engine pays each catastrophe layer in full on every event, as though reinstatements were unlimited and free. Limited cover also works out the net loss with each layer's reinstatements and their premiums, and shows it beside the engine's. It adds a year-by-year loss table to the run's output."
+            >
+              <Select
+                id="builder-cover"
+                value={cover}
+                onChange={(event) => setCover(event.target.value)}
+              >
+                <option value="engine">
+                  As the engine applies it: every event in full, no annual limit
+                </option>
+                <option value="contract_terms">
+                  Limited by contract terms: reinstatements and their premiums
+                </option>
+              </Select>
+            </Field>
+          ) : null}
 
           <Field
             label="Resource profile"

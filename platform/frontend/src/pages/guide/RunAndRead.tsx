@@ -2,7 +2,19 @@
 
 import { Link } from "react-router-dom";
 
-import { Card, Step, Steps, Bullets, Api, SectionLink, Terms, GuideTable, Term, GlossaryLink } from "./parts";
+import {
+  Card,
+  Step,
+  Steps,
+  Bullets,
+  Api,
+  SectionLink,
+  Terms,
+  GuideTable,
+  Term,
+  GlossaryLink,
+  Example,
+} from "./parts";
 
 export function RunAndRead() {
   return (
@@ -144,6 +156,13 @@ export function RunAndRead() {
               Ground-up needs only the locations. Insured also needs the policies.
               Net of reinsurance also needs the reinsurance contracts. The checklist in step
               8 tells you if your portfolio does not have what the choice needs.
+            </p>
+            <p>
+              For net of reinsurance, a second field appears: <strong>Reinsurance cover</strong>.
+              Leave it at <strong>As the engine applies it</strong> for the loss engine&apos;s
+              own figure, or choose <strong>Limited by contract terms</strong> to have CASS also
+              apply each catastrophe layer&apos;s reinstatements and their premiums. The card{" "}
+              <strong>Reinstatements: limited cover</strong> below explains the difference.
             </p>
           </Step>
           <Step number={7} title="Choose the computing power, and name the run" where="Resource profile and Run name">
@@ -377,6 +396,98 @@ export function RunAndRead() {
         </Steps>
       </Card>
 
+      <Card title="Reinstatements: limited cover">
+        <div className="guide-prose">
+          <p>
+            A catastrophe excess of loss layer pays up to its limit for an event. Once it has
+            paid, it is <strong>reinstated</strong> (its limit restored) for the rest of the
+            year, but only as many times as the contract allows, and each reinstatement costs
+            a premium. The loss engine does not model this: it pays every layer in full on
+            every event, however many events a year holds, as though reinstatements were
+            unlimited and free. That can make the loss kept look smaller than it is in years
+            with several large earthquakes.
+          </p>
+          <p>
+            When you choose <strong>Limited by contract terms</strong>, CASS works through
+            each imagined year in turn and applies every layer&apos;s real terms: its
+            reinstatements (from the <strong>Reinstatements</strong> column), the rate of each
+            (<strong>Reinstatement rate</strong>) and the premium they are charged on (
+            <strong>Reinstatement premium</strong>, normally the layer&apos;s MDP at 100%). The
+            premium for restoring part of the layer is taken off the recovery it restores.
+          </p>
+        </div>
+        <Example title="One layer, two earthquakes in a year">
+          <p>
+            A layer of 10,000,000 in excess of 5,000,000 has one reinstatement at 100% on a
+            premium of 1,000,000. In one year, two earthquakes put 12,000,000 and then
+            20,000,000 into it.
+          </p>
+          <GuideTable>
+            <thead>
+              <tr>
+                <th scope="col">Event</th>
+                <th scope="col">Recovered</th>
+                <th scope="col">Reinstatement premium</th>
+                <th scope="col">Net recovered</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>First</td>
+                <td>7,000,000</td>
+                <td>7/10 × 1,000,000 = 700,000</td>
+                <td>6,300,000</td>
+              </tr>
+              <tr>
+                <td>Second</td>
+                <td>10,000,000</td>
+                <td>only 3,000,000 of reinstatement is left: 300,000</td>
+                <td>9,700,000</td>
+              </tr>
+            </tbody>
+          </GuideTable>
+          <p>
+            The layer has now paid 17,000,000 of its 20,000,000 for the year, so a third
+            earthquake could recover at most 3,000,000. The loss engine would show 17,000,000
+            recovered and no premium, and would pay a third earthquake in full.
+          </p>
+        </Example>
+        <div className="guide-prose">
+          <p>
+            The result appears as a second net-of-reinsurance result, labelled{" "}
+            <strong>limited cover</strong>, beside the engine&apos;s own. Its panel shows, for
+            each layer, what it recovers a year with its limits and as the engine pays it, the
+            reinstatement premium a year, and how often it runs out of cover. It also shows a
+            check: CASS works out the engine&apos;s figure itself, from the same losses, and
+            says whether it matches. If it does not, the panel says so in amber, and the
+            result should not be relied on until the difference is understood.
+          </p>
+          <p>Four things to know:</p>
+        </div>
+        <Bullets>
+          <li>
+            It applies to programmes of catastrophe excess of loss contracts only. A quota
+            share or surplus share in the programme is refused with the reason, before the
+            run starts.
+          </li>
+          <li>
+            A layer whose Reinstatements cell is blank is applied as the engine applies it,
+            and the result lists it. Write 0 for a layer that pays its limit once a year.
+          </li>
+          <li>
+            Within a year, earthquakes are applied in the order of their event numbers,
+            because the imagined catalogue does not give them dates. This can change the
+            largest single loss of a year once a layer runs out, but never the year&apos;s
+            total.
+          </li>
+          <li>
+            A warranty such as &ldquo;two or more risks must be involved&rdquo; is not
+            modelled, so recoveries from an earthquake that damages only one property may be
+            overstated.
+          </li>
+        </Bullets>
+      </Card>
+
       <Card title="Reading the numbers with care">
         <div className="guide-prose">
           <p>Four things are easy to miss and change how much weight a number can bear.</p>
@@ -416,7 +527,9 @@ export function RunAndRead() {
           </li>
           <li>
             <strong>&ldquo;Net of reinsurance&rdquo; is what the insurer keeps.</strong> The
-            amount the reinsurers pay is the insured loss minus this figure.
+            amount the reinsurers pay is the insured loss minus this figure. The engine&apos;s
+            own figure treats reinstatements as unlimited and free; the limited-cover result
+            does not.
           </li>
         </Bullets>
       </Card>

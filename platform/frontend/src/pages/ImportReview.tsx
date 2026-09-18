@@ -43,7 +43,9 @@ import {
 import type {
   AllocationScenario,
   BusinessMateriality,
+  ImportFinancialStructure,
   ImportResults,
+  IntakeFinding,
   PortfolioImport,
   QueuedLocation,
   UUID,
@@ -87,6 +89,36 @@ const FIELD_LABELS: Record<string, string> = {
   construction: "Construction",
   storeys: "Storeys",
 };
+
+/** Plain names for what the import can find, by the code it reports. */
+const FINDING_LABELS: Record<string, string> = {
+  coordinate_outside_country: "Coordinate outside its country",
+  unknown_country_code: "Country code not recognised",
+  missing_value: "Required value missing",
+  unreadable_value: "Value that could not be read",
+  duplicate_risk: "Risk listed twice",
+  duplicate_policy: "Policy row listed twice",
+  risk_without_policy: "Risks with no policy",
+  policy_without_risks: "Policies with no risks",
+  no_value_to_allocate: "No value to allocate",
+  construction_without_occupancy: "Construction without occupancy",
+  policy_terms_incomplete: "Policy terms incomplete",
+  layer_terms_differ: "Layers that disagree",
+  deductible_on_both_sheets: "Deductible on both sheets",
+  contract_refused: "Reinsurance contract refused",
+  duplicate_contract_layer: "Contract layer listed twice",
+  contract_layers_disagree: "Contract layers that disagree",
+  scope_without_contract: "Scope naming no contract",
+  contract_without_scope: "Contract with no scope",
+};
+
+/** Findings listed before the rest are folded away. */
+const FINDINGS_SHOWN = 20;
+
+function findingLabel(code: string): string {
+  const plain = code.replace(/_/g, " ");
+  return FINDING_LABELS[code] ?? plain.charAt(0).toUpperCase() + plain.slice(1);
+}
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
@@ -142,6 +174,7 @@ export function ImportReview({ embedded = false }: { embedded?: boolean } = {}) 
       {results.data ? (
         <>
           <Provenance results={results.data} />
+          <WorkbookFindings findings={results.data.findings ?? []} />
           <StoreyLever results={results.data} />
           <MissingInputs results={results.data} />
           <Included results={results.data} />
@@ -497,6 +530,7 @@ function PromotionPanel({
   const [split, setSplit] = useState("");
   const [occupancy, setOccupancy] = useState("");
   const [country, setCountry] = useState("");
+  const [terms, setTerms] = useState("");
 
   // A select shows its first option whether or not state holds it, so the
   // effective value is derived rather than read: otherwise the screen offers a
@@ -506,6 +540,14 @@ function PromotionPanel({
     catalogue.data?.allocation_methods?.find((item) => item.baseline)?.value ||
     catalogue.data?.allocation_methods?.[0]?.value ||
     "";
+
+  const termsValue =
+    terms ||
+    catalogue.data?.policy_terms?.find((item) => item.default)?.value ||
+    "auto";
+  const financial = results.intake_report?.financial_structure as
+    | ImportFinancialStructure
+    | undefined;
 
   const accepted = (batch?.state ?? results.batch.state) === "accepted";
   const error = (accept.error ?? promote.error) as ApiError | null;
@@ -662,7 +704,36 @@ function PromotionPanel({
                 ]}
               />
             </Field>
+
+            <Field
+              label="Policy terms and reinsurance"
+              htmlFor="promote-terms"
+              hint={termsHint(financial)}
+            >
+              <Select
+                id="promote-terms"
+                value={termsValue}
+                onChange={(event) => setTerms(event.target.value)}
+              >
+                {(catalogue.data?.policy_terms ?? []).map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
           </div>
+
+          {financial && financial.contract_layers_refused > 0 ? (
+            <Notice
+              tone="warning"
+              title={`${formatCount(financial.contract_layers_refused)} reinsurance contract layer(s) break the contract rules`}
+            >
+              A promotion that writes policy terms will be refused until they are
+              corrected in the workbook. The findings below say what each one needs. To
+              promote now, choose to leave the terms out.
+            </Notice>
+          ) : null}
 
           <Button
             variant="primary"
@@ -676,6 +747,7 @@ function PromotionPanel({
                 coverage_split: split || undefined,
                 occupancy: occupancy || undefined,
                 country: country || undefined,
+                policy_terms: termsValue,
               })
             }
             title={
@@ -689,17 +761,65 @@ function PromotionPanel({
 
           {promote.isSuccess ? (
             <Notice tone="ok" title="Promoted">
-              {promote.data.name} v{promote.data.version} was created with{" "}
-              {formatCount(promote.data.location_count)} location(s).{" "}
-              <Link to="/exposure">
-                Review it in the exposure workspace and publish it
-              </Link>{" "}
-              before an analysis uses it.
+              <p>
+                {promote.data.name} v{promote.data.version} was created and published
+                with {formatCount(promote.data.location_count)} location(s).{" "}
+                <Link to="/exposure">Open it in the exposure workspace</Link>.
+              </p>
+              {promote.data.financial_structure ? (
+                <p>
+                  Policy terms: {promote.data.financial_structure.reason}
+                  {promote.data.financial_structure.contract_layers_written > 0
+                    ? ` Reinsurance: ${formatCount(
+                        promote.data.financial_structure.contract_layers_written,
+                      )} contract layer(s) written.`
+                    : ""}{" "}
+                  {promote.data.financial_structure.reinsurance_note}
+                </p>
+              ) : null}
+              {promote.data.financial_structure?.possibly_overstated?.policy_ids.length ? (
+                <p>
+                  Possibly overstated:{" "}
+                  <span className="mono">
+                    {promote.data.financial_structure.possibly_overstated.policy_ids
+                      .slice(0, 10)
+                      .join(", ")}
+                  </span>
+                  {promote.data.financial_structure.possibly_overstated.policy_ids.length > 10
+                    ? ` and ${formatCount(
+                        promote.data.financial_structure.possibly_overstated.policy_ids.length - 10,
+                      )} more`
+                    : ""}
+                  , holding {formatMoney(promote.data.financial_structure.possibly_overstated.tiv)}{" "}
+                  of insured value. The full list is on the portfolio.
+                </p>
+              ) : null}
             </Notice>
           ) : null}
         </>
       )}
     </Card>
+  );
+}
+
+/** What the workbook's policy terms and reinsurance allow a promotion to write. */
+function termsHint(financial?: ImportFinancialStructure): string {
+  if (!financial || financial.policy_ids === 0) {
+    return "The workbook has no policy terms, so the version will be ground-up loss only.";
+  }
+  const reinsurance =
+    financial.contract_layers > 0
+      ? ` The reinsurance sheets hold ${formatCount(financial.contracts)} contract(s) in ${formatCount(financial.contract_layers)} layer(s).`
+      : "";
+  const flagged =
+    financial.policy_ids_without_terms > 0
+      ? ` The other ${formatCount(financial.policy_ids_without_terms)} keep their ground-up loss as insured loss and are flagged as possibly overstated.`
+      : "";
+  return (
+    `${formatCount(financial.policy_ids_with_terms)} of ${formatCount(financial.policy_ids)} ` +
+    "Policy IDs have a layer attachment and limit on every policy row." +
+    flagged +
+    reinsurance
   );
 }
 
@@ -745,6 +865,66 @@ function Provenance({ results }: { results: ImportResults }) {
         beside it and applied when a version is promoted, so this import keeps
         saying what the workbook said.
       </p>
+      {batch.current_cohort_rule_version &&
+      batch.cohort_rule_version !== batch.current_cohort_rule_version ? (
+        <Notice tone="warning" title="Read under earlier cohort rules">
+          This import was read under cohort rules {batch.cohort_rule_version}, and
+          CASS now applies {batch.current_cohort_rule_version}. Promotion uses the
+          cohorts shown here. To read the file under the current rules, import the
+          same workbook again: CASS reads it into a new import and keeps this one as
+          the record of the earlier read.
+        </Notice>
+      ) : null}
+    </Card>
+  );
+}
+
+/** What the import found in the workbook, and what each finding needs. */
+function WorkbookFindings({ findings }: { findings: IntakeFinding[] }) {
+  if (findings.length === 0) {
+    return (
+      <Card title="What the workbook check found">
+        <Notice tone="ok">Nothing to correct: every sheet read as expected.</Notice>
+      </Card>
+    );
+  }
+  const table = (items: IntakeFinding[]) => (
+    <table className="grid">
+      <thead>
+        <tr>
+          <th scope="col">Finding</th>
+          <th scope="col">Where</th>
+          <th scope="col">What it means and what to do</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((item, index) => (
+          <tr key={`${item.code}-${item.sheet}-${item.row_number}-${index}`}>
+            <td>{findingLabel(item.code)}</td>
+            <td>
+              {item.sheet}
+              {item.row_number ? `, row ${item.row_number}` : ""}
+            </td>
+            <td className="consequence">{item.message}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+  return (
+    <Card title="What the workbook check found">
+      <p className="muted">
+        Each finding names the sheet and the first row it applies to. Most are
+        corrected in the workbook, which is then imported again. A coordinate
+        outside its country can also be settled here: if it is right, confirm the
+        row into a cohort in the review queue below and record why.
+      </p>
+      {table(findings.slice(0, FINDINGS_SHOWN))}
+      {findings.length > FINDINGS_SHOWN ? (
+        <Disclosure summary={`${formatCount(findings.length - FINDINGS_SHOWN)} more`}>
+          {table(findings.slice(FINDINGS_SHOWN))}
+        </Disclosure>
+      ) : null}
     </Card>
   );
 }

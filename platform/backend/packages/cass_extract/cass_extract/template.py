@@ -44,11 +44,13 @@ def workbook(
     project_reference: str = "",
     risks: Sequence[Mapping[str, Any]] = (),
     policies: Sequence[Mapping[str, Any]] = (),
+    contracts: Sequence[Mapping[str, Any]] = (),
+    scope: Sequence[Mapping[str, Any]] = (),
     generated: dt.date | None = None,
 ) -> bytes:
     """A CASS intake workbook, blank or pre-filled.
 
-    ``risks`` and ``policies`` let the same generator produce a populated file:
+    The row arguments let the same generator produce a populated file:
     an export of what CASS holds, or a migration from another shape. A template
     and an export that disagreed about column order would be two formats
     wearing one name.
@@ -57,8 +59,13 @@ def workbook(
     book.remove(book.active)
 
     _guide(book, project_reference=project_reference, generated=generated)
-    _sheet(book, Sheet.RISK, risks)
-    _sheet(book, Sheet.POLICY, policies)
+    for sheet, rows in (
+        (Sheet.RISK, risks),
+        (Sheet.POLICY, policies),
+        (Sheet.CONTRACT, contracts),
+        (Sheet.SCOPE, scope),
+    ):
+        _sheet(book, sheet, rows)
 
     buffer = io.BytesIO()
     book.save(buffer)
@@ -83,28 +90,34 @@ def _sheet(book: Workbook, sheet: Sheet, rows: Iterable[Mapping[str, Any]]) -> N
     # A worked row, in the sheet rather than only in the guidance. It is the
     # first thing a person looks at, and a template that describes its columns
     # without showing one filled in is the template that comes back wrong. It
-    # says in its first cell that it must go, and the reader drops it anyway, so
-    # neither a careful nor a hurried user can turn it into exposure.
+    # says beside itself that it must go, and the reader drops it anyway, so
+    # neither a careful nor a hurried user can turn it into exposure. The
+    # reinsurance sheets show several, because a layered programme is two rows
+    # sharing a contract number and one row cannot show that.
     rows = list(rows)
     first_data_row = 2
     if not rows:
         # Only on a blank template. An export of a portfolio CASS already holds
         # is data, and a worked example sitting on top of it would be a row
         # somebody has to notice is not theirs.
-        for position, item in enumerate(columns, start=1):
-            cell = worksheet.cell(row=2, column=position, value=item.example)
-            cell.font = Font(italic=True, color="6B7280")
-            cell.fill = _EXAMPLE_FILL
-        # The marker goes beside the row rather than in its first cell, so
-        # every column still shows its own example -- including the Policy ID,
-        # which is the one most likely to come back in the wrong shape.
-        note = worksheet.cell(row=2, column=len(columns) + 1, value=EXAMPLE_MARKER)
-        note.font = Font(italic=True, bold=True, color="6B7280")
-        note.fill = _EXAMPLE_FILL
+        examples = profile.SHEET_EXAMPLES.get(sheet) or (
+            {item.name: item.example for item in columns},
+        )
+        for offset, example in enumerate(examples, start=2):
+            for position, item in enumerate(columns, start=1):
+                cell = worksheet.cell(row=offset, column=position, value=example.get(item.name, ""))
+                cell.font = Font(italic=True, color="6B7280")
+                cell.fill = _EXAMPLE_FILL
+            # The marker goes beside the row rather than in its first cell, so
+            # every column still shows its own example -- including the Policy
+            # ID, which is the one most likely to come back in the wrong shape.
+            note = worksheet.cell(row=offset, column=len(columns) + 1, value=EXAMPLE_MARKER)
+            note.font = Font(italic=True, bold=True, color="6B7280")
+            note.fill = _EXAMPLE_FILL
         worksheet.column_dimensions[get_column_letter(len(columns) + 1)].width = (
             len(EXAMPLE_MARKER) + 2
         )
-        first_data_row = 3
+        first_data_row = 2 + len(examples)
 
     for offset, row in enumerate(rows, start=first_data_row):
         for position, item in enumerate(columns, start=1):
@@ -139,12 +152,14 @@ def _guide(book: Workbook, *, project_reference: str, generated: dt.date | None)
     write(
         "One row per risk on the Risks sheet, one row per policy or layer on the "
         "Policies sheet. The Policy ID appears on both and is what joins them, so "
-        "it has to match exactly."
+        "it has to match exactly. The two reinsurance sheets are optional: fill "
+        "them in only if the portfolio is reinsured."
     )
     write()
     write(
-        "Both sheets open with a worked example row: shaded, with a note beside "
-        "it saying so. Type over it or delete it -- CASS ignores it either way."
+        "Every sheet opens with worked example rows: shaded, with a note beside "
+        "each saying so. Type over them or delete them -- CASS ignores them either "
+        "way."
     )
     write()
     write(
@@ -162,9 +177,47 @@ def _guide(book: Workbook, *, project_reference: str, generated: dt.date | None)
     )
     write()
     write(
-        "Policy terms are optional. Without them CASS reports ground-up loss and "
-        "says which perspectives the data does not support, rather than inventing "
-        "a deductible."
+        "Policy terms are optional. Without a Policies sheet CASS reports "
+        "ground-up loss only. With one, every policy is written as stated: a layer "
+        "with no limit pays the whole loss above its attachment, so its insured "
+        "loss is its ground-up loss, and CASS lists it as possibly overstated "
+        "beside every insured and net result. Write 0 as the attachment of a layer "
+        "that pays from the first loss, and the sum insured as the limit of a share "
+        "of a whole risk."
+    )
+    write()
+    write(
+        "Most policies cover one risk. For those, put the deductible and limit on "
+        "the Policies sheet only, and leave Risk deductible and Risk limit blank. "
+        "CASS takes a risk deductible off first and then the policy deductible off "
+        "what is left, so the same 25,000 written on both sheets is charged twice: "
+        "a 120,000 loss pays 70,000 instead of 95,000. Use the risk columns only "
+        "where a policy covers several properties that each carry their own terms."
+    )
+    write()
+    write(
+        "A policy with more than one layer has one row per layer on the Policies "
+        "sheet, all with the same Policy ID and Policy reference. Repeat the policy "
+        "deductible and limit on every layer's row: each layer reads them from its "
+        "own row, and a layer whose row leaves them blank is calculated without them."
+    )
+    write()
+    write(
+        "Reinsurance takes two sheets. Reinsurance contracts holds each contract's "
+        "terms, one row per layer: a two-layer catastrophe programme is two rows "
+        "with the same contract number, layer 1 and layer 2, and the same inuring "
+        "priority. Reinsurance scope says what each contract covers, once per "
+        "contract: a row with only the contract number covers the whole portfolio, "
+        "and a row naming a Policy ID covers that policy. The example rows show a "
+        "30% quota share on one policy, then a two-layer catastrophe excess of "
+        "loss over the whole portfolio."
+    )
+    write()
+    write(
+        "Reinsurance applies to insured loss, so CASS writes it only where it also "
+        "writes the policy terms. Contracts are checked against the same rules as "
+        "the Financial structure screen when the workbook is imported, and any "
+        "problem is listed then."
     )
     write()
 

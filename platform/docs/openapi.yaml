@@ -4996,6 +4996,10 @@ paths:
         ``country`` narrows the selection to one country, because a model
         version covers one. A business with sites in two is excluded from both
         rather than split, for the same reason a partial schedule is.
+
+        ``policy_terms`` says what to do with the workbook's policy terms and
+        reinsurance: ``apply`` writes them for every account, flagging those
+        with no limit as possibly overstated, and ``ground_up`` leaves them out.
       parameters:
       - in: path
         name: id
@@ -5416,10 +5420,12 @@ paths:
           - ground_up
           - insured
           - reinsurance
+          - ri_terms
         description: |-
           * `ground_up` - Ground-up loss
           * `insured` - Insured loss
           * `reinsurance` - Loss net of reinsurance
+          * `ri_terms` - Loss net of reinsurance, cover limited by contract terms
       - in: query
         name: project
         schema:
@@ -6646,6 +6652,14 @@ components:
         run_currency:
           type: string
           maxLength: 3
+        reinsurance_cover:
+          allOf:
+          - $ref: '#/components/schemas/ReinsuranceCoverEnum'
+          description: |-
+            How the reinsurance contracts' annual limits are read.
+
+            * `engine` - As the engine applies it: every event in full, no annual limit
+            * `contract_terms` - Limited by contract terms: reinstatements and their premiums
         oasis_analysis_id:
           type: string
           readOnly: true
@@ -6726,6 +6740,14 @@ components:
         run_currency:
           type: string
           maxLength: 3
+        reinsurance_cover:
+          allOf:
+          - $ref: '#/components/schemas/ReinsuranceCoverEnum'
+          description: |-
+            How the reinsurance contracts' annual limits are read.
+
+            * `engine` - As the engine applies it: every event in full, no annual limit
+            * `contract_terms` - Limited by contract terms: reinstatements and their premiums
         exception_approval:
           type: string
           format: uuid
@@ -7108,12 +7130,16 @@ components:
         occupancy_assumptions:
           type: array
           items: {}
+        policy_terms:
+          type: array
+          items: {}
       required:
       - allocation_methods
       - cohorts
       - coverage_splits
       - coverages
       - occupancy_assumptions
+      - policy_terms
     AssumptionSet:
       type: object
       properties:
@@ -9636,6 +9662,14 @@ components:
         run_currency:
           type: string
           maxLength: 3
+        reinsurance_cover:
+          allOf:
+          - $ref: '#/components/schemas/ReinsuranceCoverEnum'
+          description: |-
+            How the reinsurance contracts' annual limits are read.
+
+            * `engine` - As the engine applies it: every event in full, no annual limit
+            * `contract_terms` - Limited by contract terms: reinstatements and their premiums
         exception_approval:
           type: string
           format: uuid
@@ -10146,6 +10180,7 @@ components:
         uncertainty_attribution:
           description: Contribution of hazard, conversion, exposure, vulnerability
             and financial uncertainty.
+        cover_detail: {}
     PatchedUserAdministrationRequest:
       type: object
       description: |-
@@ -10239,11 +10274,13 @@ components:
       - ground_up
       - insured
       - reinsurance
+      - ri_terms
       type: string
       description: |-
         * `ground_up` - Ground-up loss
         * `insured` - Insured loss
         * `reinsurance` - Loss net of reinsurance
+        * `ri_terms` - Loss net of reinsurance, cover limited by contract terms
     PlatformInfo:
       type: object
       properties:
@@ -10388,6 +10425,14 @@ components:
         * `passed` - Passed
         * `failed` - Failed
         * `waived` - Waived with rationale
+    ReinsuranceCoverEnum:
+      enum:
+      - engine
+      - contract_terms
+      type: string
+      description: |-
+        * `engine` - As the engine applies it: every event in full, no annual limit
+        * `contract_terms` - Limited by contract terms: reinstatements and their premiums
     ResultComparison:
       type: object
       properties:
@@ -10528,6 +10573,7 @@ components:
         uncertainty_attribution:
           description: Contribution of hazard, conversion, exposure, vulnerability
             and financial uncertainty.
+        cover_detail: {}
         usable_for_decisions:
           type: boolean
           readOnly: true
@@ -10614,6 +10660,7 @@ components:
         uncertainty_attribution:
           description: Contribution of hazard, conversion, exposure, vulnerability
             and financial uncertainty.
+        cover_detail: {}
       required:
       - label
       - perspective

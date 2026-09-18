@@ -18,7 +18,7 @@ revisit it. A decision that cannot name its alternatives was not a decision.
 | [0008](0008-intensity-measures-as-area-peril-channels.md) | Intensity measures are carried as correlated area-peril channels | Accepted |
 | [0009](0009-cass-writes-the-oasis-package.md) | CASS writes the Oasis model package and ships its own lookup inside it | Accepted |
 | [0010](0010-patched-oasis-worker.md) | The Oasis worker image carries a build-time patch | Accepted |
-| [0011](0011-intake-template-and-policy-id.md) | Portfolios arrive through the CASS intake template, joined on Policy ID | Accepted |
+| [0011](0011-intake-template-and-policy-id.md) | Portfolios arrive through the CASS intake template, joined on Policy ID | Accepted, amended by 0023 |
 | [0012](0012-national-classical-model-run-event-based.md) | A published national hazard model is converted to an event-based run | Accepted |
 | [0013](0013-product-areas-hold-tabs.md) | A product area holds its screens as tabs | Accepted |
 | [0014](0014-assumption-sets-as-vulnerability-sets.md) | An assumption set is a vulnerability set the engine selects per analysis | Accepted |
@@ -30,6 +30,9 @@ revisit it. A decision that cannot name its alternatives was not a decision.
 | [0020](0020-grids-keep-land-and-settled-cells.md) | A grid keeps only cells on land and near settlement, and CASS ships seeds for ten countries | Accepted |
 | [0021](0021-ten-thousand-simulated-years.md) | A hazard run simulates ten thousand years by default, and the intensity ceilings are widened for it | Accepted |
 | [0022](0022-a-calculation-is-stored-once.md) | A calculation is stored once, streamed rather than held, and rebuilt rather than rerun | Accepted |
+| [0023](0023-the-template-carries-the-financial-structure.md) | The intake template carries the financial structure, and promotion writes it | Accepted, amended by 0024 |
+| [0024](0024-limited-cover-computed-beside-the-engine.md) | Limited reinsurance cover is computed by CASS, beside the engine's | Accepted |
+| [0025](0025-every-country-screened-against-its-outline.md) | Every country is screened against its outline, and a reviewer can overrule the screen | Accepted |
 
 Records 0007 to 0013 are where delivery moved the design away from build plan
 1.7. Plan 1.8 marks each affected statement *Changed in 1.8* and links here.

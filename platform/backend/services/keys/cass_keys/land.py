@@ -37,6 +37,14 @@ seconds at 1.4 km cells, so nothing is precomputed or stored.
 What it cannot see is land the map does not draw. Natural Earth draws 176 of the
 Maldives' roughly 1,190 islands, 110 km2 of its 298; a clip there would drop real
 islands, and the Maldivian seed does not clip for that reason.
+
+The same outlines screen a portfolio. Each coordinate is checked against the
+country its row names by the rule a grid keeps its cells by, so a location that
+passes is one that country's grid can hold. Every officially assigned ISO 3166-1
+code has an outline -- eleven of them inside another country's, such as Réunion
+inside France -- so the screen never has to say it does not know a country. A
+Maldivian coordinate is checked against the extent of the islands drawn, for the
+reason the seed does not clip. That is ``within``, at the end of this module.
 """
 
 from __future__ import annotations
@@ -226,8 +234,16 @@ def _countries() -> dict[str, Country]:
 
     found = {}
     for code, members in grouped.items():
-        # The sovereign record names the country; its dependencies follow.
-        members.sort(key=lambda item: (item[0].get("ISO_A2") != code, item[0].get("NAME", "")))
+        # The sovereign record names the country; its dependencies follow. The
+        # type is tested first because ``ISO_A2`` alone cannot tell them apart
+        # where it is -99 for both: France and Clipperton Island.
+        members.sort(
+            key=lambda item: (
+                item[0].get("TYPE") == "Dependency",
+                item[0].get("ISO_A2") != code,
+                item[0].get("NAME", ""),
+            )
+        )
         rings = tuple(ring for _, parts in members for ring in parts)
         longitudes = [ring[:, 0] for ring in rings]
         latitudes = [ring[:, 1] for ring in rings]
@@ -421,3 +437,146 @@ def land_mask(
         first_column=first_column,
         kept=trimmed,
     )
+
+
+# -- whether a coordinate is in the country its row names ----------------------
+
+#: ISO 3166-1 codes Natural Earth draws inside another country's outline rather
+#: than under a code of their own, with the name a message should use. Checked
+#: against the 1:10m Admin 0 archive this module ships: every other officially
+#: assigned code is drawn under itself, so with these every code has an outline.
+DRAWN_WITHIN: Mapping[str, tuple[str, str]] = {
+    "BQ": ("NL", "Bonaire, Sint Eustatius and Saba"),
+    "BV": ("NO", "Bouvet Island"),
+    "CC": ("AU", "Cocos (Keeling) Islands"),
+    "CX": ("AU", "Christmas Island"),
+    "GF": ("FR", "French Guiana"),
+    "GP": ("FR", "Guadeloupe"),
+    "MQ": ("FR", "Martinique"),
+    "RE": ("FR", "Réunion"),
+    "SJ": ("NO", "Svalbard and Jan Mayen"),
+    "TK": ("NZ", "Tokelau"),
+    "YT": ("FR", "Mayotte"),
+}
+
+#: Countries whose outline leaves out too much land to screen a coordinate
+#: against, so the screen uses the outline's extent instead: the box around
+#: every island it does draw, widened by the buffer. Natural Earth draws 176 of
+#: the Maldives' roughly 1,190 islands, and a resort on an undrawn one can sit
+#: well beyond any buffer of a drawn coast. The extent still catches what the
+#: screen exists for, a coordinate in the wrong country.
+EXTENT_ONLY = frozenset({"MV"})
+
+#: The lattice the screen rasterises on: 0.0125 degrees, about 1.4 km, the finest
+#: base resolution a seed grid uses. A coordinate passes when its cell touches
+#: the country's land widened by the buffer -- the rule a grid clipped to land
+#: keeps its cells by, so a location the screen passes is one such a grid can
+#: hold.
+SCREEN_RESOLUTION = Decimal("0.0125")
+
+#: The screen works one degree square at a time, 80 cells a side at that
+#: resolution, and only where there are coordinates to test. Memory then
+#: follows the portfolio rather than the country: France's outline reaches from
+#: the Caribbean to the Indian Ocean, and a book in Paris rasterises Paris.
+_SCREEN_TILE = 80
+
+
+def outline_code(code: str) -> str | None:
+    """The code the outline holding a country is drawn under, or ``None``.
+
+    ``None`` means the code is not a country Natural Earth draws, under itself
+    or within another: in practice, not an ISO 3166-1 code at all.
+    """
+    code = (code or "").strip().upper()
+    if code in _countries():
+        return code
+    if code in DRAWN_WITHIN:
+        return DRAWN_WITHIN[code][0]
+    return None
+
+
+def country_name(code: str) -> str | None:
+    """The name to show for a code, or ``None`` where no outline holds it."""
+    code = (code or "").strip().upper()
+    if code in DRAWN_WITHIN:
+        return DRAWN_WITHIN[code][1]
+    found = _countries().get(code)
+    return found.name if found is not None else None
+
+
+def within(
+    code: str,
+    points,
+    *,
+    buffer_km: Decimal = DEFAULT_COAST_BUFFER_KM,
+) -> list[bool] | None:
+    """For each ``(latitude, longitude)``, whether it is on the country's land.
+
+    On land means inside the outline or within ``buffer_km`` of it, measured
+    the way a grid clipped to land measures it. ``None`` where no outline holds
+    the code, so a caller can tell a coordinate outside a country from a code
+    that names none.
+    """
+    drawn = outline_code(code)
+    if drawn is None:
+        return None
+    numpy = _numpy()
+    points = [(float(latitude), float(longitude)) for latitude, longitude in points]
+    if not points:
+        return []
+    outline = _countries()[drawn]
+    latitudes = numpy.array([point[0] for point in points])
+    longitudes = numpy.array([point[1] for point in points])
+
+    # Anything beyond the outline's extent, widened by the buffer, is outside
+    # without rasterising. For an extent-only country that is the whole test.
+    reach = float(buffer_km) / KM_PER_DEGREE
+    widening = reach / numpy.maximum(numpy.cos(numpy.radians(numpy.minimum(numpy.abs(latitudes), 89.0))), 1e-6)
+    near = (
+        (latitudes >= outline.min_latitude - reach)
+        & (latitudes <= outline.max_latitude + reach)
+        & (longitudes >= outline.min_longitude - widening)
+        & (longitudes <= outline.max_longitude + widening)
+    )
+    if (code or "").strip().upper() in EXTENT_ONLY or drawn in EXTENT_ONLY:
+        return [bool(item) for item in near]
+
+    step = float(SCREEN_RESOLUTION)
+    rows = numpy.floor(latitudes / step).astype(numpy.int64)
+    columns = numpy.floor(longitudes / step).astype(numpy.int64)
+    result = numpy.zeros(len(points), dtype=bool)
+    tiles: dict[tuple[int, int], list[int]] = {}
+    for index in numpy.flatnonzero(near):
+        key = (int(rows[index]) // _SCREEN_TILE, int(columns[index]) // _SCREEN_TILE)
+        tiles.setdefault(key, []).append(int(index))
+    for (tile_row, tile_column), members in tiles.items():
+        first_row, first_column = tile_row * _SCREEN_TILE, tile_column * _SCREEN_TILE
+        mask = land_mask(
+            drawn,
+            SCREEN_RESOLUTION,
+            Decimal(buffer_km),
+            first_row,
+            first_row + _SCREEN_TILE - 1,
+            first_column,
+            first_column + _SCREEN_TILE - 1,
+        )
+        result[members] = mask.contains(rows[members], columns[members])
+    return [bool(item) for item in result]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CountryScreen:
+    """Checks a coordinate against the country its row names, on these outlines.
+
+    What the cohort rules are handed, so the rules need not know where an
+    outline comes from and the outlines need not know what a cohort is.
+    """
+
+    buffer_km: Decimal = DEFAULT_COAST_BUFFER_KM
+    source: str = SOURCE
+
+    def within(self, code: str, points) -> list[bool] | None:
+        return within(code, points, buffer_km=self.buffer_km)
+
+    def name(self, code: str) -> str | None:
+        return country_name(code)

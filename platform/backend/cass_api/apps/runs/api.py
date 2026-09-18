@@ -25,12 +25,14 @@ from apps.exposure.review import MINIMUM_RATIONALE
 from apps.modelregistry.models import PublicationState
 from apps.projects.models import Project
 from cass_core.runs import RunState, describe
+from cass_oed.perspectives import Perspective
 
 from . import admission, services
 from .models import (
     AnalysisRun,
     ConversionRun,
     HazardRun,
+    ReinsuranceCover,
     Run,
     RunKind,
     RunMode,
@@ -145,6 +147,7 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
         fields = [
             "id", "run", "run_detail", "exposure_version", "enrichment_run", "assumption_set",
             "model_version", "mode", "perspectives", "analysis_settings", "run_currency",
+            "reinsurance_cover",
             "oasis_analysis_id", "oasis_portfolio_id", "keys_summary",
             "keys_reconciled", "may_proceed_past_keys", "exception_approval",
             "created_at",
@@ -316,7 +319,35 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
                     }
                 )
 
+        if attrs.get("reinsurance_cover") == ReinsuranceCover.CONTRACT_TERMS:
+            self._check_limited_cover(exposure, requested)
+
         return attrs
+
+    @staticmethod
+    def _check_limited_cover(exposure, requested) -> None:
+        """Refuse limited cover the calculation cannot apply, before any engine time."""
+        from apps.exposure.services import load_files
+        from cass_oed.limited_cover import CoverError, cover_classes
+
+        if str(Perspective.REINSURANCE) not in {str(item) for item in requested}:
+            raise serializers.ValidationError(
+                {
+                    "reinsurance_cover": (
+                        "Limited cover changes the loss net of reinsurance, so ask for "
+                        "that perspective too."
+                    )
+                }
+            )
+        files = load_files(exposure)
+        if files.reins_info is None or files.reins_scope is None:
+            raise serializers.ValidationError(
+                {"reinsurance_cover": "This portfolio carries no reinsurance contracts."}
+            )
+        try:
+            cover_classes(files.reins_info.rows, files.reins_scope.rows, files.location.rows)
+        except CoverError as exc:
+            raise serializers.ValidationError({"reinsurance_cover": str(exc)}) from exc
 
     @transaction.atomic
     def create(self, validated_data):

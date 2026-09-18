@@ -229,6 +229,21 @@ REINS_INFO_FIELDS: tuple[FieldSpec, ...] = (
     _money("OccLimit", "Occurrence limit"),
     _money("OccAttachment", "Occurrence attachment"),
     _rate("PlacedPercent", "Placed share"),
+    # Not applied by the Oasis engine, which marks all three unsupported. CASS
+    # reads them in a run that asks for cover limited by contract terms.
+    FieldSpec("Reinstatement", DataType.INTEGER, "Reinstatements", minimum=0,
+              business_help=(
+                  "Full reinstatements of a catastrophe layer in a year. Applied by "
+                  "CASS's limited-cover calculation; the Oasis engine ignores it."
+              )),
+    FieldSpec("ReinstatementCharge", DataType.TEXT, "Reinstatement rate",
+              business_help=(
+                  "The rate of each reinstatement as a proportion of the reinstatement "
+                  "premium: 1 for 100%, 1.25 for 125%, or one per reinstatement "
+                  "separated by semicolons."
+              )),
+    _money("ReinsPremium", "Reinstatement premium",
+           "The premium reinstatements are charged on: the layer's MDP at 100%."),
     FieldSpec("ReinsCurrency", DataType.CURRENCY, "Contract currency", required=True),
     FieldSpec("InuringPriority", DataType.INTEGER, "Inuring priority", required=True, minimum=1,
               business_help="Lower numbers inure to the benefit of higher ones."),

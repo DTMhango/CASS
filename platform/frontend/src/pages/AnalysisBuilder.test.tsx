@@ -39,6 +39,13 @@ const EXPOSURE = {
   unmodelled_subperils: [],
   supported_perspectives: [
     { perspective: "ground_up", label: "Ground-up loss", available: true, reason: "" },
+    { perspective: "insured", label: "Insured loss", available: true, reason: "" },
+    {
+      perspective: "reinsurance",
+      label: "Loss net of reinsurance",
+      available: true,
+      reason: "",
+    },
   ],
 };
 
@@ -206,6 +213,38 @@ describe("AnalysisBuilder", () => {
     await waitFor(() => expect(posted.length).toBeGreaterThan(0));
     const configured = posted.find((item) => item.url.includes("/analysis-runs/"));
     expect((configured?.body as { mode: string }).mode).toBe("geometry_only");
+  });
+
+  it("offers limited cover only for the loss net of reinsurance", async () => {
+    renderScreen();
+    await screen.findByLabelText(/Financial perspective/);
+    expect(screen.queryByLabelText(/Reinsurance cover/)).not.toBeInTheDocument();
+  });
+
+  it("sends the reinsurance cover the analyst chose", async () => {
+    window.localStorage.setItem(
+      "cass.working-context.v1",
+      JSON.stringify({
+        projectId: PROJECT_ID,
+        exposureId: EXPOSURE_ID,
+        modelId: MODEL_ID,
+        perspective: "reinsurance",
+      }),
+    );
+    const user = userEvent.setup();
+    renderScreen();
+
+    const cover = await screen.findByLabelText(/Reinsurance cover/);
+    expect(cover).toHaveValue("engine");
+    await user.selectOptions(cover, "contract_terms");
+    await user.click(screen.getByRole("button", { name: /Submit analysis/ }));
+
+    await waitFor(() => expect(posted.length).toBeGreaterThan(0));
+    const configured = posted.find((item) => item.url.includes("/analysis-runs/"));
+    expect(configured?.body).toMatchObject({
+      perspectives: ["reinsurance"],
+      reinsurance_cover: "contract_terms",
+    });
   });
 
   it("says a resource profile is full before an analyst waits on it", async () => {

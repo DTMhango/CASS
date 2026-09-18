@@ -519,6 +519,88 @@ describe("ResultsWorkspace", () => {
     expect(screen.getByText(/Bank Indonesia middle rate/)).toBeInTheDocument();
   });
 
+  it("shows what limited cover changed, layer by layer, and how it was checked", async () => {
+    results = [
+      makeResult({
+        id: "aaaaaaaa-0000-0000-0000-000000000011",
+        label: "Fac book net, limited cover",
+        perspective: "ri_terms",
+        cover_detail: {
+          limited: { average_annual_loss: 1_200_000, standard_deviation: 1, aep: { "250": 9_000_000, "100": 5_000_000 }, oep: {} },
+          unlimited: { average_annual_loss: 1_000_000, standard_deviation: 1, aep: { "250": 7_000_000, "100": 4_500_000 }, oep: {} },
+          insured: { average_annual_loss: 3_000_000, standard_deviation: 1, aep: {}, oep: {} },
+          layers: [
+            {
+              contract: 4,
+              layer: 1,
+              name: "RenRe 2026 layer 1",
+              attachment: 3_000_000,
+              limit: 5_000_000,
+              ceded: 1,
+              placed: 1,
+              reinstatements: 2,
+              rates: [1.25, 1],
+              premium: 2_075_000,
+              recovered_aal: 800_000,
+              premium_aal: 150_000,
+              unlimited_recovered_aal: 850_000,
+              exhausted_share: 0.004,
+              applied_as_engine: false,
+            },
+          ],
+          periods: 10000,
+          samples: 10,
+          check: {
+            unlimited_net_aal: 1_000_000,
+            engine_net_aal: "1000500.00",
+            net_difference_share: 0.0005,
+            insured_aal: 3_000_000,
+            engine_insured_aal: "3000000.00",
+            insured_difference_share: 0,
+            tolerance: 0.005,
+            agrees: true,
+          },
+          notes: ["Within a year, events are applied in event-number order."],
+        },
+      }),
+    ];
+    renderScreen();
+
+    expect(await screen.findByText("Checked against the engine")).toBeInTheDocument();
+    expect(screen.getByText("2 at 125%, 100%")).toBeInTheDocument();
+    expect(screen.getByText(/Within a year, events are applied/)).toBeInTheDocument();
+  });
+
+  it("names the policies an insured number may overstate", async () => {
+    results = [
+      makeResult({
+        id: "aaaaaaaa-0000-0000-0000-000000000010",
+        label: "Fac book insured",
+        caveats: {
+          ...BASELINE.caveats,
+          perspective: "Insured loss",
+          exposure_quality: {
+            possibly_overstated: {
+              policy_count: 2,
+              tiv: "4500000.00",
+              uncapped: 2,
+              attachment_read_as_zero: 0,
+              no_policy_row: 0,
+              first: ["2025_01_PFAC1", "2025_03_PFAC2"],
+            },
+          },
+        },
+      }),
+    ];
+    renderScreen();
+
+    expect(
+      await screen.findByText("Possibly overstated: 2 policies without complete terms"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/2 have no layer or policy limit/)).toBeInTheDocument();
+    expect(screen.getByText("2025_01_PFAC1, 2025_03_PFAC2")).toBeInTheDocument();
+  });
+
   it("warns when the two runs were made for different purposes", async () => {
     comparisons = [
       {

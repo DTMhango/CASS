@@ -305,6 +305,15 @@ export interface RunStageEvent {
 /** What the keys lookup and any currency conversion said about the book. */
 export interface ExposureQuality {
   location_count?: number;
+  /** Policies whose insured loss is their ground-up loss for want of a limit. */
+  possibly_overstated?: {
+    policy_count: number;
+    tiv?: string;
+    uncapped: number;
+    attachment_read_as_zero: number;
+    no_policy_row: number;
+    first: string[];
+  };
   source_tiv?: string;
   successful_tiv?: string;
   not_at_risk_tiv?: string;
@@ -336,12 +345,63 @@ export interface ResultCaveats {
   uncertainty_attribution: Record<string, unknown>;
 }
 
+/** One catastrophe layer as a limited-cover result applied it, per simulated year. */
+export interface CoverLayerDetail {
+  contract: number;
+  layer: number;
+  name: string;
+  attachment: number;
+  limit: number;
+  ceded: number;
+  placed: number;
+  reinstatements: number | null;
+  rates: number[];
+  premium: number | null;
+  recovered_aal: number;
+  premium_aal: number;
+  unlimited_recovered_aal: number;
+  exhausted_share: number;
+  applied_as_engine: boolean;
+}
+
+/** A result on the mean-sample basis, as the limited calculation states one. */
+export interface CoverMetricsDetail {
+  average_annual_loss: number;
+  standard_deviation: number;
+  aep: Record<string, number>;
+  oep: Record<string, number>;
+}
+
+/** Why a limited-cover result says what it says, and how it was checked. */
+export interface CoverDetail {
+  limited?: CoverMetricsDetail;
+  unlimited?: CoverMetricsDetail;
+  insured?: CoverMetricsDetail;
+  layers?: CoverLayerDetail[];
+  periods?: number;
+  samples?: number;
+  event_order?: string;
+  check?: {
+    unlimited_net_aal: number;
+    engine_net_aal: string;
+    net_difference_share: number | null;
+    insured_aal: number;
+    engine_insured_aal: string | null;
+    insured_difference_share: number | null;
+    tolerance: number;
+    agrees: boolean;
+  };
+  notes?: string[];
+}
+
 export interface ResultSet {
   id: UUID;
   run: UUID;
   project: UUID;
   label: string;
-  perspective: PerspectiveKey;
+  /** ``ri_terms`` is net of reinsurance with cover limited by contract terms. */
+  perspective: PerspectiveKey | "ri_terms";
+  cover_detail?: CoverDetail;
   state: "draft" | "approved" | "research" | "withdrawn";
   average_annual_loss: string | null;
   standard_deviation: string | null;
@@ -478,6 +538,20 @@ export interface ReviewQueue {
   locations: QueuedLocation[];
 }
 
+/**
+ * Something the import found in the workbook: a cell to correct, a row the
+ * country screen could not place, a contract layer the rules refuse. Grouped
+ * where one cause repeats, so ``row_number`` is the first row it applies to.
+ */
+export interface IntakeFinding {
+  sheet: string;
+  row_number: number | null;
+  field: string;
+  code: string;
+  message: string;
+  value: string;
+}
+
 export interface ImportResults {
   batch: {
     id: UUID;
@@ -487,6 +561,8 @@ export interface ImportResults {
     snapshot_date: string | null;
     parser_version: string;
     cohort_rule_version: string;
+    /** The rules a fresh import applies; importing again re-reads under these. */
+    current_cohort_rule_version: string;
     overlay_version: string;
     policy_row_count: number;
     risk_row_count: number;
@@ -529,7 +605,7 @@ export interface ImportResults {
     businesses: string[];
     value: number;
   }[];
-  findings: Finding[];
+  findings: IntakeFinding[];
   intake_report: Record<string, unknown>;
   cohort_profile: Record<string, unknown>;
   use_modes: { mode: string; meaning: string }[];
@@ -1201,8 +1277,44 @@ export interface AssumptionCatalogue {
   coverage_splits: CoverageSplitOption[];
   coverages: AssumptionOption[];
   occupancy_assumptions: OccupancyOption[];
+  /** What a promotion does with the workbook's policy terms and reinsurance. */
+  policy_terms?: { value: string; label: string; default: boolean }[];
   default_coverage_split: string;
   default_occupancy: string;
+}
+
+/**
+ * What an import can write beyond its locations, counted per Policy ID because
+ * a policy's terms are written for all of its rows or none.
+ */
+export interface ImportFinancialStructure {
+  policy_ids: number;
+  policy_ids_with_terms: number;
+  policy_ids_without_terms: number;
+  contracts: number;
+  contract_layers: number;
+  contract_layers_refused: number;
+  contracts_without_scope: number[];
+}
+
+/** What a promotion wrote beyond the locations, and what it may overstate. */
+export interface PromotedFinancialStructure {
+  policy_terms: string;
+  applied: boolean;
+  reason: string;
+  policy_ids_written: number;
+  possibly_overstated: {
+    policy_ids: string[];
+    tiv: string;
+    uncapped: string[];
+    attachment_read_as_zero: string[];
+    no_policy_row: string[];
+  };
+  policy_rows_written: number;
+  locations_with_terms: number;
+  contracts_written: number[];
+  contract_layers_written: number;
+  reinsurance_note: string;
 }
 
 /** What a promotion produced, as the exposure version records it. */
@@ -1212,6 +1324,7 @@ export interface PromotionSummary {
   version: number;
   location_count: number;
   total_tiv: string;
+  financial_structure?: PromotedFinancialStructure;
   [key: string]: unknown;
 }
 
@@ -1503,6 +1616,10 @@ export interface ContractInput {
   risk_level?: "" | "LOC" | "POL" | "ACC";
   risk_limit?: string;
   risk_attachment?: string;
+  /** Catastrophe excess of loss only; applied by limited cover, never by the engine. */
+  reinstatements?: string;
+  reinstatement_rate?: string;
+  reinstatement_premium?: string;
   whole_portfolio?: boolean;
   scope?: ContractScopeInput[];
 }

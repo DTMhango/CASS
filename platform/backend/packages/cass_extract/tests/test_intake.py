@@ -20,7 +20,7 @@ from openpyxl import load_workbook
 
 from cass_extract import intake, profile, template
 from cass_extract.profile import ProfileError, Sheet, WhenBlank
-from cass_oed.schema import ACCOUNT_FIELDS, LOCATION_FIELDS, DataType, FileKind
+from cass_oed.schema import SCHEMA, DataType, FileKind
 
 
 def risk(**overrides):
@@ -49,9 +49,27 @@ def policy(**overrides):
     return row
 
 
-def read(risks=(), policies=()) -> intake.IntakeRead:
-    payload = template.workbook(risks=list(risks), policies=list(policies))
+def read(risks=(), policies=(), contracts=(), scope=()) -> intake.IntakeRead:
+    payload = template.workbook(
+        risks=list(risks),
+        policies=list(policies),
+        contracts=list(contracts),
+        scope=list(scope),
+    )
     return intake.read_workbook(io.BytesIO(payload))
+
+
+def contract(**overrides):
+    row = {
+        "Contract number": "2",
+        "Layer": "1",
+        "Contract type": "CXL",
+        "Inuring priority": "1",
+        "Attachment per event": "5000000",
+        "Limit per event": "20000000",
+    }
+    row.update(overrides)
+    return row
 
 
 # -- the binding ---------------------------------------------------------------------
@@ -62,13 +80,23 @@ def test_the_profile_is_internally_consistent():
 
 
 def test_every_column_lands_in_a_field_oed_actually_defines():
-    location = {spec.name for spec in LOCATION_FIELDS}
-    account = {spec.name for spec in ACCOUNT_FIELDS}
     for item in profile.COLUMNS:
         if item.oed_field is None:
             continue
-        known = location if item.oed_kind is FileKind.LOCATION else account
+        known = {spec.name for spec in SCHEMA[item.oed_kind]}
         assert item.oed_field in known, f"{item.name} -> {item.oed_field}"
+
+
+def test_each_sheet_lands_in_its_own_oed_file():
+    assert {
+        sheet: {item.oed_kind for item in profile.columns_for(sheet) if item.oed_kind}
+        for sheet in Sheet
+    } == {
+        Sheet.RISK: {FileKind.LOCATION},
+        Sheet.POLICY: {FileKind.ACCOUNT},
+        Sheet.CONTRACT: {FileKind.REINS_INFO},
+        Sheet.SCOPE: {FileKind.REINS_SCOPE},
+    }
 
 
 def test_a_column_is_read_as_the_type_of_the_field_it_lands_in():
@@ -81,10 +109,7 @@ def test_a_column_is_read_as_the_type_of_the_field_it_lands_in():
 
 def test_every_oed_required_field_is_asked_for_or_derived():
     """A template that could not produce a valid OED file would be a trap."""
-    for kind, fields in (
-        (FileKind.LOCATION, LOCATION_FIELDS),
-        (FileKind.ACCOUNT, ACCOUNT_FIELDS),
-    ):
+    for kind, fields in SCHEMA.items():
         bound = {item.oed_field for item in profile.COLUMNS if item.oed_kind is kind}
         for spec in fields:
             if not spec.required:
@@ -155,12 +180,14 @@ def test_no_column_is_classified():
 
 # -- the generated template ------------------------------------------------------------
 
-def test_the_template_carries_the_three_sheets():
+def test_the_template_carries_the_guidance_and_four_sheets():
     book = load_workbook(io.BytesIO(template.workbook()))
     assert book.sheetnames == [
         profile.GUIDE_SHEET,
         profile.RISK_SHEET,
         profile.POLICY_SHEET,
+        profile.CONTRACT_SHEET,
+        profile.SCOPE_SHEET,
     ]
 
 
@@ -482,6 +509,68 @@ def test_two_layers_of_one_policy_are_fine():
     assert [item for item in result.findings if item.code == "duplicate_policy"] == []
 
 
+# -- deductibles ---------------------------------------------------------------------------------
+
+def test_a_single_risk_deductible_on_both_sheets_is_reported_with_its_total():
+    """The same 25,000 typed on both sheets is charged twice, and the finding says so."""
+    result = read(
+        [risk(**{"Risk deductible": "25000"})],
+        [policy(**{"Policy deductible": "25000"})],
+    )
+    finding = next(
+        item for item in result.findings if item.code == "deductible_on_both_sheets"
+    )
+    assert finding.sheet == profile.RISK_SHEET
+    assert "1 single-risk policy states" in finding.message
+    assert "25,000 + 25,000 = 50,000" in finding.message
+    assert "keep it on the Policies sheet" in finding.message
+
+
+def test_single_risk_policies_with_both_deductibles_are_reported_once_with_a_count():
+    """Most of a book is one risk per policy, so one finding, not one per policy."""
+    result = read(
+        [
+            risk(**{"Risk deductible": "25000"}),
+            risk(**{"Policy ID": "A2", "Risk deductible": "10000"}),
+        ],
+        [
+            policy(**{"Policy deductible": "25000"}),
+            policy(**{"Policy ID": "A2", "Policy deductible": "10000"}),
+        ],
+    )
+    findings = [item for item in result.findings if item.code == "deductible_on_both_sheets"]
+    assert len(findings) == 1
+    assert findings[0].value == "2"
+    assert "A1, A2" in findings[0].message
+
+
+def test_a_deductible_on_one_sheet_only_is_not_reported():
+    result = read([risk()], [policy(**{"Policy deductible": "25000"})])
+    assert [item for item in result.findings if item.code == "deductible_on_both_sheets"] == []
+
+
+def test_a_multi_risk_policy_may_carry_both_deductibles():
+    """Per-site deductibles and a policy deductible are two different terms there."""
+    result = read(
+        [
+            risk(**{"Risk deductible": "25000"}),
+            risk(**{"Risk reference": "2", "Risk deductible": "25000"}),
+        ],
+        [policy(**{"Policy deductible": "100000"})],
+    )
+    assert [item for item in result.findings if item.code == "deductible_on_both_sheets"] == []
+
+
+def test_the_guidance_says_where_a_single_risk_deductible_goes():
+    book = load_workbook(io.BytesIO(template.workbook()))
+    text = " ".join(
+        str(cell.value) for row in book[profile.GUIDE_SHEET].iter_rows() for cell in row
+        if cell.value
+    )
+    assert "put the deductible and limit on the Policies sheet only" in text
+    assert "Repeat the policy deductible and limit on every layer's row" in text
+
+
 # -- lineage ------------------------------------------------------------------------------------
 
 def test_a_read_records_the_profile_and_parser_that_produced_it():
@@ -510,8 +599,118 @@ def test_an_unreadable_flag_says_what_is_expected():
 def test_the_profile_is_serialisable_for_the_schema_endpoint():
     payload = profile.as_dict()
     assert payload["profile_version"] == profile.PROFILE_VERSION
-    assert set(payload["sheets"]) == {profile.RISK_SHEET, profile.POLICY_SHEET}
+    assert set(payload["sheets"]) == {
+        profile.RISK_SHEET,
+        profile.POLICY_SHEET,
+        profile.CONTRACT_SHEET,
+        profile.SCOPE_SHEET,
+    }
     first = payload["sheets"][profile.RISK_SHEET][0]
     assert first["oed_field"] == "AccNumber"
     assert first["reads_as"] == str(DataType.TEXT)
     assert payload["oed_fields_not_requested"]["location"] == ["IsTenant", "LocGroup"]
+
+
+# -- policy terms and reinsurance ----------------------------------------------------------------
+
+def codes(result) -> list[str]:
+    return [item.code for item in result.findings]
+
+
+def test_the_reinsurance_sheets_open_with_a_layered_programme():
+    """One example row cannot show two layers sharing a contract number."""
+    book = load_workbook(io.BytesIO(template.workbook()))
+    contracts = [
+        [cell.value for cell in row]
+        for row in book[profile.CONTRACT_SHEET].iter_rows(min_row=2)
+        if any(cell.value for cell in row)
+    ]
+    assert len(contracts) == 3
+    assert [row[0] for row in contracts] == ["1", "2", "2"]
+    assert all(row[-1] == template.EXAMPLE_MARKER for row in contracts)
+
+
+def test_the_worked_reinsurance_rows_never_become_contracts():
+    result = intake.read_workbook(io.BytesIO(template.workbook()))
+    assert result.contracts.rows == []
+    assert result.scope.rows == []
+
+
+def test_a_workbook_from_before_the_reinsurance_sheets_still_reads():
+    book = load_workbook(io.BytesIO(template.workbook(risks=[risk()], policies=[policy()])))
+    for name in (profile.CONTRACT_SHEET, profile.SCOPE_SHEET):
+        del book[name]
+    buffer = io.BytesIO()
+    book.save(buffer)
+    buffer.seek(0)
+    result = intake.read_workbook(buffer)
+    assert result.is_readable
+    assert result.contracts.rows == []
+
+
+def test_contracts_and_scope_become_canonical_records():
+    result = read(
+        [risk()],
+        [policy()],
+        [contract(), contract(**{"Layer": "2", "Attachment per event": "25000000"})],
+        [{"Contract number": "2"}],
+    )
+    contracts, scope = intake.reinsurance_records(result)
+    assert [(item["contract_number"], item["layer_number"]) for item in contracts] == [(2, 1), (2, 2)]
+    assert contracts[1]["occurrence_attachment"] == Decimal("25000000")
+    assert scope[0]["business_id"] is None
+
+
+def test_a_contract_layer_given_twice_is_reported():
+    result = read([risk()], [policy()], [contract(), contract()], [{"Contract number": "2"}])
+    assert "duplicate_contract_layer" in codes(result)
+
+
+def test_layers_of_one_contract_must_be_the_same_kind_of_contract():
+    result = read(
+        [risk()],
+        [policy()],
+        [contract(), contract(**{"Layer": "2", "Inuring priority": "3"})],
+        [{"Contract number": "2"}],
+    )
+    assert "contract_layers_disagree" in codes(result)
+
+
+def test_scope_and_contracts_must_name_each_other():
+    result = read([risk()], [policy()], [contract()], [{"Contract number": "7"}])
+    assert "scope_without_contract" in codes(result)
+    assert "contract_without_scope" in codes(result)
+
+
+def test_a_policy_filled_in_for_its_value_alone_is_not_a_problem():
+    """A ground-up book fills the Policies sheet for the join and the allocation."""
+    result = read([risk()], [policy(**{"Total insured value": "1000000"})])
+    assert "policy_terms_incomplete" not in codes(result)
+
+
+def test_terms_without_a_layer_attachment_and_limit_are_reported():
+    result = read([risk()], [policy(**{"Policy deductible": "25000"})])
+    finding = next(item for item in result.findings if item.code == "policy_terms_incomplete")
+    assert "Write 0 as the attachment" in finding.message
+
+
+def test_complete_accounts_need_every_row_complete():
+    records = [
+        {"business_id": "A1", "layer_attachment": "0", "layer_limit": "100"},
+        {"business_id": "A2", "layer_attachment": "0", "layer_limit": "100"},
+        {"business_id": "A2", "layer_attachment": "100", "layer_limit": None},
+    ]
+    assert intake.complete_accounts(records) == {"A1"}
+
+
+def test_layers_stating_different_deductibles_are_reported():
+    result = read(
+        [risk()],
+        [
+            policy(**{"Layer": "1", "Layer attachment": "0", "Layer limit": "3000000",
+                      "Policy deductible": "100000"}),
+            policy(**{"Layer": "2", "Layer attachment": "3000000", "Layer limit": "7000000"}),
+        ],
+    )
+    finding = next(item for item in result.findings if item.code == "layer_terms_differ")
+    assert "A1 P1" in finding.message

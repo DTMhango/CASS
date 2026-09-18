@@ -28,7 +28,7 @@ import pytest
 
 import cass_extract as extract
 from apps.audit.models import AuditAction, AuditEvent
-from apps.exposure.extract import import_portfolio, transformation_manifest
+from apps.exposure.extract import COUNTRY_SCREEN, import_portfolio, transformation_manifest
 from apps.exposure.models import SourcePolicyRow, SourceRiskLocation
 from cass_extract import intake
 
@@ -211,7 +211,9 @@ def test_the_business_complete_benchmark_is_forty_two_risks(batch):
     from decimal import Decimal
 
     risks = list(SourceRiskLocation.objects.filter(batch=batch))
-    assignments = extract.assign_all([row.values for row in risks])
+    assignments = extract.assign_all(
+        [row.values for row in risks], screen=COUNTRY_SCREEN
+    )
     complete = extract.business_complete([row.values for row in risks], assignments)
 
     assert len(complete) == 42
@@ -230,13 +232,19 @@ def test_the_business_complete_benchmark_is_forty_two_risks(batch):
 
 @needs_extract
 def test_the_real_extract_parses_without_a_single_finding(batch):
-    """One finding, and it is the state of the book rather than a defect.
+    """Only the state of the book, and the five coordinates in the wrong country.
 
     1,138 accounts carry policy terms and no risks, because most of a
     facultative book is not geocoded. Reporting that once with a count is
-    something a person can act on; reporting it 1,138 times is noise.
+    something a person can act on; reporting it 1,138 times is noise. The five
+    rows outside the country they name are reported the same way, once for
+    each country code.
     """
-    assert [item["code"] for item in batch.findings] == ["policy_without_risks"]
+    codes = [item["code"] for item in batch.findings]
+    assert codes[0] == "policy_without_risks"
+    assert set(codes[1:]) == {"coordinate_outside_country"}
+    rows = sum(int(item["message"].split(" ", 1)[0]) for item in batch.findings[1:])
+    assert rows == 5
     assert batch.blocking is False
 
 
@@ -374,7 +382,9 @@ def test_the_benchmark_needs_no_allocation_assumption_at_all(rows):
     from decimal import Decimal
 
     policies, locations = rows
-    complete = extract.business_complete(locations, extract.assign_all(locations))
+    complete = extract.business_complete(
+        locations, extract.assign_all(locations, screen=COUNTRY_SCREEN)
+    )
     subset_policies = [p for p in policies if p["business_id"] in complete]
     subset_locations = [item for item in locations if item["business_id"] in complete]
 
@@ -396,7 +406,7 @@ def test_the_benchmark_needs_no_allocation_assumption_at_all(rows):
 def test_restricting_to_cohort_a_excludes_whole_policies_rather_than_redistributing(rows):
     """A partly eligible business leaves entirely, taking all its value."""
     policies, locations = rows
-    assignments = extract.assign_all(locations)
+    assignments = extract.assign_all(locations, screen=COUNTRY_SCREEN)
     eligible = {
         (item["business_id"], int(item["location_number"]))
         for item, assignment in zip(locations, assignments, strict=True)
@@ -535,8 +545,10 @@ def test_the_promoted_oed_names_no_counterparty(batch, analyst):
     assert set(rows[0]) == {
         "PortNumber", "AccNumber", "LocNumber", "CountryCode", "Latitude",
         "Longitude", "OccupancyCode", "ConstructionCode", "NumberOfStoreys",
-        "LocPerilsCovered",
+        "LocPerilsCovered", "LocPeril",
         "BuildingTIV", "OtherTIV", "ContentsTIV", "BITIV", "LocCurrency",
+        # The site terms, written as blanks where the workbook states none.
+        "LocDed6All", "LocDedType6All", "LocLimit6All", "LocLimitType6All",
     }
     # Business references only, never a name.
     assert all(row["AccNumber"].startswith("PFAC") for row in rows)
@@ -809,7 +821,7 @@ def test_a_business_whose_schedule_straddles_cohorts_enters_neither(batch):
     site alone would leave the policy's value with nowhere honest to go.
     """
     rows = [row.values for row in batch.location_rows.all()]
-    assignments = extract.assign_all(rows)
+    assignments = extract.assign_all(rows, screen=COUNTRY_SCREEN)
     for cohort in (extract.Cohort.A, extract.Cohort.B):
         selected = extract.business_complete(
             rows, assignments, cohort=cohort, class_of_business=None

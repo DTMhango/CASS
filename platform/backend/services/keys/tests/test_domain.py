@@ -150,6 +150,93 @@ def test_the_maldives_outline_is_incomplete_and_the_code_says_so():
     assert "Maldives" in land.__doc__
 
 
+def test_a_country_drawn_with_its_dependencies_is_named_for_itself():
+    """France and Clipperton Island are both -99 in ISO_A2; the country leads."""
+    assert land.country("FR").name == "France"
+    assert land.country("AU").name == "Australia"
+
+
+# -- screening a portfolio's coordinates -----------------------------------------------
+
+def test_each_country_holds_its_own_capital_and_not_its_neighbours():
+    capitals = {
+        "ID": (-6.1754, 106.8272),  # Jakarta
+        "NP": (27.7045, 85.3077),   # Kathmandu
+        "BD": (23.8103, 90.4125),   # Dhaka
+        "BT": (27.4728, 89.6390),   # Thimphu
+        "QA": (25.2854, 51.5310),   # Doha
+        "TR": (41.0082, 28.9784),   # Istanbul
+        "LB": (33.8938, 35.5018),   # Beirut
+    }
+    for code, point in capitals.items():
+        assert land.within(code, [point]) == [True], code
+        others = [other for other in capitals.values() if other != point]
+        assert land.within(code, others) == [False] * len(others), code
+
+
+def test_the_outline_refuses_what_the_old_box_let_through():
+    """Lucknow sat inside the box that screened Nepal; it is 90 km over the border."""
+    assert land.within("NP", [(26.8467, 80.9462)]) == [False]
+
+
+def test_a_coordinate_just_offshore_is_ashore_and_one_at_sea_is_not():
+    # Tanjung Priok's quay, which a 1:10m coast places in the water, and the
+    # middle of the Java Sea.
+    assert land.within("ID", [(-6.1, 106.88), (-5.0, 110.0)]) == [True, False]
+
+
+def test_an_offshore_platform_is_outside_and_left_to_a_person():
+    """Halul Island's terminal is 90 km off Qatar: flagged, then confirmed in review."""
+    assert land.within("QA", [(25.67, 52.41)]) == [False]
+
+
+def test_every_territory_drawn_inside_another_country_is_screened_there():
+    places = {
+        "BQ": (12.15, -68.27), "BV": (-54.42, 3.36), "CC": (-12.19, 96.83),
+        "CX": (-10.42, 105.68), "GF": (4.93, -52.33), "GP": (16.24, -61.53),
+        "MQ": (14.60, -61.07), "RE": (-21.10, 55.50), "SJ": (78.22, 15.65),
+        "TK": (-9.38, -171.22), "YT": (-12.78, 45.23),
+    }
+    assert set(places) == set(land.DRAWN_WITHIN)
+    for code, point in places.items():
+        assert code not in land.countries(), code
+        assert land.within(code, [point]) == [True], code
+        assert land.country_name(code) == land.DRAWN_WITHIN[code][1]
+
+
+def test_every_officially_assigned_code_has_an_outline():
+    """249 officially assigned ISO 3166-1 codes; Natural Earth draws Kosovo too."""
+    covered = set(land.countries()) | set(land.DRAWN_WITHIN)
+    assert len(covered - {"XK"}) == 249
+
+
+def test_a_code_that_names_no_country_is_told_apart_from_a_coordinate_outside_one():
+    assert land.within("UK", [(51.5, -0.1)]) is None
+    assert land.outline_code("UK") is None
+    assert land.within("GB", [(51.5, -0.1)]) == [True]
+
+
+def test_the_maldives_is_screened_against_the_extent_of_its_islands():
+    """Resorts sit on islands the 1:10m outline does not draw."""
+    resorts_and_towns = [(4.175, 73.509), (-0.69, 73.15), (6.62, 73.07), (3.62, 72.72)]
+    assert land.within("MV", resorts_and_towns) == [True] * 4
+    assert land.within("MV", [(10.0, 73.0), (4.2, 80.0)]) == [False, False]
+
+
+def test_screening_follows_the_portfolio_and_answers_in_order():
+    points = [(-6.1754, 106.8272), (33.8938, 35.5018)] * 500
+    assert land.within("ID", points) == [True, False] * 500
+    assert land.within("ID", []) == []
+
+
+def test_the_screen_the_cohort_rules_take_describes_itself():
+    screen = land.CountryScreen()
+    assert screen.buffer_km == land.DEFAULT_COAST_BUFFER_KM
+    assert "Natural Earth" in screen.source
+    assert screen.name("BD") == "Bangladesh"
+    assert screen.within("BD", [(23.8103, 90.4125)]) == [True]
+
+
 # -- the settlement layer --------------------------------------------------------------
 
 def test_settled_places_are_settled_and_empty_ones_are_not():

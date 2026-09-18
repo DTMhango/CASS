@@ -428,6 +428,58 @@ def _check_account_hierarchy(files: PortfolioFiles, out: FindingSet) -> None:
     )
 
 
+def _amount(row: Row, field: str) -> Decimal:
+    """A money cell as a number, reading a blank or unparseable cell as none."""
+    try:
+        return Decimal(str(row.get(field, 0)))
+    except ArithmeticError:
+        return Decimal(0)
+
+
+def _check_single_location_deductibles(files: PortfolioFiles, out: FindingSet) -> None:
+    """A policy with one location whose deductible is written at both levels.
+
+    The engine takes the location deductible off first and the policy deductible
+    off what is left. Across several locations those are two different terms.
+    Across one they are usually the same deductible typed twice, and the loss
+    loses it twice. Both are valid OED, so this warns rather than refuses.
+    """
+    if files.account is None:
+        return
+    locations: dict[tuple[str, str], list[Row]] = {}
+    for row in files.location.rows:
+        locations.setdefault((row.text("PortNumber"), row.text("AccNumber")), []).append(row)
+    policy_deductible: dict[tuple[str, str], Decimal] = {}
+    for row in files.account.rows:
+        key = (row.text("PortNumber"), row.text("AccNumber"))
+        amount = _amount(row, "PolDed6All")
+        if amount > 0:
+            policy_deductible.setdefault(key, amount)
+
+    for key, rows in locations.items():
+        if len(rows) != 1 or key not in policy_deductible:
+            continue
+        location = rows[0]
+        at_location = _amount(location, "LocDed6All")
+        if at_location <= 0:
+            continue
+        at_policy = policy_deductible[key]
+        out.add(
+            fnd.make(
+                "deductible_at_risk_and_policy",
+                f"Account {key[1]} has one location, and a deductible is written on both "
+                f"the location ({at_location:,}) and the policy ({at_policy:,}). Both are "
+                "applied, one after the other, so a loss to this location loses "
+                f"{at_location + at_policy:,} to deductibles.",
+                file_kind=str(FileKind.LOCATION),
+                row_number=location.row_number,
+                field="LocDed6All",
+                value=at_location,
+                record_key=_record_key(FileKind.LOCATION, location),
+            )
+        )
+
+
 def _check_contiguous(
     rows: Sequence[Row],
     *,
@@ -607,6 +659,7 @@ def validate(files: PortfolioFiles) -> ValidationReport:
 
     _check_locations(files.location, out)
     _check_account_hierarchy(files, out)
+    _check_single_location_deductibles(files, out)
     _check_reinsurance(files, out)
 
     summary = _summarise(files, out)

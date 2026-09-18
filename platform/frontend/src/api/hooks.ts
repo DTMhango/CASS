@@ -774,6 +774,7 @@ export function useCreateAnalysis() {
       execution_profile?: string;
       assumption_set?: UUID;
       mode?: RunMode;
+      reinsurance_cover?: string;
     }) => api.post<AnalysisRun>("/analysis-runs/", input),
     onSuccess: () => client.invalidateQueries({ queryKey: ["runs"] }),
   });
@@ -1162,6 +1163,7 @@ export function usePromoteImport(batchId: UUID) {
       coverage_split?: string;
       occupancy?: string;
       country?: string;
+      policy_terms?: string;
     }) => api.post<PromotionSummary>(`/portfolio-imports/${batchId}/promote/`, input),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ["exposure-versions"] });

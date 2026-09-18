@@ -39,6 +39,7 @@ from apps.audit.models import AuditAction
 from apps.common.storage import bucket, get_store
 from cass_core.artifacts import AccessPolicy, RetentionClass
 from cass_extract import intake, profile
+from cass_keys.land import CountryScreen
 
 from .models import (
     ImportBatch,
@@ -50,6 +51,20 @@ from .models import (
 
 #: The role the raw workbook is registered under.
 SOURCE_ROLE = "portfolio_extract_source"
+
+#: What every coordinate is checked against: the country outlines CASS ships,
+#: with the coastal allowance a grid clipped to land uses. See ADR 0025.
+COUNTRY_SCREEN = CountryScreen()
+
+#: The cohort rules whose answers become import findings, and the column each
+#: points a person to.
+SCREEN_FINDINGS = {
+    "outside_country": ("coordinate_outside_country", "Latitude"),
+    "unknown_country": ("unknown_country_code", "Country"),
+}
+
+#: Row numbers a screen finding lists before counting the rest.
+SCREEN_ROWS_SHOWN = 10
 
 #: Namespace for deterministic location identifiers. A fixed UUID, so the same
 #: location in the same source resolves to the same identifier on every read,
@@ -136,17 +151,23 @@ def import_portfolio(
     """Register, read and profile one completed intake template.
 
     Re-importing the same bytes into the same project returns the batch that
-    already exists. A rerun of the same checksum has to be idempotent, and a
-    second batch with identical counts would be worse than useless: a reader
-    would have to work out which of two identical reads the downstream work was
-    based on.
+    already exists, if the same rules read it. A rerun of the same checksum has
+    to be idempotent, and a second batch with identical counts would be worse
+    than useless: a reader would have to work out which of two identical reads
+    the downstream work was based on. Under newer rules the read is not
+    identical -- a country the old screen could not check is checked now -- so
+    the file is read again into a new batch, and the old one stays as the record
+    of what the old rules made of it.
     """
     artifact = register_source(
         project, payload, filename=filename, actor=actor, request=request
     )
 
     existing = ImportBatch.objects.filter(
-        project=project, source_checksum=artifact.checksum
+        project=project,
+        source_checksum=artifact.checksum,
+        parser_version=intake.PARSER_VERSION,
+        cohort_rule_version=extract.COHORT_RULE_VERSION,
     ).first()
     if existing is not None:
         return existing
@@ -158,8 +179,15 @@ def import_portfolio(
         return _rejected(project, artifact, filename, snapshot_date, str(exc), actor)
 
     risks, policies = intake.records(read)
-    assignments = extract.assign_all(risks)
+    contracts, scope = intake.reinsurance_records(read)
+    assignments = extract.assign_all(risks, screen=COUNTRY_SCREEN)
     cohort_profile = extract.cohort_profile(risks, assignments)
+    programme = _programme(project, risks, policies, contracts, scope)
+    findings = [
+        *(finding.as_dict() for finding in read.findings),
+        *_screen_findings(risks, assignments),
+        *_programme_findings(programme),
+    ]
 
     with transaction.atomic():
         batch = ImportBatch.objects.create(
@@ -175,8 +203,12 @@ def import_portfolio(
             state=ImportState.PARSED,
             policy_row_count=len(read.policies.rows),
             risk_row_count=len(read.risks.rows),
-            findings=[finding.as_dict() for finding in read.findings],
-            intake_report=_intake_report(read),
+            findings=findings,
+            intake_report=_intake_report(read, findings, risks, policies, contracts, programme),
+            reinsurance={
+                "contracts": [_jsonable(record) for record in contracts],
+                "scope": [_jsonable(record) for record in scope],
+            },
             cohort_profile=cohort_profile.as_dict(),
             created_by=actor,
             updated_by=actor,
@@ -212,8 +244,120 @@ def import_portfolio(
     return batch
 
 
-def _intake_report(read) -> dict[str, Any]:
-    """What the read found across both sheets.
+#: The perils and currency the template route writes every term in. Promotion
+#: records the same for every location and policy; the contracts follow them.
+TEMPLATE_PERIL = "QEQ"
+TEMPLATE_CURRENCY = "USD"
+
+
+def _programme(project, risks, policies, contracts, scope):
+    """The workbook's reinsurance under the Financial structure screen's rules.
+
+    Checked against every risk and policy the workbook holds. A promotion
+    checks it again against the selection it promotes, which can only be
+    smaller, so anything refused here is refused there too.
+    """
+    from . import structure_builder
+
+    locations = [
+        {
+            "PortNumber": project.reference,
+            "AccNumber": str(record.get("business_id") or "").strip(),
+            "LocNumber": str(record.get("location_number") or "").strip(),
+            "LocCurrency": TEMPLATE_CURRENCY,
+        }
+        for record in risks
+    ]
+    policy_keys = {
+        (str(record.get("business_id") or "").strip(), str(record.get("policy_id") or "").strip())
+        for record in policies
+    }
+    return structure_builder.programme_rows(
+        contracts,
+        scope,
+        locations=locations,
+        policy_keys=policy_keys,
+        perils=TEMPLATE_PERIL,
+        currency=TEMPLATE_CURRENCY,
+    )
+
+
+def _screen_findings(risks, assignments) -> list[dict[str, Any]]:
+    """One finding per country code whose risks the country screen could not place.
+
+    Each row is staged either way, unclassified and in the review queue with
+    its own reason. The finding is what puts them in front of a person at
+    import, with both ways out: correct the workbook, or -- where a coordinate
+    is right, as an offshore platform's is -- confirm that row into a cohort in
+    review with the reason. Grouped by code and counted, as the intake groups
+    its findings, so a sheet whose latitudes have all lost their sign says so
+    once a country rather than once a row.
+    """
+    grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    for record, assignment in zip(risks, assignments, strict=True):
+        if assignment.rule in SCREEN_FINDINGS:
+            country = str(record.get("country_code") or "").strip().upper()
+            grouped.setdefault((assignment.rule, country), []).append(record)
+
+    found = []
+    for (rule, country), records in sorted(grouped.items()):
+        code, field = SCREEN_FINDINGS[rule]
+        rows = sorted(record.get("row_number") or 0 for record in records)
+        shown = ", ".join(str(row) for row in rows[:SCREEN_ROWS_SHOWN]) + (
+            f" and {len(rows) - SCREEN_ROWS_SHOWN} more" if len(rows) > SCREEN_ROWS_SHOWN else ""
+        )
+        risks_word = "risk" if len(rows) == 1 else "risks"
+        if rule == "outside_country":
+            name = COUNTRY_SCREEN.name(country) or country
+            message = (
+                f"{len(rows)} {risks_word} coded {country} "
+                f"{'has a coordinate' if len(rows) == 1 else 'have coordinates'} more "
+                f"than {COUNTRY_SCREEN.buffer_km:f} km outside {name} (Risks rows "
+                f"{shown}). Correct the coordinate or the Country code and import "
+                "the file again. Where a coordinate is right -- an offshore platform, "
+                "say -- confirm that row into a cohort in the review queue and record "
+                "why."
+            )
+        else:
+            message = (
+                f"{len(rows)} {risks_word} (Risks rows {shown}): "
+                f"{extract.cohorts.unknown_country_reason(country)} Then import the "
+                "file again."
+            )
+        found.append(
+            {
+                "sheet": profile.RISK_SHEET,
+                "row_number": rows[0],
+                "field": field,
+                "code": code,
+                "message": message,
+                "value": country,
+            }
+        )
+    return found
+
+
+def _programme_findings(programme) -> list[dict[str, Any]]:
+    """One finding per reason a contract layer cannot be written."""
+    return [
+        {
+            "sheet": profile.CONTRACT_SHEET,
+            "row_number": record.get("row_number"),
+            "field": "Contract type",
+            "code": "contract_refused",
+            "message": (
+                f"Contract {record.get('contract_number')} layer "
+                f"{record.get('layer_number') or 1}: {reason}"
+            ),
+            "value": "",
+        }
+        for record, reasons in programme.refused
+        for reason in reasons
+    ]
+
+
+def _intake_report(read, findings, risks, policies, contracts, programme) -> dict[str, Any]:
+    """What the read found across every sheet.
 
     ``blocking`` is deliberately narrow. A file CASS cannot interpret at all
     stops the import; a file describing a book that is only partly geocoded
@@ -221,8 +365,10 @@ def _intake_report(read) -> dict[str, Any]:
     refusing it would leave an analyst nothing to work with.
     """
     counts: dict[str, int] = {}
-    for finding in read.findings:
-        counts[finding.code] = counts.get(finding.code, 0) + 1
+    for finding in findings:
+        counts[finding["code"]] = counts.get(finding["code"], 0) + 1
+    accounts = {str(record.get("business_id") or "").strip() for record in risks} - {""}
+    with_terms = intake.complete_accounts(policies) & accounts
     return {
         "profile_version": read.profile_version,
         "parser_version": read.parser_version,
@@ -238,6 +384,17 @@ def _intake_report(read) -> dict[str, Any]:
             "policies": list(read.policies.unrecognised_columns),
         },
         "blocking": not read.is_readable,
+        # What promotion can write beyond the locations. Counted per Policy ID,
+        # because a policy's terms are written for all of its rows or none.
+        "financial_structure": {
+            "policy_ids": len(accounts),
+            "policy_ids_with_terms": len(with_terms),
+            "policy_ids_without_terms": len(accounts - with_terms),
+            "contracts": len({record.get("contract_number") for record in contracts} - {None}),
+            "contract_layers": len(contracts),
+            "contract_layers_refused": len(programme.refused),
+            "contracts_without_scope": list(programme.unscoped),
+        },
     }
 
 
@@ -251,6 +408,9 @@ def _rejected(project, artifact, filename, snapshot_date, reason, actor) -> Impo
         snapshot_date=snapshot_date,
         schema_version=intake.PROFILE_VERSION,
         parser_version=intake.PARSER_VERSION,
+        # The rules that would have applied, so importing the same unreadable
+        # file again finds this batch rather than colliding with it.
+        cohort_rule_version=extract.COHORT_RULE_VERSION,
         state=ImportState.REJECTED,
         rejection_reason=reason,
         created_by=actor,

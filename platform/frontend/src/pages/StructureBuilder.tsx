@@ -284,6 +284,9 @@ function ContractForm({
   const [limit, setLimit] = useState("");
   const [riskLevel, setRiskLevel] = useState<"LOC" | "POL" | "ACC">("LOC");
   const [riskLimit, setRiskLimit] = useState("");
+  const [reinstatements, setReinstatements] = useState("");
+  const [reinstatementRate, setReinstatementRate] = useState("");
+  const [reinstatementPremium, setReinstatementPremium] = useState("");
   const [covers, setCovers] = useState<"whole" | "named">("whole");
   const [scope, setScope] = useState<ContractScopeInput[]>([]);
 
@@ -311,6 +314,9 @@ function ContractForm({
         ceded_percent: amount(ceded),
         occurrence_attachment: amount(attachment),
         occurrence_limit: amount(limit),
+        reinstatements: reinstatements.trim() || undefined,
+        reinstatement_rate: reinstatementRate.trim() || undefined,
+        reinstatement_premium: amount(reinstatementPremium),
       };
     }
     if (type === "QS") {
@@ -381,6 +387,41 @@ function ContractForm({
                 inputMode="decimal"
                 value={ceded}
                 onChange={(event) => setCeded(event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Reinstatements"
+              htmlFor="contract-reinstatements"
+              hint="Times the limit is restored in a year; 0 for once a year. Blank leaves the layer as the engine applies it."
+            >
+              <TextInput
+                id="contract-reinstatements"
+                inputMode="numeric"
+                value={reinstatements}
+                onChange={(event) => setReinstatements(event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Reinstatement rate"
+              htmlFor="contract-reinstatement-rate"
+              hint="1 for 100%, 1.25 for 125%; 1.25;1 where they differ. Blank for free."
+            >
+              <TextInput
+                id="contract-reinstatement-rate"
+                value={reinstatementRate}
+                onChange={(event) => setReinstatementRate(event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Reinstatement premium"
+              htmlFor="contract-reinstatement-premium"
+              hint="The premium reinstatements are charged on: the layer's MDP at 100%."
+            >
+              <TextInput
+                id="contract-reinstatement-premium"
+                inputMode="decimal"
+                value={reinstatementPremium}
+                onChange={(event) => setReinstatementPremium(event.target.value)}
               />
             </Field>
           </>

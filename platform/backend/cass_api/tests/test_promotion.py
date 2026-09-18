@@ -350,6 +350,59 @@ def test_a_selection_with_no_complete_business_is_refused(batch, analyst):
         promote(batch, name="Empty", cohort=extract.Cohort.C, actor=analyst)
 
 
+# -- decisions made in review -------------------------------------------------------------
+
+def _decide(batch, business_id: str, cohort: str, analyst) -> None:
+    from apps.exposure import review
+
+    review.decide(
+        batch.location_rows.get(business_id=business_id),
+        field="cohort",
+        value=cohort,
+        rationale="Checked against the insured's schedule and the survey report.",
+        actor=analyst,
+    )
+
+
+def accounts_in(version: ExposureVersion) -> set[str]:
+    return {row["AccNumber"] for row in oed_rows(version)}
+
+
+def test_a_row_confirmed_in_review_is_promoted_with_that_cohort(project, analyst):
+    """The way in for a coordinate the screen flagged and a person found right."""
+    from fixtures import structural_template
+
+    risks, policies = structural_template()
+    risks[0]["Country"] = "BD"  # B-SINGLE's coordinate is Jakarta's
+    batch = import_portfolio(
+        project, as_template(risks, policies), filename="p.xlsx", actor=analyst
+    )
+    before = promote(batch, name="Before review", actor=analyst)
+    assert "B-SINGLE" not in accounts_in(before)
+    assert before.source_lineage["cohorts_decided_in_review"] == 0
+
+    _decide(batch, "B-SINGLE", "A", analyst)
+    after = promote(batch, name="After review", actor=analyst)
+    assert "B-SINGLE" in accounts_in(after)
+    assert after.source_lineage["cohorts_decided_in_review"] == 1
+
+
+def test_a_row_moved_out_in_review_leaves_the_promotion(batch, analyst):
+    _decide(batch, "B-SINGLE", "C", analyst)
+    assert "B-SINGLE" not in accounts_in(promote(batch, name="Reviewed", actor=analyst))
+
+
+def test_promotion_uses_the_cohorts_the_batch_was_read_with(batch, analyst, monkeypatch):
+    """Not rerun at promotion, so the rule version in the lineage is the one applied."""
+
+    def rerun(*args, **kwargs):
+        raise AssertionError("the cohort rules were run again at promotion")
+
+    monkeypatch.setattr(extract, "assign_all", rerun)
+    version = promote(batch, name="Staged cohorts", actor=analyst)
+    assert version.source_lineage["cohort_rule_version"] == batch.cohort_rule_version
+
+
 def test_the_generated_oed_is_validated_before_it_is_published(version):
     """It goes through the ordinary exposure pipeline, not around it."""
     assert version.validation_report["publishable"] is True

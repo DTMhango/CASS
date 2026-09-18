@@ -24,6 +24,19 @@ a named, versioned assumption selected per promotion and recorded in the
 lineage. Where a risk states its own, that outranks the assumption for that
 row.
 
+**Policy terms and reinsurance are written as the workbook states them.**
+The promotion writes the Policies sheet into an OED account file, the risks'
+own deductibles and limits into the location file, and the reinsurance sheets
+into the two reinsurance files. A term the workbook leaves blank is written
+blank, and OED reads a blank layer limit as no limit and a blank attachment as
+nothing: such a policy's insured loss is its ground-up loss, less any
+deductible it does state. That is never hidden. Every Policy ID with no layer
+or policy limit, or no stated attachment, or no policy row at all, is listed
+on the version as possibly overstated, and the list travels with every insured
+and net-of-reinsurance result made from it. Leaving an account out would
+understate the book, which is the worse error for a PML. The caller may still
+leave the terms out altogether, for a ground-up version.
+
 Nothing promoted under an assumption is fit for decision use. Every version
 says so in its lineage, and says which assumptions it rests on.
 """
@@ -32,7 +45,9 @@ from __future__ import annotations
 
 import csv
 import dataclasses
+import enum
 import io
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -41,9 +56,9 @@ from django.db import transaction
 import cass_extract as extract
 from apps.audit import services as audit
 from apps.audit.models import AuditAction
-from cass_oed.schema import FileKind
+from cass_oed.schema import FLAT_TERM_BASIS, FileKind
 
-from . import review, services
+from . import review, services, structure_builder
 from .models import ExposureVersion, ImportBatch, SourcePolicyRow, SourceRiskLocation
 
 #: OED's own code for an occupancy that is not known. Writing it states a fact;
@@ -55,10 +70,10 @@ UNKNOWN_OCCUPANCY = extract.UNKNOWN_OCCUPANCY
 COVERED_PERIL = "QEQ"
 CURRENCY = "USD"
 
-#: The OED columns a ground-up location file needs. Account and reinsurance
-#: files are not written: section 8 of the build plan refuses to generate a
-#: placeholder financial file to imply a perspective the source cannot support,
-#: and this extract carries no deductible, limit or layer interpretation.
+#: The OED columns a ground-up location file needs. Section 8 of the build plan
+#: refuses to generate a placeholder financial file to imply a perspective the
+#: source cannot support, so the financial columns and files below are written
+#: only from terms the workbook states.
 LOCATION_COLUMNS = (
     "PortNumber",
     "AccNumber",
@@ -73,6 +88,86 @@ LOCATION_COLUMNS = (
     *(str(coverage) for coverage in extract.COVERAGE_ORDER),
     "LocCurrency",
 )
+
+
+#: A risk's own deductible and limit, written beside the location when the
+#: version carries policy terms. OED requires the basis and the peril wherever
+#: an amount is stated, and CASS calculates only a flat amount.
+LOCATION_TERM_COLUMNS = (
+    "LocDed6All",
+    "LocDedType6All",
+    "LocLimit6All",
+    "LocLimitType6All",
+    "LocPeril",
+)
+
+#: The account file, one row per policy layer. The same shape the Financial
+#: structure screen writes, so a promoted policy and a built one read alike.
+ACCOUNT_COLUMNS = (
+    "PortNumber",
+    "AccNumber",
+    "AccCurrency",
+    "PolNumber",
+    "PolPerilsCovered",
+    "PolInceptionDate",
+    "PolExpiryDate",
+    "LayerNumber",
+    "LayerParticipation",
+    "LayerLimit",
+    "LayerAttachment",
+    "PolDed6All",
+    "PolDedType6All",
+    "PolLimit6All",
+    "PolLimitType6All",
+    "PolPeril",
+)
+
+REINS_INFO_COLUMNS = (
+    "ReinsNumber",
+    "ReinsLayerNumber",
+    "ReinsName",
+    "ReinsPeril",
+    "CededPercent",
+    "PlacedPercent",
+    "RiskLimit",
+    "RiskAttachment",
+    "OccLimit",
+    "OccAttachment",
+    "ReinsCurrency",
+    "InuringPriority",
+    "ReinsType",
+    "RiskLevel",
+    "Reinstatement",
+    "ReinstatementCharge",
+    "ReinsPremium",
+)
+
+REINS_SCOPE_COLUMNS = (
+    "ReinsNumber",
+    "PortNumber",
+    "AccNumber",
+    "PolNumber",
+    "LocNumber",
+    "CededPercent",
+)
+
+
+class PolicyTerms(enum.StrEnum):
+    """Whether a promotion writes the workbook's policy terms and reinsurance."""
+
+    APPLY = "apply"
+    """Written for every account, as stated. An account without a limit keeps its
+    ground-up loss as insured loss, and is listed as possibly overstated."""
+
+    GROUND_UP = "ground_up"
+    """Not written, whatever the workbook holds: a ground-up version."""
+
+    @property
+    def label(self) -> str:
+        return {
+            PolicyTerms.APPLY: "Apply them, flagging policies with no limit",
+            PolicyTerms.GROUND_UP: "Leave them out: ground-up loss only",
+        }[self]
 
 
 #: The coverage columns of a written row, in OED order.
@@ -94,6 +189,7 @@ def promote(
     allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
     component_split: extract.ComponentSplit | None = None,
     occupancy: extract.OccupancyAssumption | None = None,
+    policy_terms: PolicyTerms | str = PolicyTerms.APPLY,
     actor=None,
     request=None,
 ) -> ExposureVersion:
@@ -112,6 +208,7 @@ def promote(
         allocation_method=allocation_method,
         component_split=component_split,
         occupancy=occupancy,
+        policy_terms=policy_terms,
     )
     selected_businesses = prepared.businesses
     selected_locations = prepared.locations
@@ -130,20 +227,30 @@ def promote(
         coverage_record=coverage_record,
         taxonomy_record=taxonomy_record,
         height_record=height_record,
+        financial_record=prepared.financial_record,
         selected_businesses=selected_businesses,
         selected_locations=selected_locations,
         actor=actor,
     )
 
-    payload = _location_csv(prepared.rows)
-    services.attach_file(
-        version,
-        FileKind.LOCATION,
-        payload,
-        filename=f"{version.id}_oed_location.csv",
-        actor=actor,
-        request=request,
-    )
+    for kind, rows, columns in (
+        (FileKind.LOCATION, prepared.rows, prepared.location_columns),
+        (FileKind.ACCOUNT, prepared.account_rows, ACCOUNT_COLUMNS),
+        (FileKind.REINS_INFO, prepared.reins_info_rows, REINS_INFO_COLUMNS),
+        (FileKind.REINS_SCOPE, prepared.reins_scope_rows, REINS_SCOPE_COLUMNS),
+    ):
+        if not rows:
+            # No placeholder file: an empty account file would claim an
+            # insured perspective the workbook does not support.
+            continue
+        services.attach_file(
+            version,
+            kind,
+            _csv(rows, columns),
+            filename=f"{version.id}_oed_{kind}.csv",
+            actor=actor,
+            request=request,
+        )
     services.run_validation(version, actor=actor, request=request)
     version.refresh_from_db()
     if not version.is_publishable:
@@ -168,6 +275,9 @@ def promote(
             "coverage_source": coverage_record["source"],
             "occupancy_assumption": taxonomy_record["assumption"]["name"],
             "locations": len(selected_locations),
+            "policy_terms": prepared.financial_record["policy_terms"],
+            "terms_applied": prepared.financial_record["applied"],
+            "contract_layers": prepared.financial_record["contract_layers_written"],
         },
         detail="Promoted a source-extract cohort to an OED exposure version.",
         request=request,
@@ -193,6 +303,11 @@ class PreparedSelection:
     coverage_record: dict[str, Any]
     taxonomy_record: dict[str, Any]
     height_record: dict[str, Any]
+    location_columns: tuple[str, ...] = LOCATION_COLUMNS
+    account_rows: tuple[dict[str, str], ...] = ()
+    reins_info_rows: tuple[dict[str, str], ...] = ()
+    reins_scope_rows: tuple[dict[str, str], ...] = ()
+    financial_record: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @property
     def total_tiv(self) -> Decimal:
@@ -217,6 +332,7 @@ def prepare(
     allocation_method: extract.AllocationMethod = extract.AllocationMethod.EQUAL_LOCATION,
     component_split: extract.ComponentSplit | None = None,
     occupancy: extract.OccupancyAssumption | None = None,
+    policy_terms: PolicyTerms | str = PolicyTerms.APPLY,
 ) -> PreparedSelection:
     """Resolve a selection into OED rows without creating anything.
 
@@ -227,6 +343,7 @@ def prepare(
     """
     component_split = component_split or extract.DEFAULT_SPLIT
     occupancy = occupancy or extract.DEFAULT_OCCUPANCY
+    mode = PolicyTerms(policy_terms)
 
     businesses, locations, allocation = _selection(
         batch,
@@ -235,6 +352,12 @@ def prepare(
         country=country,
         allocation_method=allocation_method,
     )
+    # Terms are written where the workbook has a Policies sheet for this
+    # selection at all. A book without one states no terms, and an account file
+    # of nothing but blanks would claim an insured perspective it never had.
+    applies = mode is PolicyTerms.APPLY and batch.policy_rows.filter(
+        business_id__in=businesses
+    ).exists()
 
     totals, tiers = _location_totals(locations, allocation)
     components, coverage_record = _coverage_values(
@@ -247,15 +370,268 @@ def prepare(
         occupancy, taxonomy, reported=stated_taxonomy
     )
 
+    rows = _location_rows(batch, locations, components, taxonomy, terms=applies)
+    account_rows = _account_rows(batch, businesses) if applies else []
+    programme, scope_dropped = (
+        _programme(batch, businesses, rows, account_rows) if applies else (None, 0)
+    )
+    contracts_in_workbook = sorted(
+        {
+            int(record["contract_number"])
+            for record in (batch.reinsurance or {}).get("contracts", [])
+            if record.get("contract_number") is not None
+        }
+    )
+
     return PreparedSelection(
         businesses=businesses,
         locations=locations,
         allocation=allocation,
-        rows=_location_rows(batch, locations, components, taxonomy),
+        rows=rows,
         coverage_record=coverage_record,
         taxonomy_record=taxonomy_record,
         height_record=_height_record(locations),
+        location_columns=(
+            (*LOCATION_COLUMNS, *LOCATION_TERM_COLUMNS) if applies else LOCATION_COLUMNS
+        ),
+        account_rows=tuple(account_rows),
+        reins_info_rows=programme.info if programme else (),
+        reins_scope_rows=programme.scope if programme else (),
+        financial_record=_financial_record(
+            mode,
+            applies=applies,
+            businesses=businesses,
+            account_rows=account_rows,
+            location_rows=rows,
+            programme=programme,
+            contracts_in_workbook=contracts_in_workbook,
+            scope_dropped=scope_dropped,
+        ),
     )
+
+
+def overstated_accounts(account_rows: Sequence[Mapping[str, str]]) -> dict[str, list[str]]:
+    """Policy IDs whose insured loss may be overstated, by the reason why.
+
+    ``uncapped``: a layer with neither a layer limit nor a policy limit, so the
+    layer pays the whole loss above its attachment. ``attachment_read_as_zero``:
+    a layer with no stated attachment, which OED reads as paying from the first
+    loss. ``no_policy_row``: an account the Policies sheet does not mention,
+    written with no terms at all.
+    """
+    reasons: dict[str, set[str]] = {
+        "uncapped": set(),
+        "attachment_read_as_zero": set(),
+        "no_policy_row": set(),
+    }
+    for row in account_rows:
+        account = row["AccNumber"]
+        if row.get("_no_policy_row"):
+            reasons["no_policy_row"].add(account)
+            continue
+        if not row.get("LayerLimit") and not row.get("PolLimit6All"):
+            reasons["uncapped"].add(account)
+        if not row.get("LayerAttachment"):
+            reasons["attachment_read_as_zero"].add(account)
+    return {key: sorted(values) for key, values in reasons.items()}
+
+
+def _financial_record(
+    mode: PolicyTerms,
+    *,
+    applies: bool,
+    businesses: set[str],
+    account_rows: Sequence[Mapping[str, str]],
+    location_rows: Sequence[Mapping[str, Any]],
+    programme,
+    contracts_in_workbook: list[int],
+    scope_dropped: int,
+) -> dict[str, Any]:
+    """What the version carries beyond its locations, and what it may overstate.
+
+    Every "no" says why, because "insured loss is not available" reads as a
+    platform limit when the reason is usually a column the workbook left empty.
+    """
+    flagged = overstated_accounts(account_rows)
+    possibly_overstated = sorted({account for values in flagged.values() for account in values})
+    value = {row["AccNumber"]: Decimal(0) for row in location_rows}
+    for row in location_rows:
+        value[row["AccNumber"]] += sum(
+            (Decimal(str(row.get(column) or 0)) for column in _COVERAGE_COLUMNS), Decimal(0)
+        )
+    overstated_tiv = sum((value.get(account, Decimal(0)) for account in possibly_overstated), Decimal(0))
+
+    if mode is PolicyTerms.GROUND_UP:
+        reason = "Ground-up only was chosen at promotion, so no terms were written."
+    elif not applies:
+        reason = (
+            "The workbook has no Policies rows for this selection, so there were no "
+            "terms to write and the version is ground-up only."
+        )
+    else:
+        reason = f"Written for all {len(businesses)} Policy IDs in the selection."
+        if possibly_overstated:
+            reason += (
+                f" {len(possibly_overstated)} of them state no limit, no attachment or "
+                "no policy row, so their insured loss is their ground-up loss (less any "
+                "deductible they state) and may be overstated."
+            )
+
+    written = programme.written if programme else ()
+    if contracts_in_workbook and not applies:
+        reinsurance = (
+            "Not written: reinsurance applies to insured loss, and this version "
+            "carries no policy terms."
+        )
+    elif programme and programme.unscoped:
+        reinsurance = (
+            f"Contract(s) {', '.join(str(item) for item in programme.unscoped)} "
+            "were left out: their scope names only accounts outside this version, "
+            "so they would cede nothing."
+        )
+    else:
+        reinsurance = ""
+
+    signed = {
+        row["LayerParticipation"] for row in account_rows if row.get("LayerParticipation")
+    }
+    return {
+        "policy_terms": str(mode),
+        "applied": applies,
+        "reason": reason,
+        "policy_ids_written": len({row["AccNumber"] for row in account_rows}),
+        "possibly_overstated": {
+            "policy_ids": possibly_overstated,
+            "tiv": str(overstated_tiv),
+            **flagged,
+        },
+        "policy_rows_written": len(account_rows),
+        "locations_with_terms": sum(
+            1 for row in location_rows if row.get("LocDed6All") or row.get("LocLimit6All")
+        ),
+        "signed_shares": sorted(signed),
+        "contracts_in_workbook": contracts_in_workbook,
+        "contracts_written": list(written),
+        "contract_layers_written": len(programme.info) if programme else 0,
+        "scope_rows_outside_version": scope_dropped,
+        "reinsurance_note": reinsurance,
+    }
+
+
+def _text(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def _positive(value: Any) -> str:
+    """A stated amount above zero as OED text, or blank: a zero term is no term."""
+    if value in (None, ""):
+        return ""
+    amount = Decimal(str(value))
+    return format(amount, "f") if amount > 0 else ""
+
+
+def _account_rows(batch: ImportBatch, businesses: set[str]) -> list[dict[str, str]]:
+    """The OED account rows: one per policy layer, exactly as the workbook states.
+
+    Nothing is completed on the way. A layer without a deductible is written
+    without one, even where the layer above states one, because a term copied
+    between layers is a term nobody wrote; a layer without a limit is written
+    without one, which OED reads as no limit. An account the Policies sheet
+    does not mention gets one row of no terms, under its own Policy ID, so it
+    is modelled at ground-up rather than left out of the insured perspective.
+    The ``_no_policy_row`` marker says so and is never written.
+    """
+    rows: list[dict[str, str]] = []
+    policies = SourcePolicyRow.objects.filter(
+        batch=batch, business_id__in=businesses
+    ).order_by("business_id", "policy_id", "layer_number", "row_number")
+    for policy in policies:
+        values = policy.values or {}
+        deductible = _positive(values.get("policy_deductible"))
+        limit = _positive(values.get("policy_limit"))
+        rows.append(
+            {
+                "PortNumber": batch.project.reference,
+                "AccNumber": policy.business_id,
+                "AccCurrency": CURRENCY,
+                "PolNumber": policy.policy_id,
+                "PolPerilsCovered": COVERED_PERIL,
+                "PolInceptionDate": _text(values.get("inception_date")),
+                "PolExpiryDate": _text(values.get("expiry_date")),
+                "LayerNumber": _text(values.get("layer_number")) or "1",
+                "LayerParticipation": _text(values.get("signed_share")) or "1",
+                "LayerLimit": _text(values.get("layer_limit")),
+                "LayerAttachment": _text(values.get("layer_attachment")),
+                "PolDed6All": deductible,
+                "PolDedType6All": FLAT_TERM_BASIS if deductible else "",
+                "PolLimit6All": limit,
+                "PolLimitType6All": FLAT_TERM_BASIS if limit else "",
+                "PolPeril": COVERED_PERIL if (deductible or limit) else "",
+            }
+        )
+    for account in sorted(businesses - {row["AccNumber"] for row in rows}):
+        rows.append(
+            {
+                "PortNumber": batch.project.reference,
+                "AccNumber": account,
+                "AccCurrency": CURRENCY,
+                "PolNumber": account,
+                "PolPerilsCovered": COVERED_PERIL,
+                "LayerNumber": "1",
+                "LayerParticipation": "1",
+                "_no_policy_row": "1",
+            }
+        )
+    return rows
+
+
+def _programme(
+    batch: ImportBatch,
+    businesses: set[str],
+    location_rows: Sequence[Mapping[str, Any]],
+    account_rows: Sequence[Mapping[str, str]],
+):
+    """The workbook's reinsurance, for the accounts this version holds.
+
+    Scope rows naming an account outside the selection are dropped: the
+    contract still covers what it names inside it. A contract left covering
+    nothing is left out and named, rather than written to cede nothing. A
+    contract that breaks a rule refuses the promotion, because a version whose
+    reinsurance differed from the workbook's would be net of a programme
+    nobody bought.
+    """
+    reinsurance = batch.reinsurance or {}
+    contracts = reinsurance.get("contracts") or []
+    if not contracts:
+        return None, 0
+    every_scope = reinsurance.get("scope") or []
+    scope = [
+        row
+        for row in every_scope
+        if not _text(row.get("business_id")) or _text(row.get("business_id")) in businesses
+    ]
+    programme = structure_builder.programme_rows(
+        contracts,
+        scope,
+        locations=location_rows,
+        policy_keys={(row["AccNumber"], row["PolNumber"]) for row in account_rows},
+        perils=COVERED_PERIL,
+        currency=CURRENCY,
+    )
+    if programme.refused:
+        reasons = [
+            f"Contract {record.get('contract_number')} layer "
+            f"{record.get('layer_number') or 1}: {reason}"
+            for record, reasons in programme.refused
+            for reason in reasons
+        ]
+        raise PromotionError(
+            "The reinsurance contracts cannot be written as the workbook states them, "
+            "so nothing was promoted. "
+            + " ".join(reasons[:5])
+            + (f" ({len(reasons) - 5} more.)" if len(reasons) > 5 else "")
+        )
+    return programme, len(every_scope) - len(scope)
 
 
 #: How one risk's value was arrived at, best evidence first.
@@ -336,25 +712,26 @@ def _stated_taxonomy(
     return stated
 
 
-def _selection(
+def _eligible(
     batch: ImportBatch,
     *,
     cohort: extract.Cohort,
     class_of_business: str | None,
-    allocation_method: extract.AllocationMethod,
     country: str | None = None,
-):
-    """The locations a promotion would cover, and what each would be allocated.
+) -> tuple[list[SourceRiskLocation], set[str]]:
+    """Every staged location, and the businesses whose whole schedule qualifies.
 
-    Shared by the promotion itself and the coverage template, so the template a
-    person fills in is always exactly the set the promotion will read back.
+    By the cohort each location stands in after review: the rules' assignment
+    at import, then whatever a person decided with a rationale. The rules are
+    not run again here, so the cohort rule version recorded on the batch is the
+    one that applied, and the review screen's counts are what is promoted.
     """
-    locations = list(batch.location_rows.all())
+    locations = list(batch.location_rows.all().prefetch_related("decisions"))
     if not locations:
         raise PromotionError("The batch staged no locations, so there is nothing to promote.")
 
     rows = [row.values for row in locations]
-    assignments = extract.assign_all(rows)
+    assignments = review.standing_assignments(locations)
     businesses = extract.business_complete(
         rows,
         assignments,
@@ -371,15 +748,35 @@ def _selection(
         raise PromotionError(
             f"No business has its whole schedule in {label}, so there is nothing to "
             "promote. Taking part of a schedule would leave the excluded sites' value "
-            "with nowhere honest to go."
+            "with nowhere honest to go. The review queue lists every location left "
+            "out and why."
         )
+    return locations, businesses
+
+
+def _selection(
+    batch: ImportBatch,
+    *,
+    cohort: extract.Cohort,
+    class_of_business: str | None,
+    allocation_method: extract.AllocationMethod,
+    country: str | None = None,
+):
+    """The locations a promotion would cover, and what each would be allocated.
+
+    Shared by the promotion itself and the coverage template, so the template a
+    person fills in is always exactly the set the promotion will read back.
+    """
+    locations, businesses = _eligible(
+        batch, cohort=cohort, class_of_business=class_of_business, country=country
+    )
 
     selected = [row for row in locations if row.business_id in businesses]
     policies = list(
         SourcePolicyRow.objects.filter(batch=batch, business_id__in=businesses)
     )
     allocation = extract.allocate(
-        [policy.values for policy in policies],
+        _one_row_per_policy([policy.values for policy in policies]),
         [row.values for row in selected],
         method=allocation_method,
     )
@@ -389,6 +786,32 @@ def _selection(
             "exposure version would misstate the portfolio."
         )
     return businesses, selected, allocation
+
+
+def _one_row_per_policy(policies: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """One record per policy, however many layers it has.
+
+    A policy's total insured value is one number, and allocating it once per
+    layer row would put it in the portfolio once per layer. A layered policy
+    may carry it on its first row or on every row; two different figures are a
+    contradiction nothing here can resolve, so they are refused.
+    """
+    grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    for record in policies:
+        key = (_text(record.get("business_id")), _text(record.get("policy_id")))
+        grouped.setdefault(key, []).append(record)
+
+    kept: list[Mapping[str, Any]] = []
+    for (account, policy), records in grouped.items():
+        stated = [record for record in records if record.get("policy_tiv") not in (None, "")]
+        if len({Decimal(str(record["policy_tiv"])) for record in stated}) > 1:
+            raise PromotionError(
+                f"Policy {policy} of {account} states different total insured values "
+                "on different layers. A policy has one value: write it on the first "
+                "layer's row, or the same figure on every row."
+            )
+        kept.append(stated[0] if stated else records[0])
+    return kept
 
 
 def _coverage_values(
@@ -475,6 +898,7 @@ def _create_version(
     coverage_record: dict[str, Any],
     taxonomy_record: dict[str, Any],
     height_record: dict[str, Any],
+    financial_record: dict[str, Any],
     selected_businesses: set[str],
     selected_locations: list[SourceRiskLocation],
     actor,
@@ -500,6 +924,15 @@ def _create_version(
             "parser_version": batch.parser_version,
             "cohort": str(cohort),
             "cohort_rule_version": batch.cohort_rule_version,
+            # Locations in the version because a person put them in its cohort,
+            # rather than the rules: a coordinate outside the country's outline
+            # confirmed as right, say. The review overlay is what applied it.
+            "cohorts_decided_in_review": sum(
+                1
+                for row in selected_locations
+                if review.overlay(row).cohort_is_reviewed
+            ),
+            "overlay_version": review.OVERLAY_VERSION,
             "class_of_business": class_of_business,
             "country_filter": country,
             "business_count": len(selected_businesses),
@@ -518,11 +951,8 @@ def _create_version(
             },
             "coverage": coverage_record,
             "taxonomy": taxonomy_record,
-            "value_basis": (
-                "gross_limit is reported TIV at KRE's share in USD. The share is not "
-                "applied again, so a physical-damage result from this version is "
-                "KRE-share gross damage, not 100%-of-risk ground-up loss."
-            ),
+            "financial_structure": financial_record,
+            "value_basis": _value_basis(financial_record),
             # Section 8: an assumed attribute must never look like a reported
             # one. These are the fields the source did not carry.
             "attributes_not_reported": {
@@ -542,6 +972,27 @@ def _create_version(
         },
         created_by=actor,
         updated_by=actor,
+    )
+
+
+def _value_basis(financial_record: Mapping[str, Any]) -> str:
+    """What a loss from this version is a loss of, in one sentence.
+
+    The workbook states values at KRE's share unless a signed share says
+    otherwise, and a signed share below one is the statement that the values
+    are at 100% of the risk.
+    """
+    shares = [Decimal(item) for item in financial_record.get("signed_shares", [])]
+    if any(share < 1 for share in shares):
+        return (
+            "Values are at 100% of each risk, in USD, and the signed share on each "
+            "layer applies in the insured perspective. Ground-up loss from this "
+            "version is 100%-of-risk damage; insured loss is at KRE's share."
+        )
+    return (
+        "Values are reported at KRE's share, in USD. The share is not applied again, "
+        "so a physical-damage result from this version is KRE-share gross damage, "
+        "not 100%-of-risk ground-up loss."
     )
 
 
@@ -600,6 +1051,8 @@ def _location_rows(
     locations: list[SourceRiskLocation],
     components: dict[tuple[str, int], dict[str, Decimal]],
     taxonomy: dict[tuple[str, int], dict[str, str]],
+    *,
+    terms: bool = False,
 ) -> list[dict[str, Any]]:
     """The OED location rows a selection produces.
 
@@ -645,13 +1098,28 @@ def _location_rows(
                 },
             }
         )
+        if terms:
+            values = row.values or {}
+            deductible = _positive(values.get("location_deductible"))
+            limit = _positive(values.get("location_limit"))
+            rows[-1].update(
+                {
+                    "LocDed6All": deductible,
+                    "LocDedType6All": FLAT_TERM_BASIS if deductible else "",
+                    "LocLimit6All": limit,
+                    "LocLimitType6All": FLAT_TERM_BASIS if limit else "",
+                    "LocPeril": COVERED_PERIL if (deductible or limit) else "",
+                }
+            )
     return rows
 
 
-def _location_csv(rows: list[dict[str, Any]]) -> bytes:
-    """The OED location file for a set of prepared rows."""
+def _csv(rows: Sequence[Mapping[str, Any]], columns: Sequence[str]) -> bytes:
+    """One OED file for a set of prepared rows, blank where a row has no value."""
     buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=list(LOCATION_COLUMNS), lineterminator="\n")
+    writer = csv.DictWriter(
+        buffer, fieldnames=list(columns), restval="", extrasaction="ignore", lineterminator="\n"
+    )
     writer.writeheader()
     writer.writerows(rows)
     return buffer.getvalue().encode("utf-8")
@@ -675,6 +1143,7 @@ def promotion_summary(version: ExposureVersion) -> dict[str, Any]:
         "coverage": lineage.get("coverage"),
         "taxonomy": lineage.get("taxonomy"),
         "value_basis": lineage.get("value_basis"),
+        "financial_structure": lineage.get("financial_structure"),
         "attributes_not_reported": sorted(lineage.get("attributes_not_reported", {})),
         "decision_use": lineage.get("decision_use"),
     }

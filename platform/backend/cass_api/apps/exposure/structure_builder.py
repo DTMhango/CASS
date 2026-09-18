@@ -19,6 +19,7 @@ rather than written and then quietly left out of the ceded loss.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -264,6 +265,10 @@ def remove_policy(version: ExposureVersion, *, account: Any, policy: Any, actor=
 
 # -- contracts ------------------------------------------------------------------------
 
+def _policy_keys(rows: Sequence[Mapping[str, Any]]) -> set[tuple[str, str]]:
+    return {(_text(row.get("AccNumber")), _text(row.get("PolNumber"))) for row in rows}
+
+
 @transaction.atomic
 def add_contract(
     version: ExposureVersion,
@@ -280,12 +285,74 @@ def add_contract(
     risk_level: Any = "",
     risk_attachment: Any = None,
     risk_limit: Any = None,
+    reinstatements: Any = None,
+    reinstatement_rate: Any = None,
+    reinstatement_premium: Any = None,
     scope: Sequence[Mapping[str, Any]] = (),
     whole_portfolio: bool = False,
     actor=None,
 ) -> dict[str, Any]:
     """Write one reinsurance contract and the scope it reaches."""
     _require_draft(version)
+    info_rows = _rows(version, FileKind.REINS_INFO)
+    info, scope_rows = contract_rows(
+        contract_type=contract_type,
+        perils=perils,
+        name=name,
+        currency=currency,
+        inuring_priority=inuring_priority,
+        ceded_percent=ceded_percent,
+        placed_percent=placed_percent,
+        occurrence_attachment=occurrence_attachment,
+        occurrence_limit=occurrence_limit,
+        risk_level=risk_level,
+        risk_attachment=risk_attachment,
+        risk_limit=risk_limit,
+        reinstatements=reinstatements,
+        reinstatement_rate=reinstatement_rate,
+        reinstatement_premium=reinstatement_premium,
+        scope=scope,
+        whole_portfolio=whole_portfolio,
+        number=max([_int(row.get("ReinsNumber")) or 0 for row in info_rows] + [0]) + 1,
+        locations=editing.read_rows(version, FileKind.LOCATION),
+        policy_keys=_policy_keys(_rows(version, FileKind.ACCOUNT)),
+    )
+    _write(version, FileKind.REINS_INFO, [*info_rows, info], actor=actor)
+    _write(version, FileKind.REINS_SCOPE, [*_rows(version, FileKind.REINS_SCOPE), *scope_rows], actor=actor)
+    run_validation(version, actor=actor)
+    return summary(version)
+
+
+def contract_rows(
+    *,
+    contract_type: Any,
+    perils: Any,
+    number: int,
+    locations: Sequence[Mapping[str, Any]],
+    policy_keys: set[tuple[str, str]],
+    layer_number: int = 1,
+    name: Any = "",
+    currency: Any = "",
+    inuring_priority: Any = 1,
+    ceded_percent: Any = None,
+    placed_percent: Any = None,
+    occurrence_attachment: Any = None,
+    occurrence_limit: Any = None,
+    risk_level: Any = "",
+    risk_attachment: Any = None,
+    risk_limit: Any = None,
+    reinstatements: Any = None,
+    reinstatement_rate: Any = None,
+    reinstatement_premium: Any = None,
+    scope: Sequence[Mapping[str, Any]] = (),
+    whole_portfolio: bool = False,
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """The info row and scope rows one contract layer writes, or why it cannot.
+
+    Reads and writes nothing, so the Financial structure screen and an imported
+    workbook are held to one set of rules: a contract the screen would refuse
+    is refused from a workbook too, in the same words. Raises ``BuildError``.
+    """
     kind = _text(contract_type).upper()
     if not kind:
         raise BuildError({"ReinsType": "Choose the contract type."})
@@ -306,7 +373,6 @@ def add_contract(
     perils = _text(perils).upper()
     if not perils:
         problems["ReinsPeril"] = "State the perils the contract covers, such as QEQ."
-    locations = editing.read_rows(version, FileKind.LOCATION)
     currency = _text(currency).upper() or (_text(locations[0].get("LocCurrency")) if locations else "")
 
     ceded = _amount(ceded_percent, "CededPercent", "The ceded share", problems, share=True)
@@ -316,6 +382,9 @@ def add_contract(
     risk_attach = _amount(risk_attachment, "RiskAttachment", "The risk attachment", problems)
     risk_cap = _amount(risk_limit, "RiskLimit", "The risk limit", problems)
     level = _text(risk_level).upper()
+    reinstated, rate_text, rip_base = _reinstatement_terms(
+        kind, reinstatements, reinstatement_rate, reinstatement_premium, problems
+    )
     priority = _int(inuring_priority)
     if priority is None or priority < 1:
         problems["InuringPriority"] = "The inuring priority is a whole number from 1."
@@ -382,12 +451,6 @@ def add_contract(
 
     portfolio_of = {_text(row.get("AccNumber")): _text(row.get("PortNumber")) for row in locations}
     location_keys = {(_text(row.get("AccNumber")), _text(row.get("LocNumber"))) for row in locations}
-    policy_keys = {
-        (_text(row.get("AccNumber")), _text(row.get("PolNumber")))
-        for row in _rows(version, FileKind.ACCOUNT)
-    }
-    info_rows = _rows(version, FileKind.REINS_INFO)
-    number = max([_int(row.get("ReinsNumber")) or 0 for row in info_rows] + [0]) + 1
 
     scope_rows: list[dict[str, str]] = []
     if whole_portfolio and kind != "SS":
@@ -405,24 +468,25 @@ def add_contract(
             )
         for index, entry in enumerate(scope, start=1):
             key = f"scope.{index}"
+            label = _text(entry.get("label")) or f"Scope row {index}"
             account = _text(entry.get("account"))
             policy = _text(entry.get("policy"))
             location = _text(entry.get("location"))
             if not account:
-                problems[key] = f"Scope row {index} names no account."
+                problems[key] = f"{label} names no account."
                 continue
             if account not in portfolio_of:
-                problems[key] = f"Scope row {index} names account {account}, which this portfolio does not hold."
+                problems[key] = f"{label} names account {account}, which this portfolio does not hold."
                 continue
             if location and (account, location) not in location_keys:
                 problems[key] = (
-                    f"Scope row {index} names location {location} on account {account}, which "
+                    f"{label} names location {location} on account {account}, which "
                     "this portfolio does not hold."
                 )
                 continue
             if policy and (account, policy) not in policy_keys:
                 problems[key] = (
-                    f"Scope row {index} names policy {policy} on account {account}, which has no "
+                    f"{label} names policy {policy} on account {account}, which has no "
                     "policy of that name."
                 )
                 continue
@@ -448,16 +512,16 @@ def add_contract(
                     )
                 share = _amount(
                     entry.get("ceded_percent"), f"{key}.ceded_percent",
-                    f"Scope row {index}'s ceded share", problems, share=True,
+                    f"{label}'s ceded share", problems, share=True,
                 )
                 if share is None and f"{key}.ceded_percent" not in problems:
-                    problems[f"{key}.ceded_percent"] = f"Scope row {index} needs the share ceded on that risk."
+                    problems[f"{key}.ceded_percent"] = f"{label} needs the share ceded on that risk."
                 row["CededPercent"] = _plain(share)
             scope_rows.append(row)
 
     info = {
         "ReinsNumber": str(number),
-        "ReinsLayerNumber": "1",
+        "ReinsLayerNumber": str(layer_number),
         "ReinsName": _text(name),
         "ReinsPeril": perils,
         "CededPercent": _plain(ceded, default="1" if kind == "CXL" else ""),
@@ -470,6 +534,9 @@ def add_contract(
         "InuringPriority": str(priority),
         "ReinsType": kind,
         "RiskLevel": level,
+        "Reinstatement": "" if reinstated is None else str(reinstated),
+        "ReinstatementCharge": rate_text,
+        "ReinsPremium": _plain(rip_base),
     }
 
     if not problems:
@@ -477,11 +544,159 @@ def add_contract(
         _checked(FileKind.REINS_SCOPE, scope_rows, problems, "scope.")
     if problems:
         raise BuildError(problems)
+    return info, scope_rows
 
-    _write(version, FileKind.REINS_INFO, [*info_rows, info], actor=actor)
-    _write(version, FileKind.REINS_SCOPE, [*_rows(version, FileKind.REINS_SCOPE), *scope_rows], actor=actor)
-    run_validation(version, actor=actor)
-    return summary(version)
+
+def _reinstatement_terms(
+    kind: str, count: Any, rate: Any, premium: Any, problems: dict[str, str]
+) -> tuple[int | None, str, Decimal | None]:
+    """Reinstatements, their rate and the premium they are charged on.
+
+    Stated only for a catastrophe excess of loss, the one type whose annual
+    limit CASS applies. The engine ignores all three, so a term written on any
+    other contract would read as cover that is limited when it is not.
+    """
+    from cass_oed.limited_cover import CoverError, parse_rates
+
+    stated = [value for value in (count, rate, premium) if _text(value)]
+    if not stated:
+        return None, "", None
+    if kind != "CXL":
+        problems["Reinstatement"] = (
+            "Reinstatements are applied to a catastrophe excess of loss only, whose "
+            "limit is per event. Leave them out for this contract type."
+        )
+        return None, "", None
+    reinstated = _int(count) if _text(count) else None
+    if _text(count) and (reinstated is None or reinstated < 0):
+        problems["Reinstatement"] = "The number of reinstatements is a whole number from 0."
+    if reinstated is None and not problems.get("Reinstatement"):
+        problems["Reinstatement"] = (
+            "State how many reinstatements the layer has, so its rate and premium "
+            "have something to apply to. 0 means it pays its limit once a year."
+        )
+    try:
+        rates = parse_rates(rate)
+    except CoverError as exc:
+        problems["ReinstatementCharge"] = str(exc)
+        rates = ()
+    base = _amount(premium, "ReinsPremium", "The reinstatement premium", problems)
+    if rates and any(rates) and base is None and "ReinsPremium" not in problems:
+        problems["ReinsPremium"] = (
+            "A reinstatement rate needs the premium it is charged on, usually the "
+            "layer's MDP at 100%."
+        )
+    text = ";".join(format(value, "g") for value in rates)
+    return reinstated, text, base
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Programme:
+    """A workbook's reinsurance, as the rows it writes and what it could not."""
+
+    info: tuple[dict[str, str], ...]
+    scope: tuple[dict[str, str], ...]
+    #: Each contract layer that broke a rule: its record and the reasons.
+    refused: tuple[tuple[Mapping[str, Any], tuple[str, ...]], ...]
+    #: Contract numbers no scope row reaches, so they would cede nothing.
+    unscoped: tuple[int, ...]
+
+    @property
+    def written(self) -> tuple[int, ...]:
+        return tuple(sorted({int(row["ReinsNumber"]) for row in self.info}))
+
+
+def programme_rows(
+    contracts: Sequence[Mapping[str, Any]],
+    scope: Sequence[Mapping[str, Any]],
+    *,
+    locations: Sequence[Mapping[str, Any]],
+    policy_keys: set[tuple[str, str]],
+    perils: str,
+    currency: str,
+) -> Programme:
+    """Every contract of a workbook, under the rules ``contract_rows`` applies.
+
+    Contract numbers and layers are kept as the workbook states them, so the
+    structure a run applies can be read back against the sheet it came from.
+    Layers of one contract share its scope, which OED joins on the contract
+    number alone, so scope rows are written once per contract.
+
+    Records are canonical, as the intake reader names them: a scope row with no
+    Policy ID covers the whole portfolio.
+    """
+    by_number: dict[int, list[Mapping[str, Any]]] = {}
+    for record in contracts:
+        number = _int(record.get("contract_number"))
+        if number is not None:
+            by_number.setdefault(number, []).append(record)
+    reach: dict[int, list[Mapping[str, Any]]] = {}
+    for record in scope:
+        number = _int(record.get("contract_number"))
+        if number is not None:
+            reach.setdefault(number, []).append(record)
+
+    info: list[dict[str, str]] = []
+    scope_rows: list[dict[str, str]] = []
+    refused: list[tuple[Mapping[str, Any], tuple[str, ...]]] = []
+    unscoped: list[int] = []
+
+    for number in sorted(by_number):
+        rows = reach.get(number, [])
+        if not rows:
+            unscoped.append(number)
+            continue
+        named = [
+            {
+                "account": row.get("business_id"),
+                "policy": row.get("policy_id"),
+                "location": row.get("location_number"),
+                "ceded_percent": row.get("ceded_percent"),
+                "label": f"Scope row {row.get('row_number')}" if row.get("row_number") else "",
+            }
+            for row in rows
+            if _text(row.get("business_id"))
+        ]
+        whole = any(not _text(row.get("business_id")) for row in rows)
+        scoped = False
+        for record in sorted(by_number[number], key=lambda item: _int(item.get("layer_number")) or 1):
+            try:
+                layer_info, layer_scope = contract_rows(
+                    contract_type=record.get("contract_type"),
+                    perils=perils,
+                    currency=currency,
+                    name=record.get("name"),
+                    inuring_priority=record.get("inuring_priority"),
+                    ceded_percent=record.get("ceded_percent"),
+                    placed_percent=record.get("placed_percent"),
+                    occurrence_attachment=record.get("occurrence_attachment"),
+                    occurrence_limit=record.get("occurrence_limit"),
+                    risk_level=record.get("risk_level"),
+                    risk_limit=record.get("risk_limit"),
+                    reinstatements=record.get("reinstatements"),
+                    reinstatement_rate=record.get("reinstatement_rate"),
+                    reinstatement_premium=record.get("reinstatement_premium"),
+                    scope=named,
+                    whole_portfolio=whole,
+                    number=number,
+                    layer_number=_int(record.get("layer_number")) or 1,
+                    locations=locations,
+                    policy_keys=policy_keys,
+                )
+            except BuildError as exc:
+                refused.append((record, tuple(dict.fromkeys(exc.problems.values()))))
+                continue
+            info.append(layer_info)
+            if not scoped:
+                scope_rows.extend(layer_scope)
+                scoped = True
+
+    return Programme(
+        info=tuple(info),
+        scope=tuple(scope_rows),
+        refused=tuple(refused),
+        unscoped=tuple(unscoped),
+    )
 
 
 @transaction.atomic

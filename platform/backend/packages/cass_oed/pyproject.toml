@@ -3,7 +3,7 @@ name = "cass-oed"
 version = "0.1.0"
 description = "CASS OED schema subset, validation and publication."
 requires-python = ">=3.11"
-dependencies = ["cass-core"]
+dependencies = ["cass-core", "numpy>=1.26"]
 
 [build-system]
 requires = ["setuptools>=68"]

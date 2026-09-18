@@ -19,11 +19,13 @@ that: a join CASS had to infer, and an allocation assumption on every policy
 holding more than one site. A risk is a row here, and the account reference
 appears on both sheets, so the join is stated rather than reconstructed.
 
-Two sheets, not one, for the same reason OED has four files. A deductible
+Four sheets, not one, for the same reason OED has four files. A deductible
 belongs to a policy and a coordinate belongs to a building, and flattening them
 together would repeat policy terms on every risk row and invite them to
-disagree. Policy terms are optional: a portfolio without them still runs, at
-ground-up loss only, and CASS says so rather than inventing a term.
+disagree. The two reinsurance sheets follow OED's own split: a contract's terms
+once per layer, and what it covers once per contract. Policy terms and
+reinsurance are optional: a portfolio without them still runs, at ground-up
+loss only, and CASS says so rather than inventing a term.
 
 **No column is classified.** An earlier draft graded these by sensitivity and
 role-gated the address, on the reading that a risk address was counterparty
@@ -37,7 +39,8 @@ platform does.
 **Blank is an answer.** Every optional column declares what CASS does when it
 is empty, and the answer is never "treat it as zero". An unknown occupancy
 reaches a named assumption; an unstated risk value reaches the allocation
-engine; an unstated policy term removes a perspective and says which. The
+engine; an unstated layer limit is written as OED's "no limit" and the policy
+is listed as possibly overstated beside every insured result. The
 alternative -- a template that implies knowledge the person filling it in does
 not have -- produces confident numbers resting on blanks, which is the failure
 this whole profile exists to prevent.
@@ -51,9 +54,8 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 from cass_oed.schema import (
-    ACCOUNT_FIELDS,
-    LOCATION_FIELDS,
     OED_SCHEMA_VERSION,
+    SCHEMA,
     DataType,
     FieldSpec,
     FileKind,
@@ -62,13 +64,17 @@ from cass_oed.schema import (
 
 #: Bumped when a column is added, removed or rebound to a different OED field.
 #: A completed template records it, so a file filled in under an earlier profile
-#: stays interpretable.
+#: stays interpretable. 1.1.0 added the two reinsurance sheets; a 1.0.0 file has
+#: neither, which reads as a portfolio with no reinsurance. 1.2.0 added the
+#: reinstatement columns; a 1.1.0 file reads as stating no reinstatements.
 PROFILE_NAME = "CASS portfolio intake"
-PROFILE_VERSION = "cass-portfolio-intake/1.0.0"
+PROFILE_VERSION = "cass-portfolio-intake/1.2.0"
 
 #: The sheet names a workbook carries.
 RISK_SHEET = "Risks"
 POLICY_SHEET = "Policies"
+CONTRACT_SHEET = "Reinsurance contracts"
+SCOPE_SHEET = "Reinsurance scope"
 GUIDE_SHEET = "How to fill this in"
 
 
@@ -77,6 +83,17 @@ class Sheet(enum.StrEnum):
 
     RISK = RISK_SHEET
     POLICY = POLICY_SHEET
+    CONTRACT = CONTRACT_SHEET
+    SCOPE = SCOPE_SHEET
+
+
+#: The OED file each sheet's columns land in.
+SHEET_FILE: Mapping[Sheet, FileKind] = {
+    Sheet.RISK: FileKind.LOCATION,
+    Sheet.POLICY: FileKind.ACCOUNT,
+    Sheet.CONTRACT: FileKind.REINS_INFO,
+    Sheet.SCOPE: FileKind.REINS_SCOPE,
+}
 
 
 class WhenBlank(enum.StrEnum):
@@ -202,7 +219,8 @@ class ProfileError(Exception):
 
 
 
-def _risk(
+def _column(
+    sheet: Sheet,
     name: str,
     oed_field: str | None,
     *,
@@ -216,9 +234,9 @@ def _risk(
 ) -> Column:
     return Column(
         name=name,
-        sheet=Sheet.RISK,
+        sheet=sheet,
         oed_field=oed_field,
-        oed_kind=FileKind.LOCATION if oed_field else None,
+        oed_kind=SHEET_FILE[sheet] if oed_field else None,
         required=required,
         help_text=help_text,
         when_blank=WhenBlank.REFUSED if required else when_blank,
@@ -229,31 +247,20 @@ def _risk(
     )
 
 
-def _policy(
-    name: str,
-    oed_field: str | None,
-    *,
-    required: bool = False,
-    help_text: str,
-    when_blank: WhenBlank = WhenBlank.ABSENT,
-    blank_effect: str = "",
-    example: str = "",
-    purpose: str = "",
-    dtype: DataType | None = None,
-) -> Column:
-    return Column(
-        name=name,
-        sheet=Sheet.POLICY,
-        oed_field=oed_field,
-        oed_kind=FileKind.ACCOUNT if oed_field else None,
-        required=required,
-        help_text=help_text,
-        when_blank=WhenBlank.REFUSED if required else when_blank,
-        blank_effect=blank_effect,
-        example=example,
-        purpose=purpose,
-        dtype=dtype,
-    )
+def _risk(name: str, oed_field: str | None, **kwargs: Any) -> Column:
+    return _column(Sheet.RISK, name, oed_field, **kwargs)
+
+
+def _policy(name: str, oed_field: str | None, **kwargs: Any) -> Column:
+    return _column(Sheet.POLICY, name, oed_field, **kwargs)
+
+
+def _contract(name: str, oed_field: str | None, **kwargs: Any) -> Column:
+    return _column(Sheet.CONTRACT, name, oed_field, **kwargs)
+
+
+def _scope(name: str, oed_field: str | None, **kwargs: Any) -> Column:
+    return _column(Sheet.SCOPE, name, oed_field, **kwargs)
 
 
 RISK_COLUMNS: tuple[Column, ...] = (
@@ -532,7 +539,13 @@ RISK_COLUMNS: tuple[Column, ...] = (
     _risk(
         "Risk deductible",
         "LocDed6All",
-        help_text="Combined deductible applying at this risk.",
+        help_text=(
+            "A deductible for this one property on its own. Use it only where a "
+            "policy covers several properties and each has its own deductible. For "
+            "a policy with one risk, leave it blank and put the deductible on the "
+            "Policies sheet: CASS takes the risk deductible off first and then the "
+            "policy deductible, so 25,000 in both places is 50,000 in total."
+        ),
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No deductible is applied at the risk. Ground-up loss is unaffected.",
         example="25000.00",
@@ -540,7 +553,11 @@ RISK_COLUMNS: tuple[Column, ...] = (
     _risk(
         "Risk limit",
         "LocLimit6All",
-        help_text="Combined limit applying at this risk.",
+        help_text=(
+            "A limit for this one property on its own. Use it only where a policy "
+            "covers several properties and each has its own limit. For a policy with "
+            "one risk, leave it blank and put the limit on the Policies sheet."
+        ),
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No limit is applied at the risk. Ground-up loss is unaffected.",
         example="1200000.00",
@@ -587,7 +604,9 @@ POLICY_COLUMNS: tuple[Column, ...] = (
         help_text=(
             "The policy's total insured value, at the share CASS writes. Fill this "
             "in only where the individual risk values are not known: it is what "
-            "the allocation scenarios divide."
+            "the allocation scenarios divide. A layered policy has one value, so "
+            "write it on the first layer's row, or the same figure on every row; "
+            "CASS counts it once."
         ),
         when_blank=WhenBlank.ABSENT,
         blank_effect=(
@@ -619,7 +638,13 @@ POLICY_COLUMNS: tuple[Column, ...] = (
     _policy(
         "Layer",
         "LayerNumber",
-        help_text="Layer number where the policy is layered. Layers apply in order.",
+        help_text=(
+            "Layer number where the policy is layered: 1, then 2, and so on. Each "
+            "layer is its own row, with the same Policy ID and Policy reference, so "
+            "a one-risk policy with two layers has one row on the Risks sheet and two "
+            "here. Every layer looks at the same loss and pays its own slice of it, "
+            "from its attachment up to its attachment plus its limit."
+        ),
         blank_effect="Read as a single layer.",
         example="1",
     ),
@@ -640,23 +665,43 @@ POLICY_COLUMNS: tuple[Column, ...] = (
     _policy(
         "Layer limit",
         "LayerLimit",
-        help_text="Limit of this layer.",
-        when_blank=WhenBlank.LIMITS_PERSPECTIVE,
-        blank_effect="Insured loss cannot be calculated for this policy.",
+        help_text=(
+            "The most this layer pays, before the signed share. For a share of a "
+            "whole risk rather than of a layer, write the policy's sum insured."
+        ),
+        when_blank=WhenBlank.ABSENT,
+        blank_effect=(
+            "Written blank, which OED reads as no limit: the layer pays the whole "
+            "loss above its attachment, so insured loss is the ground-up loss unless "
+            "a policy limit caps it. CASS lists the policy as possibly overstated."
+        ),
         example="5000000.00",
     ),
     _policy(
         "Layer attachment",
         "LayerAttachment",
-        help_text="Attachment point of this layer.",
-        when_blank=WhenBlank.LIMITS_PERSPECTIVE,
-        blank_effect="Insured loss cannot be calculated for this policy.",
+        help_text=(
+            "The loss at which this layer starts paying. Write 0 for a layer that "
+            "pays from the first loss."
+        ),
+        when_blank=WhenBlank.ABSENT,
+        blank_effect=(
+            "Written blank, which OED reads as 0: the layer pays from the first loss. "
+            "CASS lists the policy as possibly overstated, because a layer that really "
+            "attaches higher would pay less."
+        ),
         example="1000000.00",
     ),
     _policy(
         "Policy deductible",
         "PolDed6All",
-        help_text="Combined deductible applying at the policy.",
+        help_text=(
+            "The deductible for the policy as a whole, taken off the combined loss "
+            "of all its risks. For a policy with one risk, this is the only place "
+            "its deductible goes. Where the policy has more than one layer, repeat "
+            "it on every layer's row: each layer reads the deductible from its own "
+            "row, and a layer whose row leaves it blank is calculated without it."
+        ),
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No policy deductible is applied.",
         example="250000.00",
@@ -664,7 +709,12 @@ POLICY_COLUMNS: tuple[Column, ...] = (
     _policy(
         "Policy limit",
         "PolLimit6All",
-        help_text="Combined limit applying at the policy.",
+        help_text=(
+            "The limit for the policy as a whole, applied to the combined loss of all "
+            "its risks. For a policy with one risk, this is the only place its limit "
+            "goes. Where the policy has more than one layer, repeat it on every "
+            "layer's row, as for the deductible."
+        ),
         when_blank=WhenBlank.LIMITS_PERSPECTIVE,
         blank_effect="No policy limit is applied.",
         example="10000000.00",
@@ -672,7 +722,270 @@ POLICY_COLUMNS: tuple[Column, ...] = (
 )
 
 
-COLUMNS: tuple[Column, ...] = (*RISK_COLUMNS, *POLICY_COLUMNS)
+CONTRACT_COLUMNS: tuple[Column, ...] = (
+    _contract(
+        "Contract number",
+        "ReinsNumber",
+        required=True,
+        help_text=(
+            "A whole number identifying the contract. Every layer of one contract "
+            "shares it, and the Reinsurance scope sheet uses it to say what the "
+            "contract covers. OED numbers contracts, so a name belongs in Contract "
+            "name."
+        ),
+        example="2",
+    ),
+    _contract(
+        "Layer",
+        "ReinsLayerNumber",
+        help_text=(
+            "1 for the first layer of a contract, 2 for the next, and so on. A "
+            "layered programme is one contract number with one row per layer. "
+            "Every layer looks at the same loss and pays its own slice of it."
+        ),
+        blank_effect="Read as layer 1.",
+        example="1",
+    ),
+    _contract(
+        "Contract name",
+        "ReinsName",
+        help_text="A name to recognise the contract or layer by. Never used in calculation.",
+        blank_effect="The contract is identified by its number alone.",
+        example="Catastrophe excess, first layer",
+    ),
+    _contract(
+        "Contract type",
+        "ReinsType",
+        required=True,
+        help_text=(
+            "QS for quota share, SS for surplus share, CXL for catastrophe excess "
+            "of loss. These are the types CASS applies in a run."
+        ),
+        example="CXL",
+    ),
+    _contract(
+        "Inuring priority",
+        "InuringPriority",
+        required=True,
+        help_text=(
+            "The order contracts apply in: 1 first, then 2 on what 1 left, and so "
+            "on. Every layer of one programme takes the same number. Give a second "
+            "layer a higher number and it only sees what the first layer left, "
+            "which usually means it pays nothing."
+        ),
+        example="2",
+    ),
+    _contract(
+        "Ceded share",
+        "CededPercent",
+        help_text=(
+            "The proportion ceded, between 0 and 1. Required for a quota share: "
+            "0.3 cedes 30% of every loss. For a catastrophe excess of loss it is "
+            "the share of the layer ceded. For a surplus share, leave it blank "
+            "here and give each risk's share on the Reinsurance scope sheet."
+        ),
+        blank_effect=(
+            "A catastrophe excess of loss cedes the whole layer. A quota share "
+            "cannot be written without it."
+        ),
+        example="1",
+    ),
+    _contract(
+        "Placed share",
+        "PlacedPercent",
+        help_text=(
+            "The proportion of the contract actually placed with reinsurers, "
+            "between 0 and 1."
+        ),
+        blank_effect="Read as fully placed.",
+        example="0.85",
+    ),
+    _contract(
+        "Attachment per event",
+        "OccAttachment",
+        help_text=(
+            "Where a catastrophe excess of loss starts paying, measured on the "
+            "loss from one event across everything the contract covers."
+        ),
+        blank_effect="A catastrophe excess of loss cannot be written without it.",
+        example="5000000.00",
+    ),
+    _contract(
+        "Limit per event",
+        "OccLimit",
+        help_text=(
+            "The most the contract pays for one event. Required for a catastrophe "
+            "excess of loss; optional for the others."
+        ),
+        blank_effect=(
+            "A catastrophe excess of loss cannot be written without it. For the "
+            "other types, nothing caps what one event can cede."
+        ),
+        example="20000000.00",
+    ),
+    _contract(
+        "Risk level",
+        "RiskLevel",
+        help_text=(
+            "What counts as one risk for a per-risk term: LOC for each risk, POL "
+            "for each policy, ACC for each Policy ID. Needed for a surplus share, "
+            "and for a quota share with a limit per risk."
+        ),
+        blank_effect="The contract applies to the portfolio as a whole.",
+        example="LOC",
+    ),
+    _contract(
+        "Limit per risk",
+        "RiskLimit",
+        help_text="The most the contract cedes on any one risk, at the risk level named.",
+        blank_effect="Nothing caps what one risk can cede.",
+        example="8000000.00",
+    ),
+    _contract(
+        "Reinstatements",
+        "Reinstatement",
+        help_text=(
+            "For a catastrophe excess of loss: how many times the layer's limit is "
+            "restored in a year after it pays. 0 means it pays its limit once a year. "
+            "The loss engine ignores this; CASS applies it when a run asks for cover "
+            "limited by contract terms."
+        ),
+        blank_effect=(
+            "Not stated, so the layer is applied as the engine applies every layer: "
+            "in full on every event, with no annual limit. A run asking for limited "
+            "cover says which layers this applies to."
+        ),
+        example="2",
+    ),
+    _contract(
+        "Reinstatement rate",
+        "ReinstatementCharge",
+        help_text=(
+            "The charge for each reinstatement, as a proportion of the reinstatement "
+            "premium: 1 for 100%, 1.25 for 125%. Where reinstatements are charged "
+            "differently, one rate per reinstatement separated by semicolons: 1.25;1."
+        ),
+        blank_effect="Reinstatements are free.",
+        example="1",
+    ),
+    _contract(
+        "Reinstatement premium",
+        "ReinsPremium",
+        help_text=(
+            "The premium reinstatements are charged on, usually the layer's minimum "
+            "and deposit premium (MDP) at 100%. Restoring part of the limit costs this "
+            "premium times the rate times the share of the limit restored, and the "
+            "charge is taken off the recovery it restores."
+        ),
+        blank_effect="Reinstatements are free.",
+        example="900000.00",
+    ),
+)
+
+
+SCOPE_COLUMNS: tuple[Column, ...] = (
+    _scope(
+        "Contract number",
+        "ReinsNumber",
+        required=True,
+        help_text=(
+            "The contract this row says something about, as numbered on the "
+            "Reinsurance contracts sheet. A contract with several layers needs its "
+            "scope written once: it applies to every layer."
+        ),
+        example="2",
+    ),
+    _scope(
+        "Policy ID",
+        "AccNumber",
+        help_text=(
+            "A Policy ID the contract covers, as on the Risks and Policies sheets. "
+            "Leave it blank, with the other columns, for a contract that covers "
+            "the whole portfolio."
+        ),
+        blank_effect="The row covers the whole portfolio.",
+        example="2026_06_PFAC8716",
+    ),
+    _scope(
+        "Policy reference",
+        "PolNumber",
+        help_text="Narrows the row to one policy under the Policy ID.",
+        blank_effect="Every policy under the Policy ID is covered.",
+        example="P-10802-01",
+    ),
+    _scope(
+        "Risk reference",
+        "LocNumber",
+        help_text="Narrows the row to one risk under the Policy ID.",
+        blank_effect="Every risk under the Policy ID is covered.",
+        example="1",
+    ),
+    _scope(
+        "Ceded share",
+        "CededPercent",
+        help_text=(
+            "For a surplus share only: the proportion ceded on this risk, between "
+            "0 and 1. Leave it blank for every other contract type."
+        ),
+        blank_effect="Nothing: other contract types state their share on the contract.",
+        example="0.4",
+    ),
+)
+
+
+COLUMNS: tuple[Column, ...] = (
+    *RISK_COLUMNS,
+    *POLICY_COLUMNS,
+    *CONTRACT_COLUMNS,
+    *SCOPE_COLUMNS,
+)
+
+#: Worked rows for sheets where one row cannot show how the sheet works. A
+#: layered programme is the point of the reinsurance sheets, and a single
+#: example row cannot show two layers sharing a contract number.
+SHEET_EXAMPLES: Mapping[Sheet, tuple[Mapping[str, str], ...]] = {
+    Sheet.CONTRACT: (
+        {
+            "Contract number": "1",
+            "Layer": "1",
+            "Contract name": "Property quota share",
+            "Contract type": "QS",
+            "Inuring priority": "1",
+            "Ceded share": "0.3",
+            "Placed share": "1",
+        },
+        {
+            "Contract number": "2",
+            "Layer": "1",
+            "Contract name": "Catastrophe excess, first layer",
+            "Contract type": "CXL",
+            "Inuring priority": "2",
+            "Placed share": "1",
+            "Attachment per event": "5000000.00",
+            "Limit per event": "20000000.00",
+            "Reinstatements": "2",
+            "Reinstatement rate": "1",
+            "Reinstatement premium": "900000.00",
+        },
+        {
+            "Contract number": "2",
+            "Layer": "2",
+            "Contract name": "Catastrophe excess, second layer",
+            "Contract type": "CXL",
+            "Inuring priority": "2",
+            "Placed share": "0.85",
+            "Attachment per event": "25000000.00",
+            "Limit per event": "50000000.00",
+            "Reinstatements": "1",
+            "Reinstatement rate": "1",
+            "Reinstatement premium": "450000.00",
+        },
+    ),
+    Sheet.SCOPE: (
+        {"Contract number": "1", "Policy ID": "2026_06_PFAC8716"},
+        {"Contract number": "2"},
+    ),
+}
 
 #: OED fields CASS supplies itself rather than asking for. A template that
 #: asked for them would invite a person to disagree with the platform about a
@@ -691,6 +1004,8 @@ DERIVED_FIELDS: Mapping[str, str] = {
     "PolPeril": "QEQ: the peril CASS models, which the policy's terms are written against.",
     "PolDedType6All": "0, a flat monetary amount -- the only deductible basis CASS calculates.",
     "PolLimitType6All": "0, a flat monetary amount -- the only limit basis CASS calculates.",
+    "ReinsPeril": "QEQ: the peril CASS models, which every contract is written against.",
+    "ReinsCurrency": "USD, the currency the template route writes every amount in.",
 }
 
 
@@ -727,10 +1042,9 @@ def unmapped_oed_fields(kind: FileKind) -> tuple[FieldSpec, ...]:
     grouping, and the honest place to find that out is here.
     """
     bound = {item.oed_field for item in COLUMNS if item.oed_kind is kind}
-    fields = LOCATION_FIELDS if kind is FileKind.LOCATION else ACCOUNT_FIELDS
     return tuple(
         spec
-        for spec in fields
+        for spec in SCHEMA[kind]
         if spec.name not in bound and spec.name not in DERIVED_FIELDS
     )
 
@@ -741,8 +1055,7 @@ def validate() -> Iterator[str]:
     Run as a test rather than at import: a broken profile should fail a build,
     not a user's upload.
     """
-    location_names = {spec.name for spec in LOCATION_FIELDS}
-    account_names = {spec.name for spec in ACCOUNT_FIELDS}
+    names = {kind: {spec.name for spec in fields} for kind, fields in SCHEMA.items()}
 
     seen: dict[tuple[Sheet, str], int] = {}
     for item in COLUMNS:
@@ -753,8 +1066,7 @@ def validate() -> Iterator[str]:
 
         if item.oed_field is None:
             continue
-        known = location_names if item.oed_kind is FileKind.LOCATION else account_names
-        if item.oed_field not in known:
+        if item.oed_kind is None or item.oed_field not in names[item.oed_kind]:
             yield (
                 f"Column {item.name!r} binds to {item.oed_field!r}, which the pinned "
                 f"OED {item.oed_kind} schema does not define."
@@ -765,7 +1077,7 @@ def validate() -> Iterator[str]:
                 "supplies itself."
             )
 
-    for kind, fields in ((FileKind.LOCATION, LOCATION_FIELDS), (FileKind.ACCOUNT, ACCOUNT_FIELDS)):
+    for kind, fields in SCHEMA.items():
         bound = {item.oed_field for item in COLUMNS if item.oed_kind is kind}
         for spec in fields:
             if spec.required and spec.name not in bound and spec.name not in DERIVED_FIELDS:
@@ -787,6 +1099,6 @@ def as_dict() -> dict[str, Any]:
         "derived_fields": dict(DERIVED_FIELDS),
         "oed_fields_not_requested": {
             str(kind): [spec.name for spec in unmapped_oed_fields(kind)]
-            for kind in (FileKind.LOCATION, FileKind.ACCOUNT)
+            for kind in SCHEMA
         },
     }

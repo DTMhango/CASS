@@ -1,6 +1,6 @@
 # 11. Portfolios arrive through the CASS intake template, joined on Policy ID
 
-Status: Accepted
+Status: Accepted, amended by [ADR 23](0023-the-template-carries-the-financial-structure.md)
 Date: 2026-09-13
 
 ## Context

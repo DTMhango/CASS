@@ -182,6 +182,11 @@ CATALOGUE: Mapping[str, tuple[Severity, str]] = {
         Severity.WARNING,
         "Layer numbers are not contiguous. Confirm the programme structure is intended.",
     ),
+    "deductible_at_risk_and_policy": (
+        Severity.WARNING,
+        "For a policy with one location, write its deductible once, on the policy, and "
+        "clear the location deductible -- unless the policy really does carry both.",
+    ),
     "inuring_gap": (
         Severity.WARNING,
         "Inuring priorities are not contiguous. Confirm the reinsurance order is intended.",

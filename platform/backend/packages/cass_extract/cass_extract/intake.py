@@ -50,7 +50,7 @@ from .records import ExtractReadError, Finding, SheetRead, SourceRow
 
 #: Bumped when this reader's interpretation changes, independently of the
 #: profile: the same file read by a later parser should be traceable to which.
-PARSER_VERSION = "2.0.0"
+PARSER_VERSION = "2.1.0"
 
 #: The coverage columns a risk row may carry.
 COVERAGE_COLUMNS = (
@@ -71,28 +71,35 @@ class IntakeError(ExtractReadError):
 
 @dataclasses.dataclass(slots=True)
 class IntakeRead:
-    """Both sheets of a completed template, parsed and cross-checked."""
+    """Every sheet of a completed template, parsed and cross-checked."""
 
     risks: SheetRead
     policies: SheetRead
-    #: Problems that span the two sheets: a stated join that does not hold, a
-    #: risk deferring to an allocation its policy cannot supply.
+    #: Problems that span the sheets: a stated join that does not hold, a risk
+    #: deferring to an allocation its policy cannot supply.
     cross_findings: list[Finding] = dataclasses.field(default_factory=list)
+    #: The reinsurance sheets. Optional, and absent from a 1.0.0 workbook.
+    contracts: SheetRead = dataclasses.field(default_factory=lambda: _empty(Sheet.CONTRACT))
+    scope: SheetRead = dataclasses.field(default_factory=lambda: _empty(Sheet.SCOPE))
     profile_version: str = PROFILE_VERSION
     parser_version: str = PARSER_VERSION
 
     @property
+    def sheets(self) -> tuple[SheetRead, ...]:
+        return (self.risks, self.policies, self.contracts, self.scope)
+
+    @property
     def findings(self) -> list[Finding]:
-        return [*self.risks.findings, *self.policies.findings, *self.cross_findings]
+        return [*(item for sheet in self.sheets for item in sheet.findings), *self.cross_findings]
 
     @property
     def is_readable(self) -> bool:
         """Whether the shape is close enough to the contract to go on.
 
-        A missing required column is fatal; the Policies sheet being absent
-        entirely is not, because policy terms are optional by design.
+        A missing required column is fatal; a Policies or reinsurance sheet
+        being absent entirely is not, because both are optional by design.
         """
-        return not self.risks.missing_columns and not self.policies.missing_columns
+        return not any(sheet.missing_columns for sheet in self.sheets)
 
     @property
     def has_policy_terms(self) -> bool:
@@ -104,6 +111,8 @@ class IntakeRead:
             "parser_version": self.parser_version,
             "risk_count": len(self.risks.rows),
             "policy_count": len(self.policies.rows),
+            "contract_count": len(self.contracts.rows),
+            "scope_count": len(self.scope.rows),
             "accounts": len(self.accounts()),
             "readable": self.is_readable,
             "has_policy_terms": self.has_policy_terms,
@@ -162,15 +171,16 @@ def read_workbook(source: BinaryIO | str) -> IntakeRead:
         )
 
     risks = _read_sheet(book[names[profile.RISK_SHEET.lower()]], Sheet.RISK)
-    policy_name = names.get(profile.POLICY_SHEET.lower())
-    policies = (
-        _read_sheet(book[policy_name], Sheet.POLICY)
-        if policy_name
-        else _empty(Sheet.POLICY)
-    )
+    def optional(sheet: Sheet) -> SheetRead:
+        name = names.get(str(sheet).lower())
+        return _read_sheet(book[name], sheet) if name else _empty(sheet)
+
+    policies = optional(Sheet.POLICY)
+    contracts = optional(Sheet.CONTRACT)
+    scope = optional(Sheet.SCOPE)
     book.close()
 
-    read = IntakeRead(risks=risks, policies=policies)
+    read = IntakeRead(risks=risks, policies=policies, contracts=contracts, scope=scope)
     read.cross_findings = list(cross_check(read))
     return read
 
@@ -378,7 +388,7 @@ def _coerce(
 
 
 def cross_check(read: IntakeRead) -> Iterator[Finding]:
-    """Problems that only appear when the two sheets are read together.
+    """Problems that only appear when the sheets are read together.
 
     This is what replaces the old join report, and it is much shorter for one
     reason: the account reference was supplied rather than inferred, so a
@@ -390,6 +400,10 @@ def cross_check(read: IntakeRead) -> Iterator[Finding]:
     yield from _orphans(read)
     yield from _allocation_needs(read)
     yield from _construction_without_occupancy(read.risks)
+    yield from _deductible_on_both_sheets(read)
+    yield from _incomplete_policy_terms(read)
+    yield from _layers_that_disagree(read)
+    yield from _contract_structure(read)
 
 
 def _duplicate_risks(sheet: SheetRead) -> Iterator[Finding]:
@@ -539,6 +553,261 @@ def _construction_without_occupancy(sheet: SheetRead) -> Iterator[Finding]:
         )
 
 
+def _deductible_on_both_sheets(read: IntakeRead) -> Iterator[Finding]:
+    """Single-risk policies whose deductible is written on both sheets.
+
+    A risk deductible comes off first and the policy deductible comes off what
+    is left. Over several risks those are two different terms; over one, it is
+    usually one deductible typed twice, and it would be charged twice.
+
+    Aggregated like the orphans: most of a facultative book is one risk per
+    policy, and a source system that fills both columns fills them on every row.
+    """
+    risks: dict[str, list[SourceRow]] = {}
+    for row in read.risks.rows:
+        account = str(row.get("Policy ID") or "").strip()
+        if account:
+            risks.setdefault(account, []).append(row)
+    policy_deductible: dict[str, Decimal] = {}
+    for row in read.policies.rows:
+        account = str(row.get("Policy ID") or "").strip()
+        amount = row.get("Policy deductible")
+        if account and amount is not None and amount > 0:
+            policy_deductible.setdefault(account, amount)
+
+    doubled = sorted(
+        (account, rows[0].row_number, rows[0].get("Risk deductible"), policy_deductible[account])
+        for account, rows in risks.items()
+        if len(rows) == 1
+        and account in policy_deductible
+        and rows[0].get("Risk deductible") is not None
+        and rows[0].get("Risk deductible") > 0
+    )
+    if not doubled:
+        return
+    account, row_number, at_risk, at_policy = doubled[0]
+    policies = "policy states" if len(doubled) == 1 else "policies state"
+    yield Finding(
+        sheet=read.risks.sheet,
+        row_number=row_number,
+        field="Risk deductible",
+        code="deductible_on_both_sheets",
+        message=(
+            f"{len(doubled)} single-risk {policies} a deductible on both sheets. "
+            "The risk deductible comes off first and the policy deductible comes off "
+            f"what is left, so both would be charged: for {account}, {at_risk:,} + "
+            f"{at_policy:,} = {at_risk + at_policy:,}. If they are the same deductible, "
+            "keep it on the Policies sheet and clear Risk deductible. First: "
+            + ", ".join(item[0] for item in doubled[:5])
+            + "."
+        ),
+        value=str(len(doubled)),
+    )
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def terms_complete(record: Mapping[str, Any]) -> bool:
+    """Whether one policy row states enough to calculate insured loss.
+
+    A layer attachment and a layer limit, as the profile says. Read from a
+    canonical record, so promotion and the reader apply one rule.
+    """
+    return all(
+        record.get(name) not in (None, "") for name in ("layer_attachment", "layer_limit")
+    )
+
+
+def complete_accounts(policies: Sequence[Mapping[str, Any]]) -> set[str]:
+    """Policy IDs whose every policy row can be written as OED terms.
+
+    Canonical records in, so the import report and the promotion that writes
+    the account file cannot disagree about which accounts have terms.
+    """
+    rows: dict[str, list[Mapping[str, Any]]] = {}
+    for record in policies:
+        account = _text(record.get("business_id"))
+        if account:
+            rows.setdefault(account, []).append(record)
+    return {
+        account for account, records in rows.items() if all(map(terms_complete, records))
+    }
+
+
+#: Policy columns that say a row is meant to carry terms. A row with none of
+#: them is there for the join and the allocation, which is a ground-up book and
+#: not a mistake.
+TERM_COLUMNS = (
+    "Layer",
+    "Signed share",
+    "Layer limit",
+    "Layer attachment",
+    "Policy deductible",
+    "Policy limit",
+)
+
+
+def _incomplete_policy_terms(read: IntakeRead) -> Iterator[Finding]:
+    """Policy IDs that state some terms but not a layer attachment and limit.
+
+    Not an error: promotion writes them as stated, and OED reads the blanks as
+    no limit and no attachment. But the insured loss of such a policy is its
+    ground-up loss, and the person filling in the workbook should hear that
+    now, while they can still supply the terms. Aggregated: a source system
+    that leaves a column out leaves it out of every row.
+    """
+    incomplete: dict[str, int] = {}
+    for row in read.policies.rows:
+        account = _text(row.get("Policy ID"))
+        states_terms = any(row.get(name) is not None for name in TERM_COLUMNS)
+        if account and states_terms and not terms_complete(policy_record(row)):
+            incomplete.setdefault(account, row.row_number)
+    if not incomplete:
+        return
+    accounts = sorted(incomplete)
+    subject = "Policy ID has" if len(accounts) == 1 else "Policy IDs have"
+    yield Finding(
+        sheet=read.policies.sheet,
+        row_number=incomplete[accounts[0]],
+        field="Layer attachment",
+        code="policy_terms_incomplete",
+        message=(
+            f"{len(accounts)} {subject} a policy row with no layer attachment or no "
+            "layer limit. They are written as stated, so a missing limit leaves the "
+            "insured loss equal to the ground-up loss, and CASS flags them as possibly "
+            "overstated. Write 0 as the attachment of a layer that pays from the first "
+            "loss, and the sum insured as the limit of a share of a whole risk. First: "
+            + ", ".join(accounts[:5])
+            + "."
+        ),
+        value=str(len(accounts)),
+    )
+
+
+def _layers_that_disagree(read: IntakeRead) -> Iterator[Finding]:
+    """Layers of one policy that state different policy deductibles or limits.
+
+    Each layer reads the policy terms from its own row, so a deductible written
+    on the first layer only is not taken off before the second.
+    """
+    stated: dict[tuple[str, str], dict[str, set[Any]]] = {}
+    first_row: dict[tuple[str, str], int] = {}
+    for row in read.policies.rows:
+        key = (_text(row.get("Policy ID")), _text(row.get("Policy reference")))
+        if not all(key):
+            continue
+        first_row.setdefault(key, row.row_number)
+        terms = stated.setdefault(key, {"Policy deductible": set(), "Policy limit": set()})
+        for name, values in terms.items():
+            values.add(row.get(name))
+    differing = sorted(
+        key
+        for key, terms in stated.items()
+        if any(len(values) > 1 for values in terms.values())
+    )
+    if not differing:
+        return
+    subject = "policy states" if len(differing) == 1 else "policies state"
+    yield Finding(
+        sheet=read.policies.sheet,
+        row_number=first_row[differing[0]],
+        field="Policy deductible",
+        code="layer_terms_differ",
+        message=(
+            f"{len(differing)} layered {subject} a different policy deductible or "
+            "limit on different layers. Each layer reads them from its own row, so a "
+            "deductible on the first layer only is not taken off before the second. "
+            "Repeat them on every layer's row. First: "
+            + ", ".join(f"{account} {policy}" for account, policy in differing[:5])
+            + "."
+        ),
+        value=str(len(differing)),
+    )
+
+
+def _contract_structure(read: IntakeRead) -> Iterator[Finding]:
+    """What can be said about the reinsurance sheets without the contract rules.
+
+    The rules for each contract type live with the Financial structure screen
+    and are applied when the workbook is imported; this is the shape they need
+    to be applied to at all -- each layer once, layers of one contract agreeing
+    on what kind of contract it is, and scope naming contracts that exist.
+    """
+    layers: dict[tuple[int, int], int] = {}
+    kinds: dict[int, tuple[tuple[str, Any, str], int]] = {}
+    for row in read.contracts.rows:
+        number = row.get("Contract number")
+        if number is None:
+            continue
+        layer = row.get("Layer") or 1
+        if (number, layer) in layers:
+            yield Finding(
+                sheet=read.contracts.sheet,
+                row_number=row.row_number,
+                field="Layer",
+                code="duplicate_contract_layer",
+                message=(
+                    f"Contract {number} layer {layer} is already on row "
+                    f"{layers[(number, layer)]}. Each layer of a contract is one row."
+                ),
+            )
+            continue
+        layers[(number, layer)] = row.row_number
+        shape = (
+            _text(row.get("Contract type")).upper(),
+            row.get("Inuring priority"),
+            _text(row.get("Risk level")).upper(),
+        )
+        if number not in kinds:
+            kinds[number] = (shape, row.row_number)
+        elif kinds[number][0] != shape:
+            yield Finding(
+                sheet=read.contracts.sheet,
+                row_number=row.row_number,
+                field="Contract type",
+                code="contract_layers_disagree",
+                message=(
+                    f"The layers of contract {number} differ in type, inuring "
+                    f"priority or risk level from row {kinds[number][1]}. Layers of "
+                    "one contract share one scope, so they have to be the same kind "
+                    "of contract; give a different contract a different number."
+                ),
+            )
+
+    scoped: set[int] = set()
+    for row in read.scope.rows:
+        number = row.get("Contract number")
+        if number is None:
+            continue
+        scoped.add(number)
+        if number not in kinds:
+            yield Finding(
+                sheet=read.scope.sheet,
+                row_number=row.row_number,
+                field="Contract number",
+                code="scope_without_contract",
+                message=(
+                    f"This row names contract {number}, which the Reinsurance "
+                    "contracts sheet does not have."
+                ),
+            )
+    for number, (_, row_number) in sorted(kinds.items()):
+        if number not in scoped:
+            yield Finding(
+                sheet=read.contracts.sheet,
+                row_number=row_number,
+                field="Contract number",
+                code="contract_without_scope",
+                message=(
+                    f"No Reinsurance scope row names contract {number}, so it covers "
+                    "nothing. Add a row with only the contract number to cover the "
+                    "whole portfolio."
+                ),
+            )
+
+
 def _allocation_needs(read: IntakeRead) -> Iterator[Finding]:
     """Risks that defer to an allocation their policy cannot supply."""
     totals: dict[str, Decimal] = {}
@@ -644,6 +913,32 @@ POLICY_FIELDS: Mapping[str, str] = {
 }
 
 
+CONTRACT_FIELDS: Mapping[str, str] = {
+    "Contract number": "contract_number",
+    "Layer": "layer_number",
+    "Contract name": "name",
+    "Contract type": "contract_type",
+    "Inuring priority": "inuring_priority",
+    "Ceded share": "ceded_percent",
+    "Placed share": "placed_percent",
+    "Attachment per event": "occurrence_attachment",
+    "Limit per event": "occurrence_limit",
+    "Risk level": "risk_level",
+    "Limit per risk": "risk_limit",
+    "Reinstatements": "reinstatements",
+    "Reinstatement rate": "reinstatement_rate",
+    "Reinstatement premium": "reinstatement_premium",
+}
+
+SCOPE_FIELDS: Mapping[str, str] = {
+    "Contract number": "contract_number",
+    "Policy ID": "business_id",
+    "Policy reference": "policy_id",
+    "Risk reference": "location_number",
+    "Ceded share": "ceded_percent",
+}
+
+
 def risk_record(row: SourceRow) -> dict[str, Any]:
     """One risk row under the names the platform reads."""
     record = {name: row.values.get(column) for column, name in RISK_FIELDS.items()}
@@ -660,8 +955,24 @@ def policy_record(row: SourceRow) -> dict[str, Any]:
     return record
 
 
+def _record(row: SourceRow, fields: Mapping[str, str]) -> dict[str, Any]:
+    record = {name: row.values.get(column) for column, name in fields.items()}
+    record["row_number"] = row.row_number
+    return record
+
+
+def reinsurance_records(
+    read: IntakeRead,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Both reinsurance sheets as canonical records, in sheet order."""
+    return (
+        [_record(row, CONTRACT_FIELDS) for row in read.contracts.rows],
+        [_record(row, SCOPE_FIELDS) for row in read.scope.rows],
+    )
+
+
 def records(read: IntakeRead) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Both sheets as canonical records, in sheet order."""
+    """The Risks and Policies sheets as canonical records, in sheet order."""
     return (
         [risk_record(row) for row in read.risks.rows],
         [policy_record(row) for row in read.policies.rows],

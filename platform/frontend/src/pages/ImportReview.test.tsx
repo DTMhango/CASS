@@ -71,6 +71,7 @@ const RESULTS: ImportResults = {
     snapshot_date: "2026-06-30",
     parser_version: "intake-1.0.0",
     cohort_rule_version: "cohort-1.0.0",
+    current_cohort_rule_version: "cohort-1.0.0",
     overlay_version: "1.0.0",
     policy_row_count: 1353,
     risk_row_count: 224,
@@ -181,6 +182,61 @@ const QUEUE: ReviewQueue = {
 let decideBody: Record<string, unknown> | null = null;
 let decideStatus = 201;
 let decideDetail = "";
+let promoteBody: Record<string, unknown> | null = null;
+/** Whether the import has been accepted, which is when the promotion form shows. */
+let accepted = false;
+let financial: Record<string, unknown> = {
+  policy_ids: 3,
+  policy_ids_with_terms: 2,
+  policy_ids_without_terms: 1,
+  contracts: 2,
+  contract_layers: 3,
+  contract_layers_refused: 0,
+  contracts_without_scope: [],
+};
+
+const ASSUMPTIONS = {
+  cohorts: [{ value: "A", label: "Automated test cohort" }],
+  allocation_methods: [
+    { value: "equal_location_v1", label: "Equal across locations", baseline: true },
+  ],
+  coverage_splits: [],
+  coverages: [],
+  occupancy_assumptions: [],
+  policy_terms: [
+    { value: "apply", label: "Apply them, flagging policies with no limit", default: true },
+    { value: "ground_up", label: "Leave them out: ground-up loss only", default: false },
+  ],
+  default_coverage_split: "Platform default",
+  default_occupancy: "Platform default",
+};
+
+const PROMOTED = {
+  exposure_version: "c0ffee00-0000-4000-8000-000000000001",
+  name: "Fac book",
+  version: 1,
+  location_count: 3,
+  total_tiv: "6000000.00",
+  financial_structure: {
+    policy_terms: "apply",
+    applied: true,
+    reason:
+      "Written for all 3 Policy IDs in the selection. 1 of them state no limit, no attachment or no policy row, so their insured loss is their ground-up loss (less any deductible they state) and may be overstated.",
+    policy_ids_written: 3,
+    possibly_overstated: {
+      policy_ids: ["F-MULTI"],
+      tiv: "3000000.00",
+      uncapped: ["F-MULTI"],
+      attachment_read_as_zero: ["F-MULTI"],
+      no_policy_row: [],
+    },
+    policy_rows_written: 4,
+    locations_with_terms: 1,
+    contracts_written: [2],
+    contract_layers_written: 2,
+    reinsurance_note: "",
+  },
+};
 
 const MODEL_ID = "55555555-5555-5555-5555-555555555555";
 
@@ -331,14 +387,32 @@ const GEOCODING = {
     "The insured value each location states, so the value at stake is a floor rather than the book's.",
 };
 
+/** Changes to the import results a test needs, laid over the fixture. */
+let resultsOverride: Partial<ImportResults> = {};
+
 function routeFor(url: string): unknown {
+  if (url.includes("/assumptions/")) return ASSUMPTIONS;
+  if (url.includes("/promote/")) return PROMOTED;
+  if (accepted && url.includes("/import-results/")) {
+    return {
+      ...RESULTS,
+      batch: { ...RESULTS.batch, state: "accepted" },
+      intake_report: { financial_structure: financial },
+    };
+  }
+  if (accepted && url.includes("/portfolio-imports/") && !url.includes("/import-results/")) {
+    return {
+      ...IMPORTS,
+      results: IMPORTS.results.map((item) => ({ ...item, state: "accepted" })),
+    };
+  }
   if (url.includes("/geocoding-sensitivity/")) return GEOCODING;
   if (url.includes("/allocation-scenarios/")) return SCENARIOS;
   if (url.includes("/model-versions/catalogue/")) return CATALOGUE;
   if (url.includes("/projects/")) {
     return { count: 1, next: null, previous: null, results: [PROJECT] };
   }
-  if (url.includes("/import-results/")) return RESULTS;
+  if (url.includes("/import-results/")) return { ...RESULTS, ...resultsOverride };
   if (url.includes("/review-queue/")) return QUEUE;
   if (url.includes("/decide/")) {
     return decideStatus === 201
@@ -369,6 +443,10 @@ beforeEach(() => {
   decideBody = null;
   decideStatus = 201;
   decideDetail = "";
+  promoteBody = null;
+  accepted = false;
+  resultsOverride = {};
+  financial = { ...financial, contract_layers_refused: 0 };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -376,7 +454,14 @@ beforeEach(() => {
       if (url.includes("/decide/") && init?.body) {
         decideBody = JSON.parse(String(init.body));
       }
-      const status = url.includes("/decide/") ? decideStatus : 200;
+      if (url.includes("/promote/") && init?.body) {
+        promoteBody = JSON.parse(String(init.body));
+      }
+      const status = url.includes("/decide/")
+        ? decideStatus
+        : url.includes("/promote/")
+          ? 201
+          : 200;
       return new Response(JSON.stringify(routeFor(url)), {
         status,
         headers: { "Content-Type": "application/json" },
@@ -561,5 +646,86 @@ describe("ImportReview", () => {
     // The buffers are assumptions, so the card states them.
     expect(screen.getByText(/locality 5 km/)).toBeInTheDocument();
     expect(screen.getByText(/1 location\(s\) whose cell moves/)).toBeInTheDocument();
+  });
+
+  it("says what the workbook's policy terms allow before anything is promoted", async () => {
+    accepted = true;
+    renderScreen();
+
+    const choice = await screen.findByLabelText("Policy terms and reinsurance");
+    await screen.findByRole("option", { name: "Apply them, flagging policies with no limit" });
+    expect(choice).toHaveValue("apply");
+    expect(
+      screen.getByText(
+        /2 of 3 Policy IDs have a layer attachment and limit on every policy row\. The other 1 keep their ground-up loss as insured loss and are flagged as possibly overstated\. The reinsurance sheets hold 2 contract\(s\) in 3 layer\(s\)\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("sends the chosen treatment and names what may be overstated", async () => {
+    accepted = true;
+    const user = userEvent.setup();
+    renderScreen();
+
+    const choice = await screen.findByLabelText("Policy terms and reinsurance");
+    await screen.findByRole("option", { name: "Leave them out: ground-up loss only" });
+    await user.selectOptions(choice, "ground_up");
+    await user.selectOptions(choice, "apply");
+    await user.type(screen.getByLabelText("Portfolio name"), "Fac book");
+    await user.click(screen.getByRole("button", { name: "Promote to an exposure version" }));
+
+    await waitFor(() => expect(promoteBody).not.toBeNull());
+    expect(promoteBody).toMatchObject({ name: "Fac book", policy_terms: "apply" });
+    expect(await screen.findByText(/may be overstated/)).toBeInTheDocument();
+    expect(screen.getByText(/2 contract layer\(s\) written/)).toBeInTheDocument();
+    expect(screen.getByText("F-MULTI")).toBeInTheDocument();
+  });
+
+  it("lists what the workbook check found and what to do about it", async () => {
+    resultsOverride = {
+      findings: [
+        {
+          sheet: "Risks",
+          row_number: 7,
+          field: "Latitude",
+          code: "coordinate_outside_country",
+          message:
+            "1 risk coded BD has a coordinate more than 5 km outside Bangladesh (Risks rows 7). Correct the coordinate or the Country code and import the file again.",
+          value: "BD",
+        },
+      ],
+    };
+    renderScreen();
+
+    expect(await screen.findByText("Coordinate outside its country")).toBeInTheDocument();
+    expect(screen.getByText("Risks, row 7")).toBeInTheDocument();
+    expect(screen.getByText(/more than 5 km outside Bangladesh/)).toBeInTheDocument();
+  });
+
+  it("says so when the workbook check found nothing to correct", async () => {
+    renderScreen();
+    expect(
+      await screen.findByText("Nothing to correct: every sheet read as expected."),
+    ).toBeInTheDocument();
+  });
+
+  it("says when an import was read under earlier cohort rules and how to re-read it", async () => {
+    resultsOverride = {
+      batch: { ...RESULTS.batch, current_cohort_rule_version: "cohort-1.2.0" },
+    };
+    renderScreen();
+
+    expect(await screen.findByText("Read under earlier cohort rules")).toBeInTheDocument();
+    expect(screen.getByText(/import the\s+same workbook again/)).toBeInTheDocument();
+  });
+
+  it("warns before promoting when a contract breaks the contract rules", async () => {
+    accepted = true;
+    financial = { ...financial, contract_layers_refused: 1 };
+    renderScreen();
+
+    expect(
+      await screen.findByText("1 reinsurance contract layer(s) break the contract rules"),
+    ).toBeInTheDocument();
   });
 });

@@ -472,6 +472,16 @@ class ConversionRun(BaseModel):
         return f"conversion {self.run_id}"
 
 
+class ReinsuranceCover(models.TextChoices):
+    """How an analysis reads the reinsurance contracts' limits."""
+
+    ENGINE = "engine", "As the engine applies it: every event in full, no annual limit"
+    CONTRACT_TERMS = (
+        "contract_terms",
+        "Limited by contract terms: reinstatements and their premiums",
+    )
+
+
 class AnalysisRun(BaseModel):
     """Portfolio loss execution (section 5)."""
 
@@ -509,6 +519,20 @@ class AnalysisRun(BaseModel):
         default=list, help_text="Requested perspectives, checked against the source data."
     )
     analysis_settings = models.JSONField(default=dict, blank=True)
+    #: The engine applies every catastrophe layer in full to every event, which
+    #: is unlimited free reinstatement. ``contract_terms`` also computes the net
+    #: loss with each layer's reinstatements and their premiums, beside the
+    #: engine's (ADR 24).
+    reinsurance_cover = models.CharField(
+        max_length=16,
+        choices=ReinsuranceCover.choices,
+        default=ReinsuranceCover.ENGINE,
+        help_text="How the reinsurance contracts' annual limits are read.",
+    )
+    #: The layers and cover classes as the engine was given them, recorded when
+    #: the files are handed over, after any currency conversion, so the limited
+    #: calculation applies exactly the terms the engine applied.
+    cover_terms = models.JSONField(default=dict, blank=True)
     run_currency = models.CharField(max_length=3, blank=True)
     #: The rate, valuation date, source and direction used to normalise the book
     #: into the run currency, and what that moved. Empty where the book was

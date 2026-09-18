@@ -166,6 +166,11 @@ class OrdPackage:
             )
         )
 
+    def raw(self, perspective: str, summary_level: int, table: str) -> bytes | None:
+        """One ORD table's bytes, for a table too long to read row by row."""
+        name = self._index.get((_prefix_for(perspective), summary_level, table))
+        return None if name is None else self._members[name]
+
     def rows(
         self, perspective: str, summary_level: int, table: str
     ) -> list[dict[str, str]]:
